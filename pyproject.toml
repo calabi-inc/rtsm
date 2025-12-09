@@ -1,0 +1,33 @@
+[project]
+name = "rtsm"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "faiss-cpu>=1.12.0",
+    "psutil>=7.0.0",
+]
+
+[project.scripts]
+rtsm-run = "rtsm.run:main"
+
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["rtsm*","ultralytics*"]
+exclude = [
+    "tests*",
+    "scripts*",
+    "config*",
+    "docker*",
+    "test_dataset*",
+    "model_store*",
+]
+
+[tool.setuptools.package-data]
+"rtsm.models.fastsam" = [
+    "FastSAM-x.pt"
+]

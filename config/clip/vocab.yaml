@@ -1,0 +1,495 @@
+# CLIP zeroshot vocabulary for simple room setup (enhanced format)
+
+templates:
+  - "a photo of a {}"
+  - "a cropped photo of a {}"
+  - "a close-up photo of a {}"
+  - "an object that is a {}"
+
+unknown:
+  min_top: 0.30     # minimum top score to accept a label
+  min_margin: 0.05  # top - second-best must exceed this
+
+classes:
+  # Planarity/structure classes for suppressing repetitive structure
+  - id: wall
+    synonyms: ["vertical surface", "partition"]
+
+  - id: floor
+    synonyms: ["ground", "horizontal surface"]
+
+  - id: ceiling
+    synonyms: ["overhead", "top surface"]
+
+  - id: corner
+    synonyms: ["junction", "intersection"]
+
+  - id: edge
+    synonyms: ["border", "boundary"]
+
+  - id: platform
+    synonyms: ["raised surface", "stage"]
+
+  # Regular object classes
+  - id: chair
+    synonyms: []
+
+  - id: table
+    synonyms: []
+
+  - id: sofa
+    synonyms: []
+
+  - id: couch
+    synonyms: []
+
+  - id: bed
+    synonyms: []
+
+  - id: lamp
+    synonyms: []
+
+  - id: desk
+    synonyms: []
+
+  - id: bookshelf
+    synonyms: []
+
+  - id: cabinet
+    synonyms: []
+
+  - id: drawer
+    synonyms: []
+
+  - id: door
+    synonyms: []
+
+  - id: window
+    synonyms: []
+
+  - id: television
+    synonyms: ["tv"]
+
+  - id: laptop
+    synonyms: []
+
+  - id: phone
+    synonyms: []
+
+  - id: clock
+    synonyms: []
+
+  - id: mirror
+    synonyms: []
+
+  - id: carpet
+    synonyms: []
+
+  - id: rug
+    synonyms: []
+
+  - id: pillow
+    synonyms: []
+
+  - id: blanket
+    synonyms: []
+
+  - id: cushion
+    synonyms: []
+
+  - id: plant
+    synonyms: []
+
+  - id: flower
+    synonyms: []
+
+  - id: vase
+    synonyms: []
+
+  - id: picture
+    synonyms: []
+
+  - id: painting
+    synonyms: []
+
+  - id: cup
+    synonyms: ["mug", "coffee cup"]
+
+  - id: bottle
+    synonyms: ["water bottle", "plastic bottle"]
+
+  - id: glass
+    synonyms: []
+
+  - id: plate
+    synonyms: []
+
+  - id: bowl
+    synonyms: []
+
+  - id: spoon
+    synonyms: []
+
+  - id: fork
+    synonyms: []
+
+  - id: knife
+    synonyms: []
+
+  - id: pan
+    synonyms: []
+
+  - id: pot
+    synonyms: []
+
+  - id: stove
+    synonyms: ["oven"]
+
+  - id: fan
+    synonyms: []
+
+  - id: air conditioner
+    synonyms: []
+
+  - id: remote
+    synonyms: []
+
+  - id: book
+    synonyms: []
+
+  - id: bag
+    synonyms: []
+
+  - id: shoe
+    synonyms: []
+
+  - id: basket
+    synonyms: []
+
+  - id: trash can
+    synonyms: []
+
+  - id: wrench
+    synonyms: ["spanner", "torque wrench"]
+
+  - id: card box
+    synonyms: ["cardboard box", "box"]
+
+  - id: computer
+    synonyms: []
+
+  - id: monitor
+    synonyms: []
+
+  - id: keyboard
+    synonyms: []
+
+  - id: mouse
+    synonyms: []
+
+  - id: sheet
+    synonyms: []
+
+  - id: doll
+    synonyms: []
+
+  # Electronics & Tech
+  - id: webcam
+    synonyms: ["camera", "web camera"]
+
+  - id: headphones
+    synonyms: ["earphones", "headset"]
+
+  - id: speaker
+    synonyms: ["audio speaker", "bluetooth speaker"]
+
+  - id: charger
+    synonyms: ["phone charger", "power adapter"]
+
+  - id: cable
+    synonyms: ["wire", "cord"]
+
+  - id: router
+    synonyms: ["wifi router", "modem"]
+
+  - id: printer
+    synonyms: []
+
+  - id: tablet
+    synonyms: ["ipad"]
+
+  - id: game controller
+    synonyms: ["gamepad", "joystick"]
+
+  # Climate & Comfort
+  - id: heater
+    synonyms: ["space heater", "radiator"]
+
+  - id: portable air conditioner
+    synonyms: ["portable ac", "floor ac"]
+
+  - id: humidifier
+    synonyms: []
+
+  - id: dehumidifier
+    synonyms: []
+
+  - id: thermostat
+    synonyms: []
+
+  # Lighting
+  - id: ceiling light
+    synonyms: ["overhead light", "chandelier"]
+
+  - id: desk lamp
+    synonyms: ["table lamp", "reading lamp"]
+
+  - id: floor lamp
+    synonyms: ["standing lamp"]
+
+  - id: night light
+    synonyms: []
+
+  - id: light switch
+    synonyms: ["switch"]
+
+  # Fitness & Exercise
+  - id: dumbbell
+    synonyms: ["weight", "hand weight"]
+
+  - id: yoga mat
+    synonyms: ["exercise mat"]
+
+  - id: resistance band
+    synonyms: ["exercise band"]
+
+  - id: kettlebell
+    synonyms: []
+
+  - id: foam roller
+    synonyms: []
+
+  - id: jump rope
+    synonyms: ["skipping rope"]
+
+  # Bedroom & Bedding
+  - id: quilt
+    synonyms: ["comforter", "duvet"]
+
+  - id: mattress
+    synonyms: []
+
+  - id: nightstand
+    synonyms: ["bedside table"]
+
+  - id: alarm clock
+    synonyms: []
+
+  - id: wardrobe
+    synonyms: ["closet", "armoire"]
+
+  - id: hanger
+    synonyms: ["clothes hanger"]
+
+  # Bathroom
+  - id: towel
+    synonyms: ["bath towel"]
+
+  - id: soap
+    synonyms: ["bar soap"]
+
+  - id: toothbrush
+    synonyms: []
+
+  - id: toilet
+    synonyms: []
+
+  - id: sink
+    synonyms: ["wash basin"]
+
+  - id: shower
+    synonyms: ["shower head"]
+
+  - id: bathtub
+    synonyms: ["tub"]
+
+  # Health & Personal Care
+  - id: pill bottle
+    synonyms: ["medicine bottle", "prescription bottle"]
+
+  - id: tissue box
+    synonyms: ["tissues"]
+
+  - id: hand sanitizer
+    synonyms: []
+
+  - id: lotion bottle
+    synonyms: ["moisturizer"]
+
+  - id: first aid kit
+    synonyms: []
+
+  # Kitchen Appliances
+  - id: microwave
+    synonyms: ["microwave oven"]
+
+  - id: refrigerator
+    synonyms: ["fridge"]
+
+  - id: toaster
+    synonyms: []
+
+  - id: coffee maker
+    synonyms: ["coffee machine"]
+
+  - id: kettle
+    synonyms: ["electric kettle"]
+
+  - id: blender
+    synonyms: []
+
+  - id: dishwasher
+    synonyms: []
+
+  # Containers & Storage
+  - id: trash bin
+    synonyms: ["garbage bin", "waste basket", "dustbin"]
+
+  - id: recycling bin
+    synonyms: ["recycle bin"]
+
+  - id: storage box
+    synonyms: ["container", "plastic bin"]
+
+  - id: laundry basket
+    synonyms: ["hamper", "clothes basket"]
+
+  - id: suitcase
+    synonyms: ["luggage"]
+
+  - id: backpack
+    synonyms: ["rucksack"]
+
+  # Office & Stationery
+  - id: notebook
+    synonyms: ["notepad", "journal"]
+
+  - id: pen
+    synonyms: ["ballpoint pen"]
+
+  - id: pencil
+    synonyms: []
+
+  - id: stapler
+    synonyms: []
+
+  - id: scissors
+    synonyms: []
+
+  - id: tape
+    synonyms: ["scotch tape", "adhesive tape"]
+
+  - id: paper
+    synonyms: ["documents", "sheets"]
+
+  - id: folder
+    synonyms: ["file folder"]
+
+  - id: binder
+    synonyms: []
+
+  - id: whiteboard
+    synonyms: ["dry erase board"]
+
+  # Drinks & Hydration
+  - id: water bottle
+    synonyms: ["drink bottle", "sports bottle"]
+
+  - id: coffee cup
+    synonyms: ["coffee mug"]
+
+  - id: thermos
+    synonyms: ["flask", "insulated bottle"]
+
+  - id: can
+    synonyms: ["soda can", "beverage can"]
+
+  # Furniture
+  - id: ottoman
+    synonyms: ["footstool", "pouf"]
+
+  - id: recliner
+    synonyms: ["reclining chair"]
+
+  - id: stool
+    synonyms: ["bar stool"]
+
+  - id: bench
+    synonyms: []
+
+  - id: shelf
+    synonyms: ["shelving"]
+
+  - id: coat rack
+    synonyms: ["hat stand"]
+
+  - id: shoe rack
+    synonyms: ["shoe shelf"]
+
+  # Decor & Misc
+  - id: photo frame
+    synonyms: ["picture frame"]
+
+  - id: poster
+    synonyms: []
+
+  - id: curtain
+    synonyms: ["drapes"]
+
+  - id: blinds
+    synonyms: ["window blinds"]
+
+  - id: candle
+    synonyms: []
+
+  - id: figurine
+    synonyms: ["statue", "sculpture"]
+
+  - id: clock
+    synonyms: ["wall clock"]
+
+  # Pet Items
+  - id: pet bed
+    synonyms: ["dog bed", "cat bed"]
+
+  - id: pet bowl
+    synonyms: ["food bowl", "water bowl"]
+
+  - id: pet toy
+    synonyms: ["dog toy", "cat toy"]
+
+  # Tools & Hardware
+  - id: screwdriver
+    synonyms: []
+
+  - id: hammer
+    synonyms: []
+
+  - id: pliers
+    synonyms: []
+
+  - id: drill
+    synonyms: ["power drill"]
+
+  - id: toolbox
+    synonyms: ["tool kit"]
+
+  # Food Items (common visible items)
+  - id: fruit
+    synonyms: ["apple", "banana", "orange"]
+
+  - id: bread
+    synonyms: ["loaf"]
+
+  - id: snack bag
+    synonyms: ["chip bag", "crisp bag"]

@@ -1,0 +1,199 @@
+# ============================================================
+# RTSM Configuration - Real-Time Spatio-Semantic Memory
+# ============================================================
+
+# -------------------- Hardware --------------------
+camera:
+  model: D435i
+  width: 640
+  height: 480
+  aligned_to: color   # if you align depth→color
+  fx: 604.634705
+  fy: 604.906738
+  cx: 318.806030
+  cy: 259.239777
+
+# -------------------- Models --------------------
+clip:
+  model: ViT-B-32
+  pretrained: openai
+  local_dir: models/clip
+
+# -------------------- I/O & Network --------------------
+io:
+  # ZMQ endpoints for dual-socket subscription
+  camera_endpoint: tcp://172.27.240.1:5555    # D435i camera.rgbd topic
+  rtabmap_endpoint: tcp://127.0.0.1:6000      # RTABMap pose topics
+
+units:
+  # Convert incoming values to meters at ingestion
+  # If your dataset publishes millimeters, set to 0.001
+  depth_m_per_unit: 0.001   # D435i depth is in mm
+  pose_m_per_unit: 1.0      # RTABMap poses are already in meters
+
+time_sync:
+  slop_ms: 30
+  tf_lookup_timeout_ms: 20
+  buffer_ttl_sec: 3
+
+# -------------------- Perception Pipeline --------------------
+gates:
+  min_brightness: 5
+  min_std: 5
+  min_depth_valid: 0.35           # loosened from 0.5 - more lenient for cluttered indoor scenes
+
+masks:
+  min_coverage: 0.005
+  max_coverage: 0.8               # loosened from 0.6 - allow bigger segmentation masks
+  max_border_fraction: 0.15
+
+filters:
+  min_area_px: 700                # lowered from 900 - catch smaller indoor objects
+  aspect_ratio: [0.2, 5.0]
+  solidity_min: 0.3
+  border_touch_max_pct: 0.15      # tightened: reject masks with >15% border contact
+  depth:
+    z_min_m: 0.2
+    z_max_m: 8.0
+    valid_min_pct: 0.10
+    sigma_max_m: 0.25             # tightened: max depth spread (p90-p10) ±25cm to reject edge artifacts
+  border:
+    partial_min_pct: 0.30
+    extreme_drop_pct: 0.90
+    tiny_px: 150
+
+structure:
+  enable: true
+  sample_stride: 3
+  min_support_px: 2000
+  max_rms_m: 0.02                 # tightened from 0.03 - 2cm fit residual for cleaner RTABMap data
+  angle_floor_deg: 12
+  wall_dot_max: 0.3
+
+planarity:
+  sample_stride: 3
+  inlier_pct_min: 0.85            # tightened from 0.80 - require more inliers with stable point cloud
+  rms_residual_max_m: 0.015       # tightened from 0.02 - 1.5cm for cleaner indoor surfaces
+
+# -------------------- Staging & Prioritization --------------------
+staging:
+  # Basic thresholds
+  min_area_px: 120
+  centroid_min_valid: 0.35       # tightened: require 35% valid depth for centroid
+  depth_valid_min: 0.25          # tightened: skip masks with <25% valid depth
+  depth_erode_px: 1              # reduced: 1px erosion to preserve more mask area for centroid
+  topk_preclip: 10
+  crop_pad_px: 6
+  clip_input: 224
+
+  # Priority weights
+  w_coverage: 1.0
+  w_border_fraction: -2.0
+  w_depth_valid: 1.0
+  w_depth_spread: -0.5            # relaxed from -1.0 - less penalty for complex multi-plane objects
+  w_bbox_area: 0.5
+
+  # Soft caps (penalize oversized masks without hard dropping)
+  coverage_soft_cap: 0.50         # loosened from 0.30 - allow bigger masks before penalty
+  bbox_soft_cap: 0.50             # loosened from 0.30 - allow bigger bboxes before penalty
+  w_coverage_oversize: -1.0       # reduced from -2.0 - less penalty for oversized masks
+  w_bbox_oversize: -0.5           # reduced from -1.0 - less penalty for oversized bboxes
+
+  # Structure scoring (planarity + extent bias)
+  # structure_score = clamp(a*s_geom + b*s_sem + c*s_extent, 0, 1)
+  w_struct: 0.2                   # reduced from 0.4 - less planarity penalty overall
+  struct_a: 0.3                   # reduced from 0.5 - less geometry/planarity term weight
+  struct_b: 0.3                   # semantic (CLIP) term (unused pre-CLIP)
+  struct_c: 0.1                   # extent term
+  struct_geom_inlier_pct_min: 0.80
+  struct_geom_rms_inv_scale_m: 0.005
+  struct_geom_rms_hi_m: 0.02
+  struct_extent_lo: 0.10
+  struct_extent_hi: 0.35
+
+# -------------------- Spatial Memory --------------------
+sweep_cache:
+  # Spatial grid & membership
+  grid_size_m: 0.25               # cell size G (meters)
+  per_cell_cap: 64                # max IDs per cell before eviction
+  neighbors_max: 128              # clamp union of neighbor IDs
+  two_d: true                     # drop z in the key (indoors often true)
+
+  # View binning (direction quantization)
+  yaw_bins: 12                    # 360° / 12 = 30° per yaw bin
+  pitch_bins: 5                   # number of vertical slices
+  pitch_deg: 60                   # pitch_max = ±60°; clamp extremes into edge bins
+
+  # Novelty helpers state
+  look_lru_keep: 8                # remember last N look-cells per (cell,vbin)
+  hysteresis_frac: 0.20           # only switch pose cell if >20% into new cell (border flicker guard)
+
+  # Optional: structure dedup (off by default)
+  enable_plane_dedup: false
+  plane_quant_step: 0.05          # meters for plane offset quant (only if enabled)
+  plane_normal_bins: 24           # coarse normal dir bins (only if enabled)
+
+sweep_policy:
+  # Time-based cadence
+  ttl_s: 2.0                      # more frequent soft refresh
+  hard_max_s: 8.0                 # earlier absolute backstop to force sweeps
+
+  # Parallax (baseline) gate
+  min_baseline_m: 0.08            # tightened from 0.05 - reduce jitter sensitivity with stable RTABMap
+  k_depth: 0.005                  # scale baseline more gently with range Z
+
+  # TTL behavior
+  require_novelty_on_ttl: false   # allow TTL alone to trigger sweep
+
+io_sweep:
+  # What cell to mark after a sweep (ties staleness to what was actually seen)
+  mark_mode: look_cell            # camera_cell | look_cell | look_patch3x3
+  look_patch_radius_cells: 1      # only used for look_patch3x3 (1 => 3x3)
+
+assoc:
+  rings: 1                        # neighbor rings for candidate fetch (2D: 9 cells; 3D: 27)
+  nearest_m_for_cos: 8            # K: only compare cosine against the nearest K by distance
+  use_embeddings: true
+  cos_min: 0.90                   # minimum cosine similarity threshold for association (0.0 to 1.0)
+  gate_dist_base_m: 0.50          # 50cm - looser 3D distance gate for small room / noisy depth
+  gate_reproj_px: 60              # ~10cm at 1m depth - more forgiving reprojection
+  fallback_all_when_empty: true   # fallback to all objects in WM if no nearby objects are found
+  debug_positions: false          # Enable diagnostic position logging
+
+# -------------------- Object Promotion --------------------
+object:
+  proto_ttl_s: 10.0               # seconds before proto object expires if not re-observed
+  promote_hits: 2                 # observations needed to promote proto → confirmed
+  stability_promote: 0.55         # loosened from 0.8 - allow more proto objects to confirm
+  require_view_bins: 1            # loosened from 2 - allow stationary camera to confirm objects
+  stab_k: 0.45                    # stability update factor
+  miss_decay: 0.5                # stability decay on missed frames
+
+# -------------------- Storage --------------------
+vectors:
+  enable: true
+  backend: faiss                  # faiss | milvus
+  dim: 512                        # CLIP ViT-B/32 visual embedding size
+  faiss:
+    index_path: model_store/faiss/index.flatip
+  # milvus:
+  #   host: 127.0.0.1
+  #   port: 19530
+  #   collection: rtsm_objects
+  flush_period_s: 3.0
+
+# -------------------- Visualization --------------------
+visualization:
+  enable: true                    # Enable embedded visualization server
+  host: 0.0.0.0
+  port: 8081                      # WebSocket port for frontend
+
+  # Object overlay settings
+  objects:
+    push_interval_ms: 200         # How often to push WM objects to clients
+    include_proto: true           # Include proto (unconfirmed) objects
+
+# -------------------- Runtime --------------------
+logging:
+  periodic_summary: true          # Enable/disable periodic summary logs
+  summary_interval_s: 10.0        # Seconds between summary logs

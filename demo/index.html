@@ -1,0 +1,431 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>RTSM Demo — Real-Time Spatio-Semantic Memory</title>
+    <style>
+      html, body, #app { margin: 0; padding: 0; width: 100%; height: 100%; background: #111; color: #eee; overflow: hidden; }
+
+      #hud {
+        position: fixed;
+        left: 10px;
+        top: 10px;
+        color: #fff;
+        font-family: system-ui, -apple-system, Arial, sans-serif;
+        font-size: 12px;
+        z-index: 10;
+        text-shadow: 0 1px 2px rgba(0,0,0,0.6);
+        background: rgba(0,0,0,0.4);
+        padding: 8px 12px;
+        border-radius: 6px;
+        line-height: 1.5;
+      }
+
+      #ui {
+        position: fixed;
+        top: 10px;
+        right: 10px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        z-index: 11;
+      }
+
+      .ui-row {
+        display: flex;
+        gap: 6px;
+        align-items: center;
+        background: rgba(0,0,0,0.4);
+        padding: 6px 8px;
+        border-radius: 6px;
+      }
+
+      #ui input[type="file"] {
+        display: none;
+      }
+
+      #ui button, #ui label {
+        padding: 6px 10px;
+        border-radius: 4px;
+        border: 1px solid #444;
+        background: #2a2a2a;
+        color: #eee;
+        cursor: pointer;
+        font-size: 12px;
+        transition: background 0.15s;
+      }
+
+      #ui button:hover, #ui label:hover {
+        background: #3a3a3a;
+      }
+
+      #ui button.primary {
+        background: #1e90ff;
+        border-color: #1e90ff;
+      }
+
+      #ui button.primary:hover {
+        background: #1a7acc;
+      }
+
+      #ui button.success {
+        background: #28a745;
+        border-color: #28a745;
+      }
+
+      #ui button.success:hover {
+        background: #218838;
+      }
+
+      #ui button.warning {
+        background: #ffc107;
+        border-color: #ffc107;
+        color: #000;
+      }
+
+      #ui button.warning:hover {
+        background: #e0a800;
+      }
+
+      #mode {
+        font-size: 11px;
+        color: #aaa;
+        padding: 4px 8px;
+      }
+
+      .section-label {
+        font-size: 10px;
+        color: #888;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-right: 4px;
+      }
+
+      /* Object Inspector Panel */
+      #object-panel {
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        background: rgba(0,0,0,0.85);
+        border-top: 1px solid #333;
+        font-family: system-ui, -apple-system, Arial, sans-serif;
+        font-size: 12px;
+        z-index: 20;
+        transition: transform 0.2s ease;
+      }
+
+      #object-panel.collapsed #panel-content {
+        display: none;
+      }
+
+      #panel-header {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 8px 12px;
+        background: rgba(30,30,30,0.95);
+        border-bottom: 1px solid #333;
+      }
+
+      #panel-title {
+        font-weight: bold;
+        color: #fff;
+        min-width: 120px;
+      }
+
+      #object-search {
+        flex: 1;
+        max-width: 300px;
+        padding: 4px 8px;
+        border: 1px solid #444;
+        border-radius: 4px;
+        background: #222;
+        color: #eee;
+        font-size: 12px;
+      }
+
+      #object-search:focus {
+        outline: none;
+        border-color: #1e90ff;
+      }
+
+      #panel-toggle, #panel-filter {
+        padding: 4px 10px;
+        border: 1px solid #444;
+        border-radius: 4px;
+        background: #2a2a2a;
+        color: #eee;
+        cursor: pointer;
+        font-size: 12px;
+      }
+
+      #panel-toggle:hover, #panel-filter:hover {
+        background: #3a3a3a;
+      }
+
+      #panel-filter.active {
+        background: #00ff88;
+        color: #000;
+        border-color: #00ff88;
+      }
+
+      #panel-content {
+        max-height: 200px;
+        overflow-y: auto;
+      }
+
+      #object-list {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+        gap: 4px;
+        padding: 8px;
+      }
+
+      .object-item {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 10px;
+        background: #1a1a1a;
+        border-radius: 4px;
+        cursor: pointer;
+        transition: background 0.15s;
+        border: 1px solid transparent;
+      }
+
+      .object-item:hover {
+        background: #2a2a2a;
+      }
+
+      .object-item.selected {
+        background: #1e90ff22;
+        border-color: #1e90ff;
+      }
+
+      .object-dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        flex-shrink: 0;
+      }
+
+      .object-dot.confirmed { background: #00ff88; }
+      .object-dot.proto { background: #ffaa00; }
+
+      .object-info {
+        flex: 1;
+        overflow: hidden;
+      }
+
+      .object-label {
+        font-weight: bold;
+        color: #fff;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .object-meta {
+        font-size: 10px;
+        color: #888;
+      }
+
+      .object-scores {
+        font-size: 9px;
+        color: #6a9;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        margin-top: 2px;
+      }
+
+      /* Snapshot Gallery Panel */
+      #snapshot-gallery {
+        position: fixed;
+        right: 10px;
+        bottom: 220px;
+        width: 320px;
+        background: rgba(0,0,0,0.9);
+        border-radius: 8px;
+        border: 1px solid #333;
+        font-family: system-ui, -apple-system, Arial, sans-serif;
+        font-size: 12px;
+        z-index: 25;
+        display: none;
+      }
+
+      #snapshot-gallery.visible {
+        display: block;
+      }
+
+      #gallery-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 8px 12px;
+        background: rgba(30,30,30,0.95);
+        border-bottom: 1px solid #333;
+        border-radius: 8px 8px 0 0;
+      }
+
+      #gallery-title {
+        font-weight: bold;
+        color: #fff;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        max-width: 240px;
+      }
+
+      #gallery-close {
+        background: none;
+        border: none;
+        color: #888;
+        cursor: pointer;
+        font-size: 18px;
+        padding: 0 4px;
+      }
+
+      #gallery-close:hover {
+        color: #fff;
+      }
+
+      #gallery-content {
+        padding: 12px;
+      }
+
+      #gallery-loading {
+        color: #888;
+        text-align: center;
+        padding: 20px;
+      }
+
+      #gallery-images {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-bottom: 8px;
+      }
+
+      .gallery-thumb {
+        width: 70px;
+        height: 70px;
+        object-fit: cover;
+        border-radius: 4px;
+        border: 2px solid transparent;
+        cursor: pointer;
+        transition: border-color 0.15s;
+      }
+
+      .gallery-thumb:hover {
+        border-color: #1e90ff;
+      }
+
+      .gallery-thumb.selected {
+        border-color: #00ff88;
+      }
+
+      #gallery-preview {
+        width: 100%;
+        border-radius: 4px;
+        display: none;
+      }
+
+      #gallery-preview.visible {
+        display: block;
+      }
+
+      #gallery-info {
+        color: #888;
+        font-size: 10px;
+        margin-top: 8px;
+        text-align: center;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app"></div>
+
+    <div id="hud">Loading...</div>
+
+    <div id="ui">
+      <!-- File loading -->
+      <div class="ui-row">
+        <span class="section-label">PLY</span>
+        <input id="file" type="file" accept=".ply" />
+        <label for="file">Choose File</label>
+        <button id="load">Load</button>
+        <button id="disconnect">Disconnect</button>
+        <button id="reconnect" class="primary">Re-connect</button>
+      </div>
+
+      <!-- Streaming controls -->
+      <div class="ui-row">
+        <span class="section-label">Stream</span>
+        <button id="clearStream" class="warning">Clear</button>
+        <button id="savePly" class="success">Save PLY</button>
+      </div>
+
+      <!-- Objects overlay -->
+      <div class="ui-row">
+        <span class="section-label">Objects</span>
+        <button id="toggleObj">Hide Objects</button>
+        <button id="filterConfirmed">All</button>
+      </div>
+
+      <!-- View controls -->
+      <div class="ui-row">
+        <span class="section-label">View</span>
+        <button id="reset">Reset</button>
+        <button id="flipX">Flip X</button>
+        <button id="flipY">Flip Y</button>
+        <button id="flipZ">Flip Z</button>
+      </div>
+
+      <!-- RTSM Controls -->
+      <div class="ui-row">
+        <span class="section-label">RTSM</span>
+        <button id="rtsmReset" class="warning">Reset WM</button>
+        <button id="rtsmStats">Stats</button>
+      </div>
+
+      <!-- Mode indicator -->
+      <div class="ui-row">
+        <span id="mode">Mode: Free</span>
+      </div>
+    </div>
+
+    <!-- Object Inspector Panel -->
+    <div id="object-panel">
+      <div id="panel-header">
+        <span id="panel-title">Objects (0)</span>
+        <input type="text" id="object-search" placeholder="Semantic search (e.g. red cup, chair)..." />
+        <button id="search-btn">Search</button>
+        <button id="show-all-btn">Show All</button>
+        <button id="panel-filter">All</button>
+        <button id="panel-toggle">▼</button>
+      </div>
+      <div id="panel-content">
+        <div id="object-list"></div>
+      </div>
+    </div>
+
+    <!-- Snapshot Gallery Panel -->
+    <div id="snapshot-gallery">
+      <div id="gallery-header">
+        <span id="gallery-title">Snapshots</span>
+        <button id="gallery-close">&times;</button>
+      </div>
+      <div id="gallery-content">
+        <div id="gallery-loading">Select an object to view snapshots</div>
+        <div id="gallery-images"></div>
+        <img id="gallery-preview" alt="Selected snapshot" />
+        <div id="gallery-info"></div>
+      </div>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
