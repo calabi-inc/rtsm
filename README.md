@@ -128,7 +128,7 @@ RTSM builds a persistent, searchable memory of objects in 3D space from RGB-D ca
 ### Installation
 
 ```bash
-git clone https://github.com/your-org/rtsm.git
+git clone https://github.com/calabi-inc/rtsm.git
 cd rtsm
 pip install -e .
 ```
