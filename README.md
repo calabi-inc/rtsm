@@ -6,8 +6,7 @@
 
 RTSM builds a persistent, searchable memory of objects in 3D space from RGB-D camera streams. Ask natural language queries like *"Where is the red mug?"* and get answers grounded in real-world coordinates.
 
-<!-- TODO: Replace with your YouTube demo link -->
-> **[Watch Demo Video](https://youtu.be/abhXsbvOLQg)**
+**[Watch Demo Video](https://youtu.be/abhXsbvOLQg)**
 
 ---
 
@@ -125,7 +124,10 @@ RTSM builds a persistent, searchable memory of objects in 3D space from RGB-D ca
 - Python 3.10+
 - CUDA-capable GPU (tested on RTX 3080)
 - RGB-D camera (Intel RealSense D435i tested)
-- SLAM system providing poses (RTABMap, ORB-SLAM3)
+- SLAM system providing poses (RTAB-Map, ORB-SLAM3)
+
+> **Tested on:** WSL2 Ubuntu 22.04 with RTAB-Map.
+> Note: WSL2 has USB passthrough limitations — you may need [usbipd-win](https://github.com/dorssel/usbipd-win) for camera access.
 
 ### Installation
 
@@ -206,7 +208,7 @@ rtsm/
 | Stage | Metric |
 |-------|--------|
 | Input throttling | 30 Hz raw → 5–7 Hz processed (keyframe gating) |
-| Mask filtering | Heuristic filter rejects 10–1500% area masks as insignificant |
+| Mask filtering | Heuristic filter rejects 10–15% area masks as insignificant |
 | Proto-object yield | >90% of static object masks successfully accumulate via associator |
 | Frame latency | <30 ms end-to-end (FastSAM + CLIP stack) |
 | LTM upsert rate | 5 s default interval |
@@ -215,10 +217,11 @@ rtsm/
 
 ## Roadmap
 
-- [ ] ROS 2 integration
-- [ ] Multi-camera support
-- [ ] Improved temporal consistency
-- [ ] LLM integration for high-level queries
+- [ ] More adapters (YOLO-World, ORB-SLAM3)
+- [ ] Direct plugin for Isaac Sim
+- [ ] More communication protocols (ROS 2, MQTT, Kafka)
+- [ ] LLM integration for high-level queries (agentic mode)
+- [ ] Dockerization
 
 ---
 
