@@ -5,9 +5,7 @@
 RTSM builds a persistent, searchable memory of objects in 3D space from RGB-D camera streams. Ask natural language queries like *"Where is the red mug?"* and get answers grounded in real-world coordinates.
 
 <div style="text-align: center; margin: 2rem 0;">
-  <a href="https://youtu.be/abhXsbvOLQg" target="_blank">
-    <strong>▶ Watch Demo Video</strong>
-  </a>
+  <iframe width="560" height="315" src="https://www.youtube.com/embed/abhXsbvOLQg" frameborder="0" allowfullscreen></iframe>
 </div>
 
 ---

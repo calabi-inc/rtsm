@@ -6,6 +6,7 @@ repo_name: calabi-inc/rtsm
 
 theme:
   name: material
+  custom_dir: docs/overrides
   palette:
     - scheme: default
       primary: indigo
@@ -58,3 +59,11 @@ markdown_extensions:
 
 plugins:
   - search
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/calabi-inc/rtsm
+  generator: false
+
+copyright: Copyright &copy; 2025 Calabi Inc.
