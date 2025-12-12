@@ -1,0 +1,60 @@
+site_name: RTSM Documentation
+site_description: Real-Time Spatio-Semantic Memory for spatial AI and robotics
+site_url: https://calabi-inc.github.io/rtsm
+repo_url: https://github.com/calabi-inc/rtsm
+repo_name: calabi-inc/rtsm
+
+theme:
+  name: material
+  palette:
+    - scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - search.highlight
+    - content.code.copy
+
+nav:
+  - Home: index.md
+  - Getting Started:
+      - Installation: getting-started/installation.md
+      - Quick Start: getting-started/quick-start.md
+      - Configuration: getting-started/configuration.md
+  - Concepts:
+      - Architecture: concepts/architecture.md
+      - Perception Pipeline: concepts/perception-pipeline.md
+      - Memory Model: concepts/memory-model.md
+  - API Reference:
+      - REST API: api/rest-api.md
+      - WebSocket: api/websocket.md
+  - Guides:
+      - RTAB-Map Setup: guides/rtabmap-setup.md
+      - RealSense Setup: guides/realsense-setup.md
+  - Contributing: contributing.md
+
+markdown_extensions:
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - admonition
+  - pymdownx.details
+  - tables
+  - toc:
+      permalink: true
+
+plugins:
+  - search
