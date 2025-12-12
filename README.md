@@ -1,3 +1,5 @@
+![RTSM](repo_media/background.jpg)
+
 # RTSM — Real-Time Spatio-Semantic Memory
 
 **Object-centric queryable memory for spatial AI and robotics.**
@@ -197,12 +199,49 @@ rtsm/
 
 ---
 
+## Performance
+
+*Benchmarks on RTX 5090 (your mileage may vary):*
+
+| Stage | Metric |
+|-------|--------|
+| Input throttling | 30 Hz raw → 5–7 Hz processed (keyframe gating) |
+| Mask filtering | Heuristic filter rejects 10–1500% area masks as insignificant |
+| Proto-object yield | >90% of static object masks successfully accumulate via associator |
+| Frame latency | <30 ms end-to-end (FastSAM + CLIP stack) |
+| LTM upsert rate | 5 s default interval |
+
+---
+
 ## Roadmap
 
 - [ ] ROS 2 integration
 - [ ] Multi-camera support
 - [ ] Improved temporal consistency
 - [ ] LLM integration for high-level queries
+
+---
+
+## Acknowledgments
+
+RTSM builds on excellent open-source work:
+
+- **FastSAM** — Zhao et al., *Fast Segment Anything*, 2023.
+  [arXiv:2306.12156](https://arxiv.org/abs/2306.12156) · [GitHub](https://github.com/CASIA-IVA-Lab/FastSAM)
+
+- **CLIP** — Radford et al., *Learning Transferable Visual Models From Natural Language Supervision*, 2021.
+  [arXiv:2103.00020](https://arxiv.org/abs/2103.00020) · [GitHub](https://github.com/openai/CLIP)
+
+- **RTAB-Map** — Labbé & Michaud, *RTAB-Map as an Open-Source Lidar and Visual SLAM Library for Large-Scale and Long-Term Online Operation*, Journal of Field Robotics, 2019.
+  [Paper](https://doi.org/10.1002/rob.21831) · [GitHub](https://github.com/introlab/rtabmap)
+
+---
+
+## Community
+
+This project is under active development. If you have questions or run into issues, feel free to open an issue — I'm happy to help.
+
+If you find RTSM useful, please consider giving it a star! I'm also looking for design partners — reach out to [Calabi](https://github.com/calabi-team) if you're interested in collaborating.
 
 ---
 
