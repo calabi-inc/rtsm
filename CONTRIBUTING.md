@@ -48,15 +48,15 @@ ruff check rtsm/
 
 ### Commit Messages
 
-Use conventional commit prefixes:
+Use bracket prefixes:
 
 ```
-feat: add new segmentation adapter
-fix: handle null depth values
-docs: update installation guide
-refactor: simplify association logic
-test: add tests for proximity index
-chore: update dependencies
+[feat] add new segmentation adapter
+[fix] handle null depth values
+[docs] update installation guide
+[refactor] simplify association logic
+[test] add tests for proximity index
+[chore] update dependencies
 ```
 
 ### Pull Request Process
@@ -72,9 +72,9 @@ chore: update dependencies
 ### PR Title Format
 
 ```
-feat: add YOLO-World adapter
-fix: memory leak in working memory store
-docs: add API examples
+[feat] add YOLO-World adapter
+[fix] memory leak in working memory store
+[docs] add API examples
 ```
 
 ## What to Contribute
