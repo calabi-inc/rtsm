@@ -9,14 +9,14 @@ import cv2
 from PIL import Image
 
 from rtsm.utils.mask_staging import run_heuristics, MaskStats
-from rtsm.utils.prepare_ann import prepare_ann  # whatever you named it
+from rtsm.utils.prepare_ann import prepare_ann
 from rtsm.utils.periodic_logger import PeriodicLogger
 from rtsm.models.fastsam.adapter import FastSAMAdapter
 from rtsm.models.clip.adapter import CLIPAdapter
 from rtsm.models.clip.vocab_classifier import ClipVocabClassifier
 from rtsm.stores.working_memory import WorkingMemory
 from rtsm.stores.proximity_index import ProximityIndex
-from rtsm.core.association import Associator  # your match/merge scoring
+from rtsm.core.association import Associator
 from rtsm.core.ingest_gate import IngestGate
 from rtsm.stores.sweep_cache import SweepCache
 from rtsm.io.ingest_queue import IngestQueue

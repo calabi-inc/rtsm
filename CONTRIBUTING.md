@@ -23,7 +23,7 @@ Thanks for your interest in contributing to RTSM! This document provides guideli
 
 ### Prerequisites
 
-- Python 3.10+
+- Python 3.12+
 - CUDA-capable GPU
 - RGB-D camera (optional, for end-to-end testing)
 

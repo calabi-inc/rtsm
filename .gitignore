@@ -104,3 +104,6 @@ model_store/
 # Demo frontend
 demo/node_modules/
 demo/dist/
+
+# MkDocs build output (should not be committed; deploy via CI or a gh-pages branch)
+site/

@@ -1,7 +1,7 @@
 [project]
 name = "rtsm"
 version = "0.1.0"
-description = "Add your description here"
+description = "Real-Time Spatio-Semantic Memory for spatial AI and robotics"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [

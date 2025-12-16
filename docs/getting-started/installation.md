@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-- Python 3.10+
+- Python 3.12+
 - CUDA-capable GPU (tested on RTX 3080, RTX 5090)
 - RGB-D camera (Intel RealSense D435i tested)
 - SLAM system providing poses (RTAB-Map, ORB-SLAM3)
@@ -17,6 +17,10 @@
 ```bash
 git clone https://github.com/calabi-inc/rtsm.git
 cd rtsm
+# Install dependencies
+pip install -r requirements.txt
+
+# Install RTSM in editable mode
 pip install -e .
 ```
 
