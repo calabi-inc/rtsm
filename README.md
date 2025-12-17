@@ -2,25 +2,48 @@
 
 # RTSM — Real-Time Spatio-Semantic Memory
 
-**Object-centric queryable memory for spatial AI and robotics.**
+RTSM is a real-time spatial memory system that turns RGB-D streams into a **persistent, queryable 3D object-centric world state**.
 
-RTSM builds a persistent, searchable memory of objects in 3D space from RGB-D camera streams. Ask natural language queries like *"Where is the red mug?"* and get answers grounded in real-world coordinates.
+Instead of treating perception as disposable frames, RTSM maintains **stable object identities over time**, enabling robots and embodied agents to answer questions like:
+- *What objects exist in this space?*
+- *Where are they right now?*
+- *What changed, and when?*
 
 **[Watch Demo Video](https://youtu.be/abhXsbvOLQg)** · **[Documentation](https://calabi-inc.github.io/rtsm)**
 
 ---
 
-## What It Does
+## Why RTSM
 
-- **Real-time segmentation** — FastSAM extracts object instances from each frame
-- **Semantic embeddings** — CLIP encodes visual features for natural language queries
-- **Persistent memory** — Objects are tracked across views, fused, and promoted to long-term memory
-- **Spatial indexing** — Fast proximity queries via 3D grid + vector search (FAISS)
-- **Queryable** — REST API and semantic search: find objects by description
+Modern perception systems can detect objects, but they lack **memory**.
+SLAM systems build geometry, vision models detect semantics, and language models reason abstractly—but there is no shared layer that connects **space, objects, and history**.
 
-```
-"Where is the red backpack?" → { id: "a3f2c1", xyz: [1.2, 0.4, 2.1], confidence: 0.87 }
-```
+RTSM fills this gap by acting as an explicit **spatial memory layer**:
+- SLAM provides geometry and poses
+- Vision models provide object masks and semantics
+- RTSM fuses them into a persistent world representation
+
+This makes spatial state **inspectable, queryable, and reusable** across robots, agents, and applications.
+
+---
+
+## What RTSM Does
+
+- Builds a live 3D map from RGB-D + pose streams
+- Assigns **persistent IDs** to objects across viewpoints and time
+- Stores spatial, semantic, and temporal metadata per object
+- Supports semantic + spatial queries (e.g. *"red bin near dock 3"*)
+- Exposes a programmatic API and real-time 3D visualizer
+
+RTSM is **SLAM-agnostic** and designed to sit above existing perception stacks.
+
+---
+
+## Who This Is For
+
+- Robotics and embodied AI researchers
+- Developers building agentic or world-model-based systems
+- Teams exploring persistent perception, spatial reasoning, or digital twins
 
 ---
 
@@ -241,6 +264,22 @@ RTSM builds on excellent open-source work:
 
 - **RTAB-Map** — Labbé & Michaud, *RTAB-Map as an Open-Source Lidar and Visual SLAM Library for Large-Scale and Long-Term Online Operation*, Journal of Field Robotics, 2019.
   [Paper](https://doi.org/10.1002/rob.21831) · [GitHub](https://github.com/introlab/rtabmap)
+
+---
+
+## Cite This
+
+If you use RTSM in your research, please cite:
+
+```bibtex
+@software{chang2025rtsm,
+  author       = {Chang, Chi Feng},
+  title        = {{RTSM}: Real-Time Spatio-Semantic Memory},
+  year         = {2025},
+  url          = {https://github.com/calabi-inc/rtsm},
+  note         = {Object-centric queryable memory for spatial AI and robotics}
+}
+```
 
 ---
 
