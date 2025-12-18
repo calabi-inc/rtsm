@@ -14,6 +14,35 @@ camera:
   cy: 259.239777
 
 # -------------------- Models --------------------
+# Segmentation backend: fastsam (open-world) or yoloworld (task-focused)
+segmentation:
+  backend: fastsam                    # fastsam | yoloworld
+
+  fastsam:
+    model_path: model_store/fastsam/FastSAM-x.pt
+    device: cuda
+    imgsz: 640
+    conf: 0.4
+    iou: 0.9
+
+  yoloworld:
+    model_path: yolov8x-worldv2.pt    # or local path
+    device: cuda
+    imgsz: 640
+    conf: 0.25
+    iou: 0.7
+    with_masks: true                  # generate masks (slower) or boxes only
+    # Custom vocabulary for task-specific detection (null = use default indoor vocab)
+    vocab: null
+    # Example warehouse vocab:
+    # vocab:
+    #   - pallet
+    #   - cardboard box
+    #   - forklift
+    #   - person
+    #   - shelf
+    #   - bin
+
 clip:
   model: ViT-B-32
   pretrained: openai

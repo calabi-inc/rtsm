@@ -11,7 +11,7 @@ from PIL import Image
 from rtsm.utils.mask_staging import run_heuristics, MaskStats
 from rtsm.utils.prepare_ann import prepare_ann
 from rtsm.utils.periodic_logger import PeriodicLogger
-from rtsm.models.fastsam.adapter import FastSAMAdapter
+from rtsm.models.segmentation import SegmentationAdapter, SegmentationResult
 from rtsm.models.clip.adapter import CLIPAdapter
 from rtsm.models.clip.vocab_classifier import ClipVocabClassifier
 from rtsm.stores.working_memory import WorkingMemory
@@ -44,7 +44,7 @@ class Pipeline:
     def __init__(
         self,
         cfg: Dict[str,Any],
-        fastsam: FastSAMAdapter,
+        segmenter: SegmentationAdapter,
         clip: CLIPAdapter,
         working_mem: WorkingMemory,
         proximity_index: ProximityIndex,
@@ -56,7 +56,7 @@ class Pipeline:
         sweep_cache: Optional[SweepCache] = None,
     ):
         self.cfg = cfg
-        self.fastsam = fastsam
+        self.segmenter = segmenter
         self.clip = clip
         self.working_mem = working_mem
         self.proximity_index = proximity_index
@@ -167,11 +167,24 @@ class Pipeline:
             return
 
         # 1) segmentation -> masks
-        # FastSAMAdapter expects a PIL.Image for segment_everything
+        # SegmentationAdapter expects a PIL.Image
         rgb_img = snap.rgb
         pil_img = Image.fromarray(rgb_img) if isinstance(rgb_img, np.ndarray) else rgb_img
-        ann = self.fastsam.segment_everything(pil_img)
-        ann_bool = prepare_ann(ann)                   # [N,H,W] bool CPU
+
+        # Get segmentation vocab from config (for open-vocab models like YOLO-World)
+        seg_cfg = self.cfg.get("segmentation", {})
+        vocab = seg_cfg.get("yoloworld", {}).get("vocab", None)
+
+        # Run segmentation
+        seg_result = self.segmenter.segment(pil_img, vocab=vocab)
+
+        # Extract masks - use prepare_ann for consistency with existing pipeline
+        if seg_result.has_masks:
+            ann_bool = prepare_ann(seg_result.masks)  # [N,H,W] bool CPU
+        else:
+            # Fallback for detection-only models (no masks)
+            ann_bool = torch.empty(0, pil_img.height, pil_img.width, dtype=torch.bool)
+
         n_masks = int(ann_bool.shape[0]) if hasattr(ann_bool, 'shape') else 0
 
         # 2) heuristics -> keep + stats
@@ -507,7 +520,7 @@ class Pipeline:
     def shutdown(self):
         # free heavy models if desired
         try:
-            self.fastsam.close()
+            self.segmenter.close()
         except Exception:
             pass
         try:
@@ -527,8 +540,8 @@ class Pipeline:
         image_path = "test_dataset/simple_room.png"
         pil = Image.open(image_path).convert("RGB")
         rgb = np.array(pil)
-        ann = self.fastsam.segment_everything(pil)
-        ann_bool = prepare_ann(ann)
+        seg_result = self.segmenter.segment(pil)
+        ann_bool = prepare_ann(seg_result.masks) if seg_result.has_masks else torch.empty(0, pil.height, pil.width, dtype=torch.bool)
         depth_m = load_depth_png_as_meters("test_dataset/depth/1754989062.627478.png")
         kept_masks, stats = run_heuristics(
             ann_bool,

@@ -3,7 +3,7 @@ import warnings
 warnings.filterwarnings("ignore", message="pkg_resources is deprecated")
 
 from rtsm.core.pipeline import Pipeline
-from rtsm.models.fastsam.adapter import FastSAMAdapter
+from rtsm.models.segmentation import get_segmenter
 from rtsm.models.clip.adapter import CLIPAdapter
 from rtsm.stores.working_memory import WorkingMemory
 from rtsm.stores.proximity_index import ProximityIndex, GridSpec
@@ -41,8 +41,10 @@ def main():
 
     cfg = yaml.safe_load(open("config/rtsm.yaml", "r"))
     logger.info("Configuration loaded from config/rtsm.yaml")
-    fastsam = FastSAMAdapter("model_store/fastsam/FastSAM-x.pt", cfg.get("device","cuda"))
-    logger.info(f"FastSAM model successfully loaded from model_store/fastsam/FastSAM-x.pt")
+
+    # Create segmenter from config (FastSAM, YOLO-World, etc.)
+    segmenter = get_segmenter(cfg)
+    logger.info(f"Segmentation backend loaded: {segmenter.name}")
     clip = CLIPAdapter("ViT-B-32", "openai", "model_store/clip", device=cfg.get("device","cuda"))
     logger.info(f"CLIP model successfully loaded from model_store/clip")
     # Proximity index config
@@ -125,16 +127,16 @@ def main():
         logger.info(f"Visualization WebSocket server started on port {vis_cfg.get('port', 8081)}")
 
     pipe = Pipeline(
-        cfg=cfg, 
-        fastsam=fastsam, 
-        clip=clip, 
-        working_mem=wm, 
-        proximity_index=proximity_index, 
-        associator=assoc, 
-        ingest_gate=ingest_gate, 
-        vocab_clf=vocab_clf, 
-        vectors=vectors, 
-        ingest_q=ingest_q, 
+        cfg=cfg,
+        segmenter=segmenter,
+        clip=clip,
+        working_mem=wm,
+        proximity_index=proximity_index,
+        associator=assoc,
+        ingest_gate=ingest_gate,
+        vocab_clf=vocab_clf,
+        vectors=vectors,
+        ingest_q=ingest_q,
         sweep_cache=sweep_cache )
 
     # ---------------- Start FastAPI control-plane ----------------
