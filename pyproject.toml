@@ -32,6 +32,7 @@ gpu = [
     "sam2>=1.0",
     "transformers>=4.44.0",
     "faiss-cpu>=1.12.0",
+    "av",
 ]
 gpu-ultralytics = [
     "rtsm[gpu]",

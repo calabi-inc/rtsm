@@ -373,3 +373,170 @@ class TestParseBinaryMessage:
         pkt = recv._parse_binary_message(msg)
         assert pkt is not None
         assert pkt.depth_m is None
+
+
+# ─────────────────── H.264 decode support ───────────────────
+
+av = pytest.importorskip("av")
+from fractions import Fraction
+
+
+def _encode_h264_frame(img_bgr: np.ndarray) -> bytes:
+    """Encode a BGR numpy array to H.264 IDR frame bytes using PyAV."""
+    h, w = img_bgr.shape[:2]
+    codec = av.CodecContext.create("libx264", "w")
+    codec.width = w
+    codec.height = h
+    codec.pix_fmt = "yuv420p"
+    codec.time_base = Fraction(1, 30)
+    codec.options = {"preset": "ultrafast", "tune": "zerolatency"}
+    codec.open()
+
+    frame = av.VideoFrame.from_ndarray(img_bgr, format="bgr24")
+    frame.pts = 0
+    packets = codec.encode(frame)
+    packets += codec.encode()  # flush encoder
+    return b"".join(bytes(p) for p in packets)
+
+
+def _build_test_frame_h264(h264_bytes: bytes, width: int, height: int) -> bytes:
+    """Build a binary WebSocket message with H.264 RGB payload."""
+    depth_u16 = np.ones((height, width), dtype=np.uint16) * 1500
+    depth_u16[0, 0] = 0
+    depth_bytes = depth_u16.tobytes()
+
+    header = {
+        "session_id": "test-h264",
+        "frame_id": 1,
+        "timestamp_ns": 1000000000,
+        "unix_timestamp": 1700000000.0,
+        "rgb_format": "h264",
+        "rgb_width": width,
+        "rgb_height": height,
+        "depth_format": "uint16_mm",
+        "depth_width": width,
+        "depth_height": height,
+        "depth_scale": 0.001,
+        "fx": 50.0, "fy": 50.0, "cx": 32.0, "cy": 24.0,
+        "intrinsics_width": width,
+        "intrinsics_height": height,
+        "pose_format": "quat_translation",
+        "T_wc": [0.0, 0.0, 0.0, 1.0, 1.0, 2.0, 3.0],
+        "tracking_state": "normal",
+    }
+    json_bytes = json.dumps(header).encode("utf-8")
+
+    msg = b""
+    msg += struct.pack("<I", len(json_bytes))
+    msg += json_bytes
+    msg += struct.pack("<I", len(h264_bytes))
+    msg += h264_bytes
+    msg += struct.pack("<I", len(depth_bytes))
+    msg += depth_bytes
+    return msg
+
+
+class TestH264Decoder:
+    """Tests for H.264 decode support (requires PyAV)."""
+
+    @pytest.fixture
+    def h264_idr_frame(self):
+        """Generate a valid H.264 IDR frame from a test image."""
+        img = np.zeros((48, 64, 3), dtype=np.uint8)
+        img[10:30, 10:50] = [0, 128, 255]
+        h264_bytes = _encode_h264_frame(img)
+        return h264_bytes, img
+
+    def test_decoder_roundtrip(self, h264_idr_frame):
+        """H.264 encode → decode roundtrip should produce matching image."""
+        from rtsm.io.websocket import H264Decoder
+
+        h264_bytes, original = h264_idr_frame
+        decoder = H264Decoder()
+        result = decoder.decode(h264_bytes)
+
+        assert result is not None
+        assert result.shape == (48, 64, 3)
+        assert result.dtype == np.uint8
+        # H.264 is lossy — allow deviation from YUV420 chroma subsampling
+        np.testing.assert_allclose(
+            result.astype(float), original.astype(float), atol=35,
+        )
+
+    def test_decoder_returns_none_for_empty(self):
+        """Decoder should handle packets that produce no frames gracefully."""
+        from rtsm.io.websocket import H264Decoder
+
+        decoder = H264Decoder()
+        # SPS/PPS-only packets won't produce a decoded frame
+        result = decoder.decode(b"")
+        assert result is None
+
+    def test_binary_message_h264(self, h264_idr_frame):
+        """Full binary message with rgb_format=h264 should parse correctly."""
+        from rtsm.io.websocket import WebSocketReceiver
+        from rtsm.io.ingest_queue import IngestQueue
+
+        h264_bytes, _ = h264_idr_frame
+        recv = WebSocketReceiver(
+            ingest_queue=IngestQueue(16),
+            keyframe_every_n=5,
+            nonkf_min_interval_s=0.0,
+        )
+
+        data = _build_test_frame_h264(h264_bytes, width=64, height=48)
+        pkt = recv._parse_binary_message(data)
+
+        assert pkt is not None
+        assert pkt.rgb.shape == (48, 64, 3)
+        assert pkt.rgb.dtype == np.uint8
+        assert pkt.rgb_jpeg is None  # H.264 does not set raw JPEG
+        assert pkt.depth_m is not None
+        assert pkt.depth_m.shape == (48, 64)
+        assert np.isnan(pkt.depth_m[0, 0])
+        np.testing.assert_almost_equal(pkt.depth_m[1, 1], 1.5)
+        np.testing.assert_array_almost_equal(pkt.pose.t_wc, [1.0, 2.0, 3.0])
+
+    def test_h264_decoder_persists_across_frames(self, h264_idr_frame):
+        """Decoder instance should be reused across multiple H.264 frames."""
+        from rtsm.io.websocket import WebSocketReceiver
+        from rtsm.io.ingest_queue import IngestQueue
+
+        h264_bytes, _ = h264_idr_frame
+        recv = WebSocketReceiver(
+            ingest_queue=IngestQueue(16),
+            keyframe_every_n=999,
+            nonkf_min_interval_s=0.0,
+        )
+
+        # Parse first frame — creates decoder
+        data1 = _build_test_frame_h264(h264_bytes, width=64, height=48)
+        pkt1 = recv._parse_binary_message(data1)
+        assert pkt1 is not None
+        assert recv._h264_decoder is not None
+        decoder_id = id(recv._h264_decoder)
+
+        # Parse second frame — should reuse same decoder
+        data2 = _build_test_frame_h264(h264_bytes, width=64, height=48)
+        pkt2 = recv._parse_binary_message(data2)
+        assert pkt2 is not None
+        assert id(recv._h264_decoder) == decoder_id
+
+    def test_existing_formats_unaffected(self):
+        """JPEG/NV12/BGRA paths should still work after H.264 addition."""
+        from rtsm.io.websocket import WebSocketReceiver
+        from rtsm.io.ingest_queue import IngestQueue
+
+        recv = WebSocketReceiver(
+            ingest_queue=IngestQueue(16),
+            keyframe_every_n=5,
+            nonkf_min_interval_s=0.0,
+        )
+
+        # JPEG frame (existing _build_test_frame uses JPEG)
+        data = _build_test_frame()
+        pkt = recv._parse_binary_message(data)
+        assert pkt is not None
+        assert pkt.rgb.shape == (48, 64, 3)
+        assert pkt.rgb_jpeg is not None  # JPEG preserves raw bytes
+        assert recv._h264_decoder is None  # should NOT create H.264 decoder

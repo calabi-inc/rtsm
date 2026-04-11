@@ -38,7 +38,7 @@ logger = logging.getLogger(__name__)
 PROTOCOL_VERSION = 1
 
 # Supported format values
-_RGB_FORMATS = {"jpeg", "png", "bgra", "nv12"}
+_RGB_FORMATS = {"jpeg", "png", "bgra", "nv12", "h264"}
 _DEPTH_FORMATS = {"uint16_mm", "float32_m", "png_uint16"}
 _POSE_FORMATS = {"matrix4x4_col_major", "quat_translation"}
 
@@ -192,6 +192,40 @@ def parse_arkit_pose(
         raise ValueError(f"Unsupported pose_format: {pose_format!r}")
 
 
+# ─────────────────── H.264 Stateful Decoder ───────────────────
+
+
+class H264Decoder:
+    """Stateful H.264 decoder using PyAV.
+
+    Maintains codec context across frames for P-frame reference tracking.
+    Create one instance per WebSocket connection or replay session.
+    """
+
+    def __init__(self):
+        import av  # lazy import — only needed when H.264 frames arrive
+
+        self._codec = av.CodecContext.create("h264", "r")
+
+    def decode(self, h264_bytes: bytes) -> Optional[np.ndarray]:
+        """Decode H.264 NAL units to BGR numpy array.
+
+        Args:
+            h264_bytes: Raw H.264 NAL unit bytes (one or more NAL units).
+
+        Returns:
+            (H, W, 3) uint8 BGR array (OpenCV convention), or ``None``
+            if the packet produced no decodable frame (e.g. SPS/PPS only).
+        """
+        import av
+
+        packet = av.Packet(h264_bytes)
+        frames = self._codec.decode(packet)
+        if not frames:
+            return None
+        return frames[0].to_ndarray(format="bgr24")
+
+
 # ─────────────────── WebSocket Receiver Class ───────────────────
 
 
@@ -243,6 +277,7 @@ class WebSocketReceiver:
         self._last_nonkf_enq_mono: float = 0.0
         self._last_enq_ts_ns: Optional[int] = None
         self._active_session_id: Optional[str] = None
+        self._h264_decoder: Optional[H264Decoder] = None
 
         # Threading
         self._server_thread: Optional[threading.Thread] = None
@@ -328,6 +363,7 @@ class WebSocketReceiver:
         self._frame_count = 0
         self._last_nonkf_enq_mono = 0.0
         self._last_enq_ts_ns = None
+        self._h264_decoder = None  # fresh decoder per connection
         frames_received = 0
         frames_enqueued = 0
         t_start = time.monotonic()
@@ -558,7 +594,17 @@ class WebSocketReceiver:
         rgb_w = int(header.get("rgb_width", 0))
         rgb_h = int(header.get("rgb_height", 0))
         raw_jpeg = bytes(rgb_bytes) if rgb_fmt == "jpeg" else None
-        rgb = decode_rgb(rgb_bytes, fmt=rgb_fmt, width=rgb_w, height=rgb_h)
+
+        if rgb_fmt == "h264":
+            # H.264 requires stateful decoder (P-frame reference tracking)
+            if self._h264_decoder is None:
+                self._h264_decoder = H264Decoder()
+            rgb = self._h264_decoder.decode(rgb_bytes)
+            if rgb is None:
+                logger.warning("[websocket] H.264 decode produced no frame")
+                return None
+        else:
+            rgb = decode_rgb(rgb_bytes, fmt=rgb_fmt, width=rgb_w, height=rgb_h)
 
         # 8. Decode depth (native resolution, NaN for invalid)
         depth_fmt = header.get("depth_format")
