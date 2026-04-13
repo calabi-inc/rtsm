@@ -293,9 +293,9 @@ def run_demo(argv: list[str] | None = None) -> None:
 
     # Auto-open browser to the web UI
     if static_dir and not args.no_viz:
-        import webbrowser
+        from rtsm.utils.browser import open_browser
         url = f"http://localhost:{port}"
-        threading.Timer(1.5, webbrowser.open, args=[url]).start()
+        threading.Timer(1.5, open_browser, args=[url]).start()
 
     try:
         pipe.run_forever()
