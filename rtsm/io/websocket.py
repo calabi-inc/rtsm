@@ -206,6 +206,15 @@ class H264Decoder:
         import av  # lazy import — only needed when H.264 frames arrive
 
         self._codec = av.CodecContext.create("h264", "r")
+        # Allow up to 16 reference frames — VideoToolbox High Profile can
+        # produce streams with up to 16 refs. Default FFmpeg limit is 10
+        # which causes "number of reference frames exceeds max" errors.
+        self._codec.options = {
+            "max_ref_frames": "16",
+            "err_detect": "careful",  # be lenient with minor stream issues
+        }
+        self._codec.thread_type = "AUTO"
+        self._codec.thread_count = 0  # auto-detect thread count
 
     def decode(self, h264_bytes: bytes) -> Optional[np.ndarray]:
         """Decode H.264 NAL units to BGR numpy array.
