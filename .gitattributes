@@ -1,4 +1,0 @@
-# Full recordings stay in LFS (696MB+)
-recordings/session1/**/*.bin filter=lfs diff=lfs merge=lfs -text
-# Demo clip is small enough (~20MB) to live in regular git — no LFS friction
-recordings/demo_clip/**/*.bin !filter !diff !merge text=auto
