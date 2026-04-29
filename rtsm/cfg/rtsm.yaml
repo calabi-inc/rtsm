@@ -22,7 +22,7 @@ segmentation:
   #   fastsam        - class-agnostic (requires ultralytics, AGPL)
   #   yoloe          - open-vocab (requires ultralytics, AGPL)
   #   dual           - FastSAM + YOLOE IoU merge (requires ultralytics, AGPL)
-  backend: grounded_sam2
+  backend: dual
   retina_masks: false                  # false = 640x640 masks (fast), true = original resolution (precise but slow)
 
   fastsam:
