@@ -79,6 +79,10 @@ ENV/
 env/
 .venv.bak/
 
+# Arduino / ESP32 firmware secrets — local only, never commit
+examples/esp32_firmware/**/secrets.h
+!examples/esp32_firmware/**/secrets.h.example
+
 # IDE/editor
 .vscode/
 .idea/
