@@ -73,6 +73,18 @@ const bool M2_REVERSED = false;  // rear-right
 const bool M3_REVERSED = false;  // front-left
 const bool M4_REVERSED = true;   // rear-left
 
+// === Teleop state (used by /drive endpoint for joystick control) ===
+// Latest commanded speeds. teleopTick() applies them each loop iteration and
+// stops the motors if no fresh /drive command arrives within the watchdog
+// window — prevents runaway if WiFi or the controlling PC drops.
+const int8_t  TELEOP_MAX_SPEED     = 40;
+const unsigned long TELEOP_WATCHDOG_MS = 300;
+volatile int8_t teleopLeft  = 0;
+volatile int8_t teleopRight = 0;
+volatile unsigned long teleopLastCmdMs = 0;
+int8_t teleopAppliedLeft  = 0;
+int8_t teleopAppliedRight = 0;
+
 WebServer server(80);
 
 // === Low-level I2C helpers ===
@@ -190,9 +202,57 @@ void handleTurn() {
 }
 
 void handleStop() {
+    // Cancel any active teleop drive AND stop the motors.
+    teleopLeft = 0;
+    teleopRight = 0;
+    teleopLastCmdMs = millis();
     stopMotors();
     Serial.println("Stop");
     server.send(200, "application/json", "{\"ok\":true,\"cmd\":\"stop\"}");
+}
+
+// /drive — non-blocking velocity command for joystick / PS4 teleop.
+// Body: {"left": <-1.0..1.0>, "right": <-1.0..1.0>}
+// Values are fractions of TELEOP_MAX_SPEED. Motors keep running at the
+// commanded speeds until a new /drive (or /stop) arrives, or until the
+// watchdog times out after TELEOP_WATCHDOG_MS — whichever comes first.
+void handleDrive() {
+    float leftPct = 0.0;
+    float rightPct = 0.0;
+    if (server.hasArg("plain")) {
+        String body = server.arg("plain");
+        leftPct  = parseFloatArg(body, "left",  0.0);
+        rightPct = parseFloatArg(body, "right", 0.0);
+    }
+    if (leftPct  >  1.0) leftPct  =  1.0;
+    if (leftPct  < -1.0) leftPct  = -1.0;
+    if (rightPct >  1.0) rightPct =  1.0;
+    if (rightPct < -1.0) rightPct = -1.0;
+
+    teleopLeft  = (int8_t)(leftPct  * TELEOP_MAX_SPEED);
+    teleopRight = (int8_t)(rightPct * TELEOP_MAX_SPEED);
+    teleopLastCmdMs = millis();
+
+    server.send(200, "application/json", "{\"ok\":true,\"cmd\":\"drive\"}");
+}
+
+// Called every loop() iteration. Applies the latest teleop speeds, or
+// stops the motors if no fresh /drive command has arrived recently.
+void teleopTick() {
+    int8_t targetLeft, targetRight;
+    if (millis() - teleopLastCmdMs > TELEOP_WATCHDOG_MS) {
+        targetLeft = 0;
+        targetRight = 0;
+    } else {
+        targetLeft = teleopLeft;
+        targetRight = teleopRight;
+    }
+    // Only push to I2C when the speeds change — avoids spamming the bus.
+    if (targetLeft != teleopAppliedLeft || targetRight != teleopAppliedRight) {
+        driveLeftRight(targetLeft, targetRight);
+        teleopAppliedLeft  = targetLeft;
+        teleopAppliedRight = targetRight;
+    }
 }
 
 void handleTestMotor(int motorNum) {
@@ -257,6 +317,7 @@ void setup() {
     server.on("/forward",  HTTP_POST, handleForward);
     server.on("/turn",     HTTP_POST, handleTurn);
     server.on("/stop",     HTTP_POST, handleStop);
+    server.on("/drive",    HTTP_POST, handleDrive);    // joystick teleop
     server.on("/battery",  HTTP_GET,  handleBattery);
     server.on("/test_m1",  HTTP_POST, []() { handleTestMotor(1); });
     server.on("/test_m2",  HTTP_POST, []() { handleTestMotor(2); });
@@ -269,4 +330,5 @@ void setup() {
 
 void loop() {
     server.handleClient();
+    teleopTick();
 }
