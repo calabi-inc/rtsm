@@ -60,18 +60,23 @@ const unsigned long MS_PER_RADIAN = 1600; // ms to rotate 1 rad at TURN_SPEED �
                                           // acceptable for demo).
 
 // === Motor port → physical wheel mapping ===
-// Determined empirically by running /test_m1 ... /test_m4 and observing:
-//   M1 = front-right, spins BACKWARD with +speed (wires reversed)
-//   M2 = rear-right,  spins forward with +speed
-//   M3 = front-left,  spins forward with +speed
-//   M4 = rear-left,   spins BACKWARD with +speed (wires reversed)
+// Determined empirically by running /test_m1 ... /test_m4, then verified
+// against /drive joystick behavior (stick right -> physically turn right).
+//
+//   M1 = front-LEFT,  spins BACKWARD with +speed (wires reversed)
+//   M2 = rear-LEFT,   spins forward with +speed
+//   M3 = front-RIGHT, spins forward with +speed
+//   M4 = rear-RIGHT,  spins BACKWARD with +speed (wires reversed)
+//
+// (The first bring-up mapping used "top/bottom" from a chassis-flipped
+// viewpoint which had left/right inverted — the joystick test exposed it.)
 //
 // To make a wheel physically roll forward, we invert the I2C speed value
 // for the two reversed ports.
-const bool M1_REVERSED = true;   // front-right
-const bool M2_REVERSED = false;  // rear-right
-const bool M3_REVERSED = false;  // front-left
-const bool M4_REVERSED = true;   // rear-left
+const bool M1_REVERSED = true;   // front-left
+const bool M2_REVERSED = false;  // rear-left
+const bool M3_REVERSED = false;  // front-right
+const bool M4_REVERSED = true;   // rear-right
 
 // === Teleop state (used by /drive endpoint for joystick control) ===
 // Latest commanded speeds. teleopTick() applies them each loop iteration and
@@ -116,12 +121,12 @@ void stopMotors() {
 // Positive = wheel rolls forward, negative = rolls backward.
 // Handles per-motor polarity reversal so the caller can think in physical terms.
 void driveLeftRight(int8_t leftPhysical, int8_t rightPhysical) {
-    // Left side: M3 (front-left), M4 (rear-left)
-    int8_t m3 = M3_REVERSED ? -leftPhysical  : leftPhysical;
-    int8_t m4 = M4_REVERSED ? -leftPhysical  : leftPhysical;
-    // Right side: M1 (front-right), M2 (rear-right)
-    int8_t m1 = M1_REVERSED ? -rightPhysical : rightPhysical;
-    int8_t m2 = M2_REVERSED ? -rightPhysical : rightPhysical;
+    // Left side: M1 (front-left), M2 (rear-left)
+    int8_t m1 = M1_REVERSED ? -leftPhysical  : leftPhysical;
+    int8_t m2 = M2_REVERSED ? -leftPhysical  : leftPhysical;
+    // Right side: M3 (front-right), M4 (rear-right)
+    int8_t m3 = M3_REVERSED ? -rightPhysical : rightPhysical;
+    int8_t m4 = M4_REVERSED ? -rightPhysical : rightPhysical;
     setMotorSpeed(m1, m2, m3, m4);
 }
 
@@ -189,13 +194,13 @@ void handleTurn() {
     Serial.printf("Turn: %.3f rad\n", angle);
     unsigned long ms = (unsigned long)(fabs(angle) * MS_PER_RADIAN);
 
-    // In-place rotation. Sign convention determined empirically:
-    //   First test: positive angle made the car rotate CW (right), not CCW.
-    //   That means our M3/M4 == "left side" assumption was inverted relative
-    //   to the car's physical forward direction. Flipping signs here makes
-    //   POSITIVE angle = CCW (left turn) as desired.
-    int8_t left  = (angle >= 0) ?  TURN_SPEED : -TURN_SPEED;
-    int8_t right = (angle >= 0) ? -TURN_SPEED :  TURN_SPEED;
+    // In-place rotation. POSITIVE angle = CCW (left turn): left wheels physically
+    // backward, right wheels physically forward.
+    // (The earlier sign-flip workaround was removed once driveLeftRight got
+    // the M1/M2 vs M3/M4 labels in the right places — see the mapping
+    // section above.)
+    int8_t left  = (angle >= 0) ? -TURN_SPEED :  TURN_SPEED;
+    int8_t right = (angle >= 0) ?  TURN_SPEED : -TURN_SPEED;
     driveTimed(left, right, ms);
 
     server.send(200, "application/json", "{\"ok\":true,\"cmd\":\"turn\"}");

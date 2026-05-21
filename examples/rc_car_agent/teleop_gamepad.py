@@ -35,7 +35,11 @@ import requests
 
 # ===== Defaults =====
 DEFAULT_URL  = "http://192.168.1.189"
-DEFAULT_RATE = 20          # Hz — must be > 1000/TELEOP_WATCHDOG_MS in firmware (~3 Hz min)
+DEFAULT_RATE = 10          # Hz — must be > 1000/TELEOP_WATCHDOG_MS in firmware (~3 Hz min)
+                           # Kept low because Arduino's WebServer has no HTTP keep-alive;
+                           # every request opens a new TCP connection. 20 Hz overwhelms
+                           # the ESP32's connection pool with sockets in TIME_WAIT.
+DEFAULT_TIMEOUT = 0.6      # seconds — generous enough to ride out WiFi retransmits
 DEADZONE     = 0.15        # ignore stick drift below this magnitude
 # ===================
 
@@ -85,11 +89,47 @@ def main() -> int:
     print(f"Using controller: {joy.get_name()}")
     print(f"ESP32 URL:        {args.url}")
     print(f"Polling rate:     {args.rate} Hz")
+
+    # Pre-flight: confirm ESP32 is reachable BEFORE entering the joystick loop.
+    # Fail fast with a clear message instead of running into hundreds of
+    # silent timeouts (which is what happens if the ESP32 is rebooting, the
+    # battery is too low, or we're on the wrong WiFi).
+    print(f"\nPinging ESP32...", end=" ", flush=True)
+    try:
+        r = requests.get(args.url + "/", timeout=2.0,
+                         headers={"Connection": "close"})
+        print(f"OK\n{r.text.strip()}\n")
+    except requests.RequestException as e:
+        print(f"FAILED")
+        print(f"  {str(e).split(chr(10), 1)[0]}")
+        print(f"\nThe ESP32 isn't responding. Check:")
+        print(f"  1. Is the ESP32 powered? (USB-C plugged in?)")
+        print(f"  2. Is the IP correct? (Check Serial Monitor for 'Connected! IP: ...')")
+        print(f"  3. Is the battery healthy? (Boot output should show 7000+ mV)")
+        print(f"  4. Are PC and ESP32 on the same WiFi network?")
+        return 1
+
     print(f"Press X to stop and exit, Options to exit gracefully.\n")
 
-    session = requests.Session()
+    # Deliberately NOT using requests.Session() — Arduino WebServer closes
+    # each TCP connection after the response, so caching connections in a
+    # pool just leads to stale sockets that fail mysteriously on the next
+    # request. Open-and-close per request is the right model for this stack.
+    HEADERS = {"Connection": "close"}
+
     period = 1.0 / args.rate
     last_print = 0.0
+    last_sent_left = None
+    last_sent_right = None
+    last_sent_time = 0.0
+    consecutive_failures = 0
+
+    # Don't spam the ESP32. Only send /drive when:
+    #   (a) the commanded speed changed by more than CHANGE_EPS, or
+    #   (b) it's been more than HEARTBEAT_S since the last send
+    #       (so the watchdog stays fed when holding the stick steady).
+    CHANGE_EPS  = 0.04   # ~4 % of full speed
+    HEARTBEAT_S = 0.25   # well under firmware's 0.3 s watchdog window
 
     try:
         while True:
@@ -106,17 +146,40 @@ def main() -> int:
             steer    = apply_deadzone(raw_steer)
             left, right = arcade_mix(throttle, steer)
 
-            # Send /drive command. Even when stick is centered we send (0, 0)
-            # so the watchdog doesn't trigger a stop mid-stream — keeps motors
-            # smoothly responsive when you nudge the stick again.
-            try:
-                session.post(f"{args.url}/drive",
-                             json={"left": left, "right": right},
-                             timeout=0.2)
-            except requests.RequestException as e:
-                # Drop the frame, try next tick. Watchdog will stop the car
-                # if these failures continue.
-                print(f"  (drop frame: {e})")
+            # Decide whether to actually send this tick.
+            now = time.monotonic()
+            speeds_changed = (
+                last_sent_left is None
+                or abs(left  - last_sent_left)  > CHANGE_EPS
+                or abs(right - last_sent_right) > CHANGE_EPS
+            )
+            heartbeat_due = (now - last_sent_time) > HEARTBEAT_S
+
+            if speeds_changed or heartbeat_due:
+                try:
+                    requests.post(f"{args.url}/drive",
+                                  json={"left": left, "right": right},
+                                  timeout=DEFAULT_TIMEOUT,
+                                  headers=HEADERS)
+                    last_sent_left  = left
+                    last_sent_right = right
+                    last_sent_time  = now
+                    consecutive_failures = 0
+                except requests.RequestException as e:
+                    # Drop the frame, try next tick. Watchdog will stop the car
+                    # if these failures continue.
+                    consecutive_failures += 1
+                    # Compact one-line error (the full stack trace is noise).
+                    err = str(e).split("\n", 1)[0][:120]
+                    print(f"  (drop frame #{consecutive_failures}: {err})")
+
+                    if consecutive_failures >= 10:
+                        print(f"  >> {consecutive_failures} failures in a row.")
+                        print(f"  >> The ESP32 may have crashed or browned out.")
+                        print(f"  >> Check Serial Monitor and battery voltage.")
+                        print(f"  >> Pausing 2 s then continuing...")
+                        time.sleep(2.0)
+                        consecutive_failures = 0
 
             # Lightweight terminal feedback once per second
             now = time.monotonic()
@@ -130,11 +193,17 @@ def main() -> int:
             # 3=Triangle, 6=Share, 7=Options, 8=PS, 9=L3, 10=R3
             if joy.get_button(0):
                 print("\nX pressed — stopping and exiting.")
-                session.post(f"{args.url}/stop", timeout=1)
+                try:
+                    requests.post(f"{args.url}/stop", timeout=1, headers=HEADERS)
+                except requests.RequestException:
+                    pass
                 return 0
             if joy.get_button(7):
                 print("\nOptions pressed — exiting (motors will stop via watchdog).")
-                session.post(f"{args.url}/stop", timeout=1)
+                try:
+                    requests.post(f"{args.url}/stop", timeout=1, headers=HEADERS)
+                except requests.RequestException:
+                    pass
                 return 0
 
             # Tick pacing
@@ -145,7 +214,7 @@ def main() -> int:
     except KeyboardInterrupt:
         print("\nCtrl-C — stopping and exiting.")
         try:
-            session.post(f"{args.url}/stop", timeout=1)
+            requests.post(f"{args.url}/stop", timeout=1, headers=HEADERS)
         except requests.RequestException:
             pass
         return 0
