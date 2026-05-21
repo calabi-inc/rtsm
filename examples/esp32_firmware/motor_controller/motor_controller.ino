@@ -48,8 +48,30 @@ const char* password = WIFI_PASSWORD;
 // range roughly ±50. Per Hiwonder reference Python: speed 50 = forward, -50 = reverse.
 const int8_t DRIVE_SPEED      = 30;      // ±50 max — start gentle, calibrate up
 const int8_t TURN_SPEED       = 25;
-const unsigned long MS_PER_METER  = 3000; // ms to drive 1 m at DRIVE_SPEED — CALIBRATE
-const unsigned long MS_PER_RADIAN = 800;  // ms to rotate 1 rad at TURN_SPEED — CALIBRATE
+const unsigned long MS_PER_METER  = 6200; // ms to drive 1 m at DRIVE_SPEED — CALIBRATE
+                                          // Calibration log (carpet, DRIVE_SPEED=30):
+                                          //   3000 → 0.42 m (huge undershoot, startup lag)
+                                          //   7150 → 1.15 m (15% overshoot)
+                                          //   6200 → expected ~1.0 m (target)
+const unsigned long MS_PER_RADIAN = 1600; // ms to rotate 1 rad at TURN_SPEED — CALIBRATE
+                                          // Bumped 800→1600 after first test: 1.57 rad
+                                          // commanded produced ~0.78 rad observed.
+                                          // Last test: ~83° vs 90° commanded (8% short,
+                                          // acceptable for demo).
+
+// === Motor port → physical wheel mapping ===
+// Determined empirically by running /test_m1 ... /test_m4 and observing:
+//   M1 = front-right, spins BACKWARD with +speed (wires reversed)
+//   M2 = rear-right,  spins forward with +speed
+//   M3 = front-left,  spins forward with +speed
+//   M4 = rear-left,   spins BACKWARD with +speed (wires reversed)
+//
+// To make a wheel physically roll forward, we invert the I2C speed value
+// for the two reversed ports.
+const bool M1_REVERSED = true;   // front-right
+const bool M2_REVERSED = false;  // rear-right
+const bool M3_REVERSED = false;  // front-left
+const bool M4_REVERSED = true;   // rear-left
 
 WebServer server(80);
 
@@ -78,10 +100,24 @@ void stopMotors() {
     setMotorSpeed(0, 0, 0, 0);
 }
 
-// Drive at given speeds for duration_ms, then stop. No resending needed in
-// fixed-speed (closed-loop) mode — STM32 maintains the speed automatically.
-void driveTimed(int8_t m1, int8_t m2, int8_t m3, int8_t m4, unsigned long duration_ms) {
+// Higher-level: drive left-side wheels and right-side wheels at signed physical speeds.
+// Positive = wheel rolls forward, negative = rolls backward.
+// Handles per-motor polarity reversal so the caller can think in physical terms.
+void driveLeftRight(int8_t leftPhysical, int8_t rightPhysical) {
+    // Left side: M3 (front-left), M4 (rear-left)
+    int8_t m3 = M3_REVERSED ? -leftPhysical  : leftPhysical;
+    int8_t m4 = M4_REVERSED ? -leftPhysical  : leftPhysical;
+    // Right side: M1 (front-right), M2 (rear-right)
+    int8_t m1 = M1_REVERSED ? -rightPhysical : rightPhysical;
+    int8_t m2 = M2_REVERSED ? -rightPhysical : rightPhysical;
     setMotorSpeed(m1, m2, m3, m4);
+}
+
+// Drive at given LEFT/RIGHT physical speeds for duration_ms, then stop.
+// No resending needed in fixed-speed (closed-loop) mode — STM32 maintains
+// the speed automatically.
+void driveTimed(int8_t leftPhysical, int8_t rightPhysical, unsigned long duration_ms) {
+    driveLeftRight(leftPhysical, rightPhysical);
     // Yield to HTTP server during the move so we still respond to /stop
     unsigned long start = millis();
     while (millis() - start < duration_ms) {
@@ -128,7 +164,8 @@ void handleForward() {
     Serial.printf("Forward: %.3f m\n", distance);
     unsigned long ms = (unsigned long)(fabs(distance) * MS_PER_METER);
     int8_t sp = (distance >= 0) ? DRIVE_SPEED : -DRIVE_SPEED;
-    driveTimed(sp, sp, sp, sp, ms);
+    // Forward drive: both sides physically forward at the same speed.
+    driveTimed(sp, sp, ms);
 
     server.send(200, "application/json", "{\"ok\":true,\"cmd\":\"forward\"}");
 }
@@ -140,13 +177,14 @@ void handleTurn() {
     Serial.printf("Turn: %.3f rad\n", angle);
     unsigned long ms = (unsigned long)(fabs(angle) * MS_PER_RADIAN);
 
-    // In-place rotation: left motors and right motors opposite signs.
-    // Assumption: M1/M2 = left side, M3/M4 = right side.
-    // POSITIVE angle = CCW (left turn) → left wheels reverse, right wheels forward.
-    // If car turns the wrong way during test, swap the signs below.
-    int8_t left  = (angle >= 0) ? -TURN_SPEED : TURN_SPEED;
-    int8_t right = (angle >= 0) ?  TURN_SPEED : -TURN_SPEED;
-    driveTimed(left, left, right, right, ms);
+    // In-place rotation. Sign convention determined empirically:
+    //   First test: positive angle made the car rotate CW (right), not CCW.
+    //   That means our M3/M4 == "left side" assumption was inverted relative
+    //   to the car's physical forward direction. Flipping signs here makes
+    //   POSITIVE angle = CCW (left turn) as desired.
+    int8_t left  = (angle >= 0) ?  TURN_SPEED : -TURN_SPEED;
+    int8_t right = (angle >= 0) ? -TURN_SPEED :  TURN_SPEED;
+    driveTimed(left, right, ms);
 
     server.send(200, "application/json", "{\"ok\":true,\"cmd\":\"turn\"}");
 }
@@ -158,10 +196,18 @@ void handleStop() {
 }
 
 void handleTestMotor(int motorNum) {
+    // Spin one motor at raw +20 for 1 sec — does NOT apply polarity correction.
+    // Used purely for the bring-up mapping step (figure out which port = which wheel).
     int8_t s[4] = {0, 0, 0, 0};
-    s[motorNum - 1] = 20;  // gentle test speed (closed-loop units, ±50 max)
-    Serial.printf("Test M%d for 1 sec\n", motorNum);
-    driveTimed(s[0], s[1], s[2], s[3], 1000);
+    s[motorNum - 1] = 20;
+    Serial.printf("Test M%d for 1 sec (raw, no polarity correction)\n", motorNum);
+    setMotorSpeed(s[0], s[1], s[2], s[3]);
+    unsigned long start = millis();
+    while (millis() - start < 1000) {
+        server.handleClient();
+        delay(10);
+    }
+    stopMotors();
     String resp = "{\"ok\":true,\"motor\":" + String(motorNum) + "}";
     server.send(200, "application/json", resp);
 }
