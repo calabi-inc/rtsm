@@ -12,7 +12,7 @@ This module provides utilities to:
 """
 
 from __future__ import annotations
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import List, Optional, Tuple, Dict, Any, TYPE_CHECKING
 import logging
 import numpy as np
@@ -74,6 +74,22 @@ class MaskStats:
     centroid_cam: Optional[np.ndarray] = None
 
     # TODO: Add planarity for potential structure estimation
+
+
+@dataclass
+class FilterDiagnostics:
+    """Per-frame summary of why masks were dropped by run_heuristics.
+
+    Counts are always populated. `drop_details` is populated only when
+    cfg.diagnostics.track_drops is true (adds ~10us per dropped mask).
+    """
+    total_input: int = 0
+    dropped_area: int = 0
+    dropped_depth_valid: int = 0
+    dropped_depth_spread: int = 0
+    passed: int = 0
+    drop_details: List[Dict[str, Any]] = field(default_factory=list)
+
 
 def _compute_mask_bbox(mask: torch.Tensor) -> Tuple[int,int,int,int]:
     """Tight bbox (x0,y0,x1,y1) for a binary mask [H,W] (x1/y1 exclusive)."""
@@ -235,15 +251,16 @@ def calculate_mask_stats(mask: torch.Tensor, depth_m: Optional[np.ndarray], intr
     return area, coverage, bbox, border_fraction
 # ---------- main: per-mask heuristic stack ----------
 
-def run_heuristics(      
+def run_heuristics(
     ann_bool: torch.Tensor,                # [N,H,W] torch.bool CPU (from prepare_ann)
-    depth_m: Optional[np.ndarray],         # [H,W] float32 meters or None   
+    depth_m: Optional[np.ndarray],         # [H,W] float32 meters or None
     cfg,
-) -> Tuple[List[torch.Tensor], List[MaskStats]]:
+) -> Tuple[List[torch.Tensor], List[MaskStats], FilterDiagnostics]:
     """
     Returns:
         kept_masks: list of torch.bool views (aligned to image grid)
         stats:      list of MaskStats (same order)
+        diagnostics: FilterDiagnostics with per-reason drop counts + optional per-drop detail
     """
     import torch
 
@@ -273,10 +290,12 @@ def run_heuristics(
     plan_stride = int(cfg.get("planarity", {}).get("sample_stride", 3))
     plan_rms_thr = float(cfg.get("planarity", {}).get("rms_residual_max_m", 0.02))
 
-    # Rejection counters for diagnostics
+    # Diagnostics — counts are always tracked; per-drop detail is opt-in
     _rej_area = 0
     _rej_depth_valid = 0
     _rej_depth_spread = 0
+    track_drops = bool(cfg.get("diagnostics", {}).get("track_drops", False))
+    drop_details: List[Dict[str, Any]] = []
 
     for i in range(N):
         m = ann_bool[i]
@@ -284,6 +303,11 @@ def run_heuristics(
         if area < area_min:
             _rej_area += 1
             logger.debug(f"  mask {i}: REJECT area={area} < {area_min}")
+            if track_drops:
+                drop_details.append({
+                    "idx": i, "reason": "area",
+                    "area_px": area, "area_min": area_min,
+                })
             continue
 
         bbox = _compute_mask_bbox(m)
@@ -304,6 +328,13 @@ def run_heuristics(
                     f"  mask {i}: REJECT depth_valid={depth_valid:.3f} < {depth_valid_min} "
                     f"(area={area}, coverage={coverage:.1%})"
                 )
+                if track_drops:
+                    drop_details.append({
+                        "idx": i, "reason": "depth_valid",
+                        "area_px": area, "coverage": float(coverage),
+                        "depth_valid": float(depth_valid),
+                        "depth_valid_min": float(depth_valid_min),
+                    })
                 continue
             if depth_spread is not None and depth_spread > depth_spread_max:
                 _rej_depth_spread += 1
@@ -311,6 +342,14 @@ def run_heuristics(
                     f"  mask {i}: REJECT depth_spread={depth_spread:.3f}m > {depth_spread_max}m "
                     f"(area={area}, coverage={coverage:.1%})"
                 )
+                if track_drops:
+                    drop_details.append({
+                        "idx": i, "reason": "depth_spread",
+                        "area_px": area, "coverage": float(coverage),
+                        "depth_valid": float(depth_valid),
+                        "depth_spread": float(depth_spread),
+                        "depth_spread_max": float(depth_spread_max),
+                    })
                 continue
 
         # centroids (use eroded mask for 3D centroid)
@@ -360,4 +399,12 @@ def run_heuristics(
             f"{rejected_total} rejected (area={_rej_area}, "
             f"depth_valid={_rej_depth_valid}, depth_spread={_rej_depth_spread})"
         )
-    return kept, infos
+    diagnostics = FilterDiagnostics(
+        total_input=N,
+        dropped_area=_rej_area,
+        dropped_depth_valid=_rej_depth_valid,
+        dropped_depth_spread=_rej_depth_spread,
+        passed=len(kept),
+        drop_details=drop_details,
+    )
+    return kept, infos, diagnostics

@@ -1,0 +1,66 @@
+# Auto-generated from eval/marker_assignments.csv on 2026-05-25
+# Edit the CSV and re-run csv_to_ground_truth.py instead of editing this file.
+scene_id: bedroom_01
+marker_dictionary: "DICT_4X4_50"
+marker_size_m: 0.05
+objects:
+  - id: mug_red
+    label: mug
+    position_source: aruco_marker_0
+    position_accuracy_m: 0.01
+    position_world: null  # filled by aruco.py from recorded frames
+    notes: red ceramic mug on desk
+  - id: keyboard
+    label: keyboard
+    position_source: aruco_marker_1
+    position_accuracy_m: 0.01
+    position_world: null  # filled by aruco.py from recorded frames
+    notes: mechanical keyboard on desk
+  - id: monitor
+    label: monitor
+    position_source: aruco_marker_2
+    position_accuracy_m: 0.01
+    position_world: null  # filled by aruco.py from recorded frames
+    notes: main monitor
+  - id: book_blue
+    label: book
+    position_source: aruco_marker_3
+    position_accuracy_m: 0.01
+    position_world: null  # filled by aruco.py from recorded frames
+    notes: blue hardcover on shelf
+  - id: bottle
+    label: bottle
+    position_source: aruco_marker_4
+    position_accuracy_m: 0.01
+    position_world: null  # filled by aruco.py from recorded frames
+    notes: water bottle on desk
+  - id: backpack
+    label: backpack
+    position_source: aruco_marker_5
+    position_accuracy_m: 0.01
+    position_world: null  # filled by aruco.py from recorded frames
+    notes: backpack on floor
+  - id: chair_desk
+    label: chair
+    position_source: aruco_marker_6
+    position_accuracy_m: 0.01
+    position_world: null  # filled by aruco.py from recorded frames
+    notes: desk chair
+  - id: lamp
+    label: lamp
+    position_source: aruco_marker_7
+    position_accuracy_m: 0.01
+    position_world: null  # filled by aruco.py from recorded frames
+    notes: desk lamp
+  - id: plant
+    label: plant
+    position_source: aruco_marker_8
+    position_accuracy_m: 0.01
+    position_world: null  # filled by aruco.py from recorded frames
+    notes: small plant on shelf
+  - id: box_cardboard
+    label: box
+    position_source: aruco_marker_9
+    position_accuracy_m: 0.01
+    position_world: null  # filled by aruco.py from recorded frames
+    notes: cardboard box on floor
