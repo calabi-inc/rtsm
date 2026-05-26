@@ -8,7 +8,7 @@ import torch
 import cv2
 from PIL import Image
 
-from rtsm.utils.mask_staging import run_heuristics, MaskStats
+from rtsm.utils.mask_staging import run_heuristics, MaskStats, FilterDiagnostics
 from rtsm.utils.prepare_ann import prepare_ann
 from rtsm.utils.periodic_logger import PeriodicLogger
 from rtsm.models.segmentation import SegmentationAdapter, SegmentationResult
@@ -21,6 +21,7 @@ from rtsm.core.ingest_gate import IngestGate
 from rtsm.stores.sweep_cache import SweepCache
 from rtsm.io.ingest_queue import IngestQueue
 from rtsm.core.datamodel import FramePacket
+from rtsm.evaluation.event_log import EventLogWriter, FrameEvent, summarize_sources
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +40,29 @@ class Candidate:
     priority: float               # computed priority score
     crop: Optional[np.ndarray] = None    # 224x224x3 uint8 after pre-clip
     emb_vis: Optional[np.ndarray] = None # CLIP visual embedding (L2-normalized)
+
+
+@dataclass
+class ScoringTraceEntry:
+    """Per-candidate scoring trace row. Captured before dedup/topK so the full
+    distribution is visible offline (sweep tuning needs to see what almost
+    survived, not just what did)."""
+    mask_idx: int
+    priority: float
+    coverage: float
+    border_fraction: float
+    depth_valid: float
+    depth_spread: float
+    bbox_area_norm: float
+    confirmation_source: Optional[str]   # "dual" | "yoloe_only" | "fastsam_only" | None
+    selected_topk: bool                  # True for candidates that survived the top-K cut
+
+
+@dataclass
+class ScoringTrace:
+    n_candidates: int                    # total scored (pre-dedup)
+    n_selected: int                      # actually returned by _score_and_select (post-dedup, capped at topK)
+    entries: List[ScoringTraceEntry]
 
 class Pipeline:
     def __init__(
@@ -79,6 +103,17 @@ class Pipeline:
             interval_s=float(log_cfg.get("summary_interval_s", 5.0)),
             enabled=bool(log_cfg.get("periodic_summary", True)),
         )
+
+        # Phase 0 diagnostics: per-frame JSONL event log (off by default).
+        # See rtsm/evaluation/event_log.py for path resolution rules.
+        diag_cfg = cfg.get("diagnostics", {})
+        self._event_log = EventLogWriter(
+            enabled=bool(diag_cfg.get("enabled", False)),
+            configured_path=diag_cfg.get("event_log_path"),
+        )
+        # Always-present attrs (populated each frame when set; default to None)
+        self._last_filter_diagnostics: Optional[FilterDiagnostics] = None
+        self._last_scoring_trace: Optional[ScoringTrace] = None
 
     # -------- public entrypoints --------
     def run_forever(self):
@@ -256,12 +291,13 @@ class Pipeline:
             mask_to_rgb_sy = rgb_h_frame / mask_hw[0]  # height
 
         t_heur_start = time.perf_counter()
-        kept_masks, stats = run_heuristics(
+        kept_masks, stats, filter_diag = run_heuristics(
             ann_bool,
             snap.depth_m,
             cfg=heur_cfg,
         )
         t_heur_end = time.perf_counter()
+        self._last_filter_diagnostics = filter_diag
         logger.debug(f"staging: kept {len(kept_masks)}/{n_masks} masks after heuristics")
 
         # Scale centroid_px from mask space to RGB space for downstream consumers
@@ -415,6 +451,59 @@ class Pipeline:
         except Exception:
             pass
 
+        # ---- Phase 0 diagnostic event log (no-op when disabled) ----
+        if self._event_log.enabled:
+            try:
+                fd = self._last_filter_diagnostics
+                st = self._last_scoring_trace
+                filter_dict: Dict[str, Any] = {}
+                if fd is not None:
+                    filter_dict = {
+                        "total_input": fd.total_input,
+                        "dropped_area": fd.dropped_area,
+                        "dropped_depth_valid": fd.dropped_depth_valid,
+                        "dropped_depth_spread": fd.dropped_depth_spread,
+                        "passed": fd.passed,
+                    }
+                    if fd.drop_details:
+                        filter_dict["drop_details"] = fd.drop_details
+                scoring_dict: Dict[str, Any] = {}
+                if st is not None:
+                    scoring_dict = {
+                        "n_candidates": st.n_candidates,
+                        "n_selected": st.n_selected,
+                        "top_k_priorities": [e.priority for e in st.entries[:5]],
+                        "source_breakdown": summarize_sources(st.entries),
+                    }
+                n_conf = 0
+                if self.working_mem is not None:
+                    try:
+                        n_conf = int(self.working_mem.stats().get("confirmed", 0))
+                    except Exception:
+                        n_conf = 0
+                self._event_log.write(FrameEvent(
+                    timestamp=t_step_start,
+                    frame_seq=int(pkt.time.seq or 0) if pkt is not None else 0,
+                    is_keyframe=is_kf,
+                    n_masks_raw=n_masks,
+                    filter=filter_dict,
+                    scoring=scoring_dict,
+                    n_matched=m,
+                    n_created=c,
+                    n_objects_confirmed=n_conf,
+                    timing_ms={
+                        "segmentation": (t_seg_end - t_seg_start) * 1000.0,
+                        "heuristics": (t_heur_end - t_heur_start) * 1000.0,
+                        "scoring": (t_score_end - t_score_start) * 1000.0,
+                        "clip": (t_clip_end - t_clip_start) * 1000.0,
+                        "association": (t_assoc_end - t_assoc_start) * 1000.0,
+                        "total": (t_assoc_end - t_step_start) * 1000.0,
+                    },
+                ))
+            except Exception:
+                # Never let diagnostics kill the pipeline
+                logger.debug("event log write failed", exc_info=True)
+
     # -------- internals --------
     def _get_snapshot_via_queue(self) -> Tuple[Optional[Snapshot], Optional[FramePacket]]:
         if self.ingest_q is None:
@@ -566,6 +655,33 @@ class Pipeline:
         # pick top-K by priority
         cands.sort(key=lambda c: c.priority, reverse=True)
 
+        # Build scoring trace (pre-dedup snapshot of all candidates with their priorities).
+        # selected_topk is filled in after dedup at the end of this function.
+        seg = getattr(self, '_last_seg_result', None)
+        seg_sources = (
+            seg.confirmation_source
+            if seg is not None and seg.confirmation_source is not None
+            else None
+        )
+        trace_entries: List[ScoringTraceEntry] = []
+        for cd in cands:
+            s = cd.stats
+            bbox_n = min(1.0, (max(0, s.bbox[2]-s.bbox[0]) * max(0, s.bbox[3]-s.bbox[1])) / img_area) if img_area > 0 else 0.0
+            src: Optional[str] = None
+            if seg_sources is not None and 0 <= s.idx < len(seg_sources):
+                src = seg_sources[s.idx]
+            trace_entries.append(ScoringTraceEntry(
+                mask_idx=int(s.idx),
+                priority=float(cd.priority),
+                coverage=float(s.coverage),
+                border_fraction=float(s.border_fraction),
+                depth_valid=float(s.depth_valid),
+                depth_spread=0.0 if s.depth_spread is None else float(s.depth_spread),
+                bbox_area_norm=float(bbox_n),
+                confirmation_source=src,
+                selected_topk=False,  # filled in at the end after dedup
+            ))
+
         # Scoring diagnostics: log all candidates ranked by priority
         if cands:
             logger.info(
@@ -697,7 +813,20 @@ class Pipeline:
             if not suppress:
                 kept.append(c)
 
-        return kept[:topK]
+        final = kept[:topK]
+
+        # Mark which trace entries actually survived dedup + topK
+        selected_mask_idx = {int(c.stats.idx) for c in final}
+        for entry in trace_entries:
+            if entry.mask_idx in selected_mask_idx:
+                entry.selected_topk = True
+        self._last_scoring_trace = ScoringTrace(
+            n_candidates=len(trace_entries),
+            n_selected=len(final),
+            entries=trace_entries,
+        )
+
+        return final
 
     def _make_crops_inplace(self, cands: List[Candidate], rgb: np.ndarray,
                             mask_to_rgb_sx: float = 1.0, mask_to_rgb_sy: float = 1.0):
@@ -847,6 +976,10 @@ class Pipeline:
             self.clip.close()
         except Exception:
             pass
+        try:
+            self._event_log.close()
+        except Exception:
+            pass
 
     # -------- single test  step (hardcoded import) --------
     @torch.no_grad()
@@ -863,7 +996,7 @@ class Pipeline:
         seg_result = self.segmenter.segment(pil)
         ann_bool = prepare_ann(seg_result.masks) if seg_result.has_masks else torch.empty(0, pil.height, pil.width, dtype=torch.bool)
         depth_m = load_depth_png_as_meters("test_dataset/depth/1754989062.627478.png")
-        kept_masks, stats = run_heuristics(
+        kept_masks, stats, _filter_diag = run_heuristics(
             ann_bool,
             depth_m,
             cfg=self.cfg,

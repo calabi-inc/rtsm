@@ -331,6 +331,17 @@ analytics:
   retention_s: 3600                 # Tier 2 wall-clock retention (seconds)
   buffer_frames: 300                # Tier 1 per-frame ring buffer size
 
+# -------------------- Eval Diagnostics (Phase 0) --------------------
+# When enabled, writes one JSONL event per processed frame for offline analysis.
+# Each pipeline run gets a FRESH file (no appending across runs).
+# Path resolution: see rtsm/evaluation/event_log.py docstring.
+diagnostics:
+  enabled: false                  # Master switch. false = zero overhead, no file created.
+  track_drops: false              # Capture per-dropped-mask detail (~10us per drop). Counts always tracked.
+  event_log_path: null            # null = auto: eval_output/<YYYYMMDD_HHMMSS>/events.jsonl
+                                  # "my_dir/" = auto-name inside that dir
+                                  # "my_dir/run01.jsonl" = exact path (overwrites with warning if exists)
+
 # -------------------- Runtime --------------------
 logging:
   periodic_summary: true          # Enable/disable periodic summary logs
