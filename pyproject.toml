@@ -3,7 +3,7 @@ name = "rtsm"
 version = "0.1.1"
 description = "Real-Time Spatio-Semantic Memory for spatial AI and robotics"
 readme = "README.md"
-requires-python = ">=3.12,<3.14"
+requires-python = ">=3.10,<3.14"   # 3.10 = JetPack 6.x floor (edge/ARM); verified no 3.12-only syntax
 dependencies = [
     # Core
     "numpy",
@@ -35,6 +35,15 @@ gpu = [
 ]
 gpu-ultralytics = [
     "rtsm[gpu]",
+    "ultralytics>=8.4.0",
+]
+# Lean edge/Jetson profile: FastSAM-only + SigLIP + memory + API.
+# Deliberately EXCLUDES torch/torchvision (install those per-platform first via
+# `python scripts/install_torch.py` — on ARM they come from the NVIDIA Jetson
+# index, not PyPI) and the heavy CUDA-op backends (sam2, transformers/GDINO).
+edge = [
+    "open-clip-torch",
+    "faiss-cpu>=1.12.0",
     "ultralytics>=8.4.0",
 ]
 viz = [

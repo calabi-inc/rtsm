@@ -178,6 +178,24 @@ cd rtsm
 pip install ".[gpu]" --extra-index-url https://download.pytorch.org/whl/cu128
 ```
 
+### Edge / Jetson (ARM)
+
+On NVIDIA Jetson (Orin), `torch` ships from NVIDIA's Jetson wheel index — not PyPI — and the lean `edge` profile runs FastSAM-only (skips the heavy SAM2/GDINO CUDA backends). A helper picks the right torch source per architecture:
+
+```bash
+# 1. torch for this machine (x86 → PyTorch CUDA index, Jetson → NVIDIA index)
+python scripts/install_torch.py                 # add --jetson-cu cu124 if on JetPack 6.1
+python -c "import torch; print(torch.cuda.is_available())"   # must print True
+
+# 2. RTSM + FastSAM-only deps (no torch re-pull, no SAM2/transformers)
+pip install -e ".[edge]"
+
+# 3. set `segmentation.backend: fastsam` in config, then run
+rtsm --replay recordings/session1
+```
+
+> **Jetson note:** targets JetPack 6.x (Python 3.10, CUDA 12.6). Verify your CUDA with `nvcc --version` and pass `--jetson-cu cu124`/`cu126` to match. The `edge` extra installs FastSAM + YOLOE + SigLIP + FAISS only.
+
 ### Download Models
 
 ```bash
@@ -187,7 +205,7 @@ python scripts/fetch_models.py --only sam2    # or individually
 
 > **License note:** `rtsm[gpu]` uses only Apache 2.0 / MIT dependencies. `rtsm[gpu-ultralytics]` adds the `ultralytics` package (AGPL-3.0) for FastSAM and YOLOE backends.
 >
-> **CUDA version:** Use `cu128` for most GPUs (RTX 3080–5090). For Blackwell-only features use `cu130`. See [PyTorch install](https://pytorch.org/get-started/locally/) for other options.
+> **CUDA version:** Use `cu128` for most GPUs (RTX 3080–5090). For Blackwell-only features use `cu130`. On **Jetson/ARM**, torch comes from NVIDIA's index — use `python scripts/install_torch.py` (see [Edge / Jetson](#edge--jetson-arm)) instead of `--extra-index-url`. See [PyTorch install](https://pytorch.org/get-started/locally/) for other options.
 
 ---
 
