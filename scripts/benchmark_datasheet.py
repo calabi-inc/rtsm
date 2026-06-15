@@ -80,7 +80,10 @@ def _repro_block() -> str:
             f"- segmentation imgsz: {seg['fastsam']['imgsz']} "
             f"(fastsam conf {seg['fastsam']['conf']}/iou {seg['fastsam']['iou']}, "
             f"yoloe conf {seg['yoloe']['conf']}/iou {seg['yoloe']['iou']})\n"
-            f"- mask resolution: 640×640 (`retina_masks: {seg.get('retina_masks')}`)\n"
+            f"- mask tensor shape (measured via scripts/probe_mask_shapes.py): "
+            f"fastsam/yoloe/dual = **480×640** (imgsz 640, retina_masks false); "
+            f"grounded_sam2/sam2 = **1440×1920** (native RGB — retina_masks NOT consumed). "
+            f"The ~9× pixels/mask is what drives grounded_sam2's heuristics cost.\n"
             f"- embed: {c['clip']['model']} ({c['clip']['pretrained']}), "
             f"crop {stg['clip_input']}×{stg['clip_input']}\n"
             f"- staging: topk_preclip {stg['topk_preclip']}\n"
@@ -170,7 +173,7 @@ def compile_datasheet(results: list[dict], gpu: str) -> str:
 **GPU:** {gpu}
 **Recording:** `recordings/session1` (240 msgs, 75.8 s, iPhone ARKit RGB-D + pose)
 **Embedder:** SigLIP ViT-B-16 (webli), 768-dim
-**Mask resolution:** 640×640 (`retina_masks: false`)
+**Mask tensor shape (measured):** FastSAM/YOLOE/dual 480×640 (imgsz 640); GroundedSAM2/SAM2 1440×1920 (native RGB — `retina_masks` not consumed). See Reproducibility.
 **Replay:** real-time (original recording cadence)
 
 > **Latency is per *processed* frame.** In deployment RTSM gates the camera
