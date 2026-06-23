@@ -2,8 +2,8 @@
 
 ## Prerequisites
 
-- Python 3.12+
-- CUDA-capable GPU (tested on RTX 3080, RTX 4090, RTX 5090)
+- Python 3.10+ (3.12 on desktop; 3.10 on Jetson / JetPack 6.x)
+- CUDA-capable GPU (tested on RTX 3080, RTX 4090, RTX 5090; Jetson Orin via the edge profile)
 - For live capture: iPhone with [Calabi Lens](https://github.com/calabi-inc/rtsm-arkit-client) or Intel RealSense D435i + RTAB-Map
 - For demo/replay: no hardware needed
 
@@ -52,6 +52,26 @@ pip install "rtsm[gpu-ultralytics]" --extra-index-url https://download.pytorch.o
 
 Then set `backend: dual` in your config. See [Configuration](configuration.md) for details.
 
+### Option D: edge / Jetson (ARM, aarch64)
+
+On NVIDIA Jetson (Orin), stock PyPI `torch` has no working aarch64+CUDA build — it must come from NVIDIA's Jetson wheel index, matched to the device's JetPack/CUDA. The `edge` profile runs **FastSAM-only** and deliberately excludes `torch`/`torchvision` (installed separately) and the heavy SAM2/GDINO CUDA backends.
+
+```bash
+# 0. verify the device first
+cat /etc/nv_tegra_release      # JetPack/L4T version
+nvcc --version                 # CUDA 12.6 → cu126 (default), 12.4 → cu124
+python3 --version              # 3.10 on JetPack 6.x
+
+# 1. torch — arch-detecting helper (x86 → PyTorch index, Jetson → NVIDIA index)
+python scripts/install_torch.py            # add --jetson-cu cu124 if JetPack 6.1
+python -c "import torch; print(torch.cuda.is_available())"   # must print True
+
+# 2. RTSM + lean edge deps (no torch re-pull, no SAM2/transformers)
+pip install -e ".[edge]"
+```
+
+Then set `backend: fastsam` in your config. FastSAM-only is the recommended edge default — lighter than `dual` with comparable object discovery.
+
 ---
 
 ## Install Extras
@@ -60,6 +80,7 @@ Then set `backend: dual` in your config. See [Configuration](configuration.md) f
 |-------|-------------|---------|
 | `gpu` | Grounding DINO, SAM2, CLIP, torch, FAISS | Apache 2.0 |
 | `gpu-ultralytics` | FastSAM, YOLOE (via ultralytics) | AGPL-3.0 |
+| `edge` | FastSAM + YOLOE + SigLIP + FAISS (Jetson/ARM, no torch/SAM2) | AGPL-3.0 |
 | `viz` | Open3D, matplotlib (3D visualization) | MIT |
 | `mcp` | MCP server + httpx (AI agent integration) | Apache 2.0 |
 | `all` | gpu + viz + mcp | Mixed |
