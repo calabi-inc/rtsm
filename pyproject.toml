@@ -40,9 +40,12 @@ gpu-ultralytics = [
 # Lean edge/Jetson profile: FastSAM-only + SigLIP + memory + API.
 # Deliberately EXCLUDES torch/torchvision (install those per-platform first via
 # `python scripts/install_torch.py` — on ARM they come from the NVIDIA Jetson
-# index, not PyPI) and the heavy CUDA-op backends (sam2, transformers/GDINO).
+# index, not PyPI) and the heavy SAM2/GDINO CUDA-op backends.
+# transformers IS required: SigLIP's tokenizer (open_clip HFTokenizer) imports it,
+# and CLIP/SigLIP runs for every backend — verified on Jetson Orin (JetPack 6.2).
 edge = [
     "open-clip-torch",
+    "transformers>=4.44.0",
     "faiss-cpu>=1.12.0",
     "ultralytics>=8.4.0",
 ]

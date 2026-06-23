@@ -21,6 +21,7 @@ so a mid-sweep failure never loses completed runs.
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -103,8 +104,24 @@ def _repro_block() -> str:
     )
 
 
+def _machine_label(gpu: str) -> tuple[str, str]:
+    """Map a detected GPU string to (human title, filename slug) so the same
+    script self-labels correctly on desktop and on Jetson edge hardware."""
+    g = (gpu or "").lower()
+    if "orin" in g:
+        return ("Jetson Orin Nano Super (edge)", "orin")
+    if "5090" in g:
+        return ("RTX 5090 (desktop reference)", "5090")
+    if "3080" in g:
+        return ("RTX 3080 (desktop)", "3080")
+    head = (gpu or "device").split(",")[0].strip()
+    slug = "".join(c if c.isalnum() else "_" for c in head.lower())[:24] or "device"
+    return (head, slug)
+
+
 def compile_datasheet(results: list[dict], gpu: str) -> str:
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    machine_title, _ = _machine_label(gpu)
     stages = [
         ("t_segmentation", "Segmentation"),
         ("t_heuristics",   "Heuristics"),
@@ -167,7 +184,7 @@ def compile_datasheet(results: list[dict], gpu: str) -> str:
     lic_rows = [f"| {r['label']} | {license_map.get(r['label'],'?')} |"
                 for r in results if "error" not in r]
 
-    return f"""# RTSM Backend Datasheet — RTX 5090 (desktop reference)
+    return f"""# RTSM Backend Datasheet — {machine_title}
 
 **Generated:** {now}
 **GPU:** {gpu}
@@ -248,7 +265,9 @@ def main():
     print(f"GPU: {gpu}")
     print(f"Backends: {[b['name'] for b in backends]}\n")
 
-    backup = str(CONFIG_PATH) + ".datasheet_bak"
+    # Per-PID backup name so concurrent/overlapping runs can't clobber each
+    # other's backup (a shared name leaves a run unable to restore the config).
+    backup = f"{CONFIG_PATH}.datasheet_bak.{os.getpid()}"
     shutil.copy2(CONFIG_PATH, backup)
 
     results = []
@@ -263,11 +282,17 @@ def main():
             print(f"  saved {raw_path.name}"
                   f"  ({'ERROR' if 'error' in res else 'ok'})")
     finally:
-        shutil.copy2(backup, CONFIG_PATH)
-        Path(backup).unlink(missing_ok=True)
+        # Defensive: never crash teardown if the backup vanished — the raw
+        # per-backend JSON is already saved, so a failed restore must not mask it.
+        if os.path.exists(backup):
+            shutil.copy2(backup, CONFIG_PATH)
+            os.remove(backup)
+        else:
+            print(f"  warn: config backup {backup} missing; config left as-is")
 
     sheet = compile_datasheet(results, gpu)
-    out = REPORT_DIR / "edge_datasheet_5090.md"
+    _, slug = _machine_label(gpu)
+    out = REPORT_DIR / f"edge_datasheet_{slug}.md"
     out.write_text(sheet, encoding="utf-8")
     print(f"\nDatasheet: {out}")
     # quick console echo of the key numbers
