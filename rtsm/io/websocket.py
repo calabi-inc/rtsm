@@ -545,6 +545,9 @@ class WebSocketReceiver:
 
         # 5b. Parse pose + wall timestamp (hoisted above the keyframe/interval
         # throttle so the pose sink fires at the full input rate).
+        # Note: a malformed T_wc now raises here — before frame_count
+        # increments — instead of after image decode; the caller catches and
+        # logs it per frame.
         t_wc, q_xyzw = parse_arkit_pose(
             T_wc_data=header["T_wc"],
             pose_format=header.get("pose_format", "matrix4x4_col_major"),
@@ -561,7 +564,11 @@ class WebSocketReceiver:
             t_wc = T_wc_mat[:3, 3].astype(np.float32)
             q_xyzw = rotmat_to_quat_xyzw(T_wc_mat[:3, :3].astype(np.float32))
 
-        unix_ts = float(header.get("unix_timestamp", time.time()))
+        # Treat a missing/zero unix_timestamp as absent and substitute server
+        # wall time; the same value flows into TimeBundle.t_wall_utc_s, so the
+        # pose sink and the pipeline's later update_robot_pose call always
+        # share one clock (the guard compares timestamps across the two).
+        unix_ts = float(header.get("unix_timestamp") or time.time())
 
         # 5c. Pose sink: latest-pose passthrough for every tracking-normal
         # frame, even ones the throttle below skips. Same (post-flip) pose the

@@ -167,8 +167,11 @@ class WorkingMemory:
 
         self._map: Dict[str, ObjectState] = {}
         self._lock = threading.RLock()
-        # Latest robot pose — passthrough from sensor, updated every processed frame
+        # Latest robot pose — passthrough from sensor (receive-time in live
+        # websocket mode; per processed frame on ZMQ/replay paths).
         self._latest_pose: Optional[Dict[str, Any]] = None
+        # Process-monotonic arrival time of the stored pose (guard window).
+        self._latest_pose_arrival_mono: float = 0.0
         # Reverse index: frame_id -> set of object IDs last updated on that frame
         self._frame_to_objects: Dict[str, set] = {}
         # Min-heap of (deadline_mono, oid) for proto expiry (lazy re-schedule on matches)
@@ -763,6 +766,12 @@ class WorkingMemory:
 
     # ---------- utilities ----------
 
+    # How long (by this process's monotonic clock) a stored pose out-ranks
+    # older-timestamped updates. Long enough to block the slow pipeline
+    # write (~0.5-1 s behind), short enough that a sender clock stepping
+    # backward (new device, NTP) recovers instead of freezing the pose.
+    _POSE_GUARD_WINDOW_S = 2.0
+
     def update_robot_pose(self, t_wc: np.ndarray, q_wc_xyzw: np.ndarray, timestamp: float) -> None:
         """Store latest robot pose (passthrough from sensor).
 
@@ -771,22 +780,35 @@ class WorkingMemory:
 
         May be called from two writers: the receiver at frame-receive time
         (fresh, input-rate) and the pipeline after processing (older frames).
-        Updates carrying a strictly older timestamp than the stored pose are
-        ignored, so a slow pipeline write can never overwrite a fresher
-        receive-time pose. Timestamps must come from the same clock per
-        session (FramePacket wall time).
+        Guarded compare-and-set under the WM lock: an update carrying a
+        strictly older timestamp is ignored while the stored pose is fresh
+        (received less than _POSE_GUARD_WINDOW_S ago), so a slow pipeline
+        write cannot overwrite a fresher receive-time pose — but a sender
+        clock discontinuity self-heals within the window rather than
+        rejecting all future updates. Timestamps must come from the same
+        clock per session (FramePacket wall time).
         """
         ts = float(timestamp)
-        if self._latest_pose is not None and ts < self._latest_pose["timestamp"]:
-            return
-        self._latest_pose = {
-            "xyz": t_wc.tolist() if hasattr(t_wc, 'tolist') else list(t_wc),
-            "quaternion_xyzw": q_wc_xyzw.tolist() if hasattr(q_wc_xyzw, 'tolist') else list(q_wc_xyzw),
-            "timestamp": ts,
-        }
+        now_mono = time.monotonic()
+        with self._lock:
+            lp = self._latest_pose
+            if (
+                lp is not None
+                and ts < lp["timestamp"]
+                and (now_mono - self._latest_pose_arrival_mono) < self._POSE_GUARD_WINDOW_S
+            ):
+                return
+            self._latest_pose = {
+                "xyz": t_wc.tolist() if hasattr(t_wc, 'tolist') else list(t_wc),
+                "quaternion_xyzw": q_wc_xyzw.tolist() if hasattr(q_wc_xyzw, 'tolist') else list(q_wc_xyzw),
+                "timestamp": ts,
+            }
+            self._latest_pose_arrival_mono = now_mono
 
     def get_robot_pose(self) -> Optional[Dict[str, Any]]:
-        """Get the latest robot pose, or None if no frames processed yet."""
+        """Get the latest robot pose, or None if no frame has arrived yet
+        (live websocket: first *received* frame; ZMQ/replay: first
+        *processed* frame)."""
         return self._latest_pose
 
     def stats(self) -> Dict[str, Any]:
@@ -835,6 +857,7 @@ class WorkingMemory:
             # update_robot_pose() can't reject re-fed older timestamps
             # (e.g. replaying a recording after a /reset).
             self._latest_pose = None
+            self._latest_pose_arrival_mono = 0.0
 
             logger.info(f"[WM] Cleared {obj_count} objects ({confirmed_count} confirmed, {proto_count} proto)")
 

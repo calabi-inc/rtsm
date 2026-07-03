@@ -61,6 +61,19 @@ class TestUpdateRobotPoseGuard:
         wm.update_robot_pose(np.array([1.5, 2.5, 3.5]), np.array([0, 0, 0, 1.0]), 100.0)
         assert wm.get_robot_pose()["xyz"] == [1.5, 2.5, 3.5]
 
+    def test_older_accepted_after_staleness_window(self):
+        """A sender clock stepping backward (new device / NTP) must not
+        freeze the pose forever: once the stored pose is older than the
+        guard window, an older-timestamped update is accepted."""
+        wm = self._wm()
+        wm.update_robot_pose(np.array([4.0, 5.0, 6.0]), np.array([0, 0, 0, 1.0]), 1000.0)
+        # Simulate the stored pose aging past the guard window.
+        wm._latest_pose_arrival_mono -= wm._POSE_GUARD_WINDOW_S + 1.0
+        wm.update_robot_pose(np.array([7.0, 8.0, 9.0]), np.array([0, 0, 0, 1.0]), 10.0)
+        pose = wm.get_robot_pose()
+        assert pose["xyz"] == [7.0, 8.0, 9.0]
+        assert pose["timestamp"] == 10.0
+
     def test_clear_resets_guard(self):
         """After clear() (e.g. /reset between replay runs or demo trials),
         older re-fed timestamps must be accepted again."""
