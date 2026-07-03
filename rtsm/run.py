@@ -280,6 +280,10 @@ def main():
             on_pose_corrections_batch=vis_server.handle_pose_corrections_batch if vis_server else None,
             on_raw_message=recorder.on_message if recorder else None,
             on_handshake_done=recorder.on_handshake if recorder else None,
+            # Receive-time robot pose passthrough: agents polling robot_pose
+            # get input-rate freshness (~5 Hz) instead of the pipeline's
+            # sweep-gated processing rate (~1 Hz).
+            pose_sink=wm.update_robot_pose,
             latency_analytics=latency_analytics,
         )
         ws_receiver.start()

@@ -220,6 +220,7 @@ class WebSocketReceiver:
         on_pose_corrections_batch: Optional[callable] = None,
         on_raw_message: Optional[callable] = None,
         on_handshake_done: Optional[callable] = None,
+        pose_sink: Optional[callable] = None,
         latency_analytics: Optional[Any] = None,
     ) -> None:
         self.ingest_q = ingest_queue
@@ -236,6 +237,11 @@ class WebSocketReceiver:
         self._on_pose_corrections_batch = on_pose_corrections_batch
         self._on_raw_message = on_raw_message
         self._on_handshake_done = on_handshake_done
+        # Called as pose_sink(t_wc, q_wc_xyzw, unix_ts) for EVERY frame with
+        # normal tracking — including frames the keyframe/interval throttle
+        # skips — so consumers (e.g. WorkingMemory.update_robot_pose) see
+        # pose at the full input rate, not the pipeline processing rate.
+        self._pose_sink = pose_sink
         self._latency_analytics = latency_analytics
 
         # Per-session state (reset on each new client connection)
@@ -537,6 +543,42 @@ class WebSocketReceiver:
             )
             return None
 
+        # 5b. Parse pose + wall timestamp (hoisted above the keyframe/interval
+        # throttle so the pose sink fires at the full input rate).
+        # Note: a malformed T_wc now raises here — before frame_count
+        # increments — instead of after image decode; the caller catches and
+        # logs it per frame.
+        t_wc, q_xyzw = parse_arkit_pose(
+            T_wc_data=header["T_wc"],
+            pose_format=header.get("pose_format", "matrix4x4_col_major"),
+        )
+
+        # Camera convention flip: ARKit (Y-up, Z-back) → OpenCV (Y-down, Z-forward)
+        # Applied once at ingestion so ALL downstream consumers (pipeline, TSDF,
+        # visualization, sweep cache, pose sink) see poses in OpenCV camera
+        # convention.
+        if self._apply_camera_flip:
+            T_wc_mat = PoseStamped(
+                stamp_ns=0, frame_id="", t_wc=t_wc, q_wc_xyzw=q_xyzw
+            ).T_wc() @ _ARKIT_TO_OPENCV
+            t_wc = T_wc_mat[:3, 3].astype(np.float32)
+            q_xyzw = rotmat_to_quat_xyzw(T_wc_mat[:3, :3].astype(np.float32))
+
+        # Treat a missing/zero unix_timestamp as absent and substitute server
+        # wall time; the same value flows into TimeBundle.t_wall_utc_s, so the
+        # pose sink and the pipeline's later update_robot_pose call always
+        # share one clock (the guard compares timestamps across the two).
+        unix_ts = float(header.get("unix_timestamp") or time.time())
+
+        # 5c. Pose sink: latest-pose passthrough for every tracking-normal
+        # frame, even ones the throttle below skips. Same (post-flip) pose the
+        # FramePacket carries, so consumers see one consistent convention.
+        if self._pose_sink is not None:
+            try:
+                self._pose_sink(t_wc, q_xyzw, unix_ts)
+            except Exception as e:
+                logger.error(f"[websocket] pose_sink callback error: {e}")
+
         self._frame_count += 1
 
         # 5. Keyframe decision
@@ -570,21 +612,8 @@ class WebSocketReceiver:
             depth_scale=depth_scale,
         )
 
-        # 9. Parse pose
-        t_wc, q_xyzw = parse_arkit_pose(
-            T_wc_data=header["T_wc"],
-            pose_format=header.get("pose_format", "matrix4x4_col_major"),
-        )
-
-        # 9b. Camera convention flip: ARKit (Y-up, Z-back) → OpenCV (Y-down, Z-forward)
-        # Applied once at ingestion so ALL downstream consumers (pipeline, TSDF,
-        # visualization, sweep cache) see poses in OpenCV camera convention.
-        if self._apply_camera_flip:
-            T_wc_mat = PoseStamped(
-                stamp_ns=0, frame_id="", t_wc=t_wc, q_wc_xyzw=q_xyzw
-            ).T_wc() @ _ARKIT_TO_OPENCV
-            t_wc = T_wc_mat[:3, 3].astype(np.float32)
-            q_xyzw = rotmat_to_quat_xyzw(T_wc_mat[:3, :3].astype(np.float32))
+        # 9. Pose already parsed (+ convention flip) in step 5b above; the
+        # same t_wc / q_xyzw feed both the pose sink and the FramePacket.
 
         # 10. Build intrinsics (scale if intrinsics resolution differs from RGB)
         intr_w = int(header.get("intrinsics_width", rgb_w))
@@ -608,9 +637,8 @@ class WebSocketReceiver:
             fx=fx, fy=fy, cx=cx, cy=cy,
         )
 
-        # 11. Build TimeBundle
+        # 11. Build TimeBundle (unix_ts computed in step 5b)
         timestamp_ns = int(header.get("timestamp_ns", 0))
-        unix_ts = float(header.get("unix_timestamp", time.time()))
 
         tb = TimeBundle(
             t_mono_s=time.monotonic(),
