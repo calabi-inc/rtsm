@@ -1,0 +1,9 @@
+# RC-car agent (Demo 2) — install: pip install -r requirements.txt
+requests
+pyyaml
+numpy
+pygame          # e-stop gamepad reader + teleop
+fastapi
+uvicorn
+anthropic       # single Haiku target-pick call (E1 condition a)
+# paper/scripts/aggregate.py additionally needs: scipy, pandas

@@ -1,0 +1,55 @@
+# RC-car agent configuration (Demo 2)
+# Every tunable lives here — code contains no magic numbers.
+
+rtsm:
+  url: "http://localhost:8002"        # RTSM REST API
+  lifecycle: "attach"                  # attach | spawn | off  (spawn: launch `python -m rtsm.run` if healthz is down)
+  kill_on_exit: false                  # NEVER default true — condition (a) memory must survive agent restarts
+  diagnostics_for_trials: true         # spawn RTSM with event-log diagnostics on (paper failure-analysis data)
+
+esp32:
+  url: "http://192.168.1.189"          # from the ESP32 boot log
+  drive_rate_hz: 10                    # cap — Arduino WebServer has no keep-alive; >10 Hz exhausts sockets
+  heartbeat_s: 0.25                    # re-send held command to feed the 300 ms firmware watchdog
+  change_epsilon: 0.04                 # only send /drive when command changed by more than this
+  http_timeout_s: 0.6
+  battery_min_mv: 6800                 # preflight refuses below this
+
+server:
+  host: "127.0.0.1"
+  port: 8010
+  default_condition: "rtsm"            # rtsm | baseline (per-command override in POST /command)
+
+nav:
+  arrival_threshold_m: 0.40            # E1 success radius (judged by TAPE, this is the controller stop radius)
+  rotate_in_place_deg: 90              # |heading err| above this → rotate in place before translating
+  max_speed: 0.5                       # fraction of TELEOP_MAX_SPEED sent to /drive
+  max_turn: 0.5
+  kp_steer: 1.2                        # proportional steer gain on heading error (rad → differential)
+  pose_stale_s: 1.0                    # no fresh pose for this long → hold last /drive, do not re-aim
+  pose_frozen_polls: 8                 # identical timestamp across this many polls → liveness fault → safe stop
+  timeout_rtsm_s: 60                   # trial timeout, condition (a)
+  timeout_baseline_s: 180              # trial timeout, condition (b) — long so it can't cap the speedup
+
+planner:
+  model: "claude-haiku-4-5"            # single forced-tool target-pick call (E1 condition a)
+  api_timeout_s: 10
+  fallback: "top1"                     # deterministic fallback if the API is down (logged per trial)
+
+baseline:
+  freshness_gate_s: 2.0                # only objects seen within this window count as "currently visible"
+  rng_seed: 0                          # per-trial seed is logged; 0 → derive from trial_id
+
+calibration:
+  # Written by calibrate.py — do not hand-edit. Units: rad / m / dimensionless.
+  yaw_offset_rad: 0.0                  # camera forward → car forward, about world up
+  lever_arm_right_m: 0.0               # camera → drive center, car body frame (right)
+  lever_arm_forward_m: 0.0             # camera → drive center, car body frame (forward)
+  speed_scale_mps: 0.0                 # measured velocity at /drive magnitude 1.0
+  turn_scale_rps: 0.0                  # measured yaw rate at full differential
+  provenance:
+    calibrated_at: null                # ISO timestamp, written by calibrate.py
+    rig_id: null                       # e.g. "hiwonder4wd-iphone13-tray-v1"
+
+trials:
+  output_dir: "paper/demo2_data"       # trial JSONLs + videos + stop photos + event logs

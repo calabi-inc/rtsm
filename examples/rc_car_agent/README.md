@@ -156,13 +156,31 @@ If you want pure-mobile teleop with no PC in the loop, see [Bluepad32].
 
 ## Files
 
+The autonomous agent is a **persistent server** (`POST /command {"goal": "go to the red mug"}`),
+built in audited phases per `code-plan-demo2-rc-car.md`. It consumes RTSM via REST only.
+
 ```
 rc_car_agent/
-├── teleop_gamepad.py   # gamepad → PC → /drive (this README's focus)
-├── run.py              # TODO: RTSM → /forward + /turn (autonomous)
-├── planner.py          # TODO: semantic search → heading/distance
-├── nav.py              # TODO: turn-then-drive sequencer
-├── esp32_bridge.py     # TODO: shared HTTP client
-├── monitor.py          # TODO: poll robot_pose for arrival detection
-└── config.yaml         # TODO: URLs, thresholds
+├── teleop_gamepad.py     # gamepad → PC → /drive (manual teleop; baseline video + e-stop pattern)
+├── config.yaml           # ✅ every tunable: URLs, thresholds, timeouts, calibration constants
+├── config.py             # ✅ typed, validated loader
+├── geometry.py           # ✅ Tier-1 math: X–Z ground plane, yaw-from-quat, camera→car transform
+├── tests/                # ✅ 18 unit tests (geometry = the sign/axis bug zone + config smoke)
+├── rtsm_client.py        # Phase B: /search/semantic + /stats pose poll
+├── esp32_bridge.py       # Phase B: send-gated /drive + /stop client
+├── planner.py            # Phase D: Haiku forced-tool target pick (top-1 fallback)
+├── estop.py              # Phase E: independent e-stop thread (gamepad + keyboard)
+├── server.py             # Phase E: FastAPI agent server + single-slot worker (entry point)
+├── nav.py                # Phase F: closed-loop X–Z re-aim @ pose freshness
+├── monitor.py            # Phase F: sole arrival authority + staleness/frozen/frame-epoch gates
+├── calibrate.py          # Phase G: auto-derive camera→car constants + acceptance gate
+├── baseline_search.py    # Phase H: memoryless E1 condition (freshness-gated)
+└── trial_logger.py       # Phase F: per-trial JSONL → paper/demo2_data/
 ```
+
+Run the tests: `python -m pytest examples/rc_car_agent/tests/ -v`
+
+**Geometry conventions (pinned — see `geometry.py` docstring):** ARKit world is **Y-up**
+→ ground plane is **X–Z**; RTSM serves the camera quaternion in **OpenCV convention**
+(forward = `R(q)·[0,0,1]`); yaw = `atan2(x, z)`, **positive = CCW from above = left**,
+matching the firmware's `+angle = CCW`.
