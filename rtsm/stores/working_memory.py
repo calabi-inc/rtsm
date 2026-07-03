@@ -768,11 +768,21 @@ class WorkingMemory:
 
         RTSM does NOT compute or filter pose — it stores what the sensor provides.
         This allows agents to query robot position + object positions atomically.
+
+        May be called from two writers: the receiver at frame-receive time
+        (fresh, input-rate) and the pipeline after processing (older frames).
+        Updates carrying a strictly older timestamp than the stored pose are
+        ignored, so a slow pipeline write can never overwrite a fresher
+        receive-time pose. Timestamps must come from the same clock per
+        session (FramePacket wall time).
         """
+        ts = float(timestamp)
+        if self._latest_pose is not None and ts < self._latest_pose["timestamp"]:
+            return
         self._latest_pose = {
             "xyz": t_wc.tolist() if hasattr(t_wc, 'tolist') else list(t_wc),
             "quaternion_xyzw": q_wc_xyzw.tolist() if hasattr(q_wc_xyzw, 'tolist') else list(q_wc_xyzw),
-            "timestamp": float(timestamp),
+            "timestamp": ts,
         }
 
     def get_robot_pose(self) -> Optional[Dict[str, Any]]:
@@ -820,6 +830,11 @@ class WorkingMemory:
             # Clear attached spatial index if present
             if self.index is not None:
                 self.index.clear()
+
+            # Reset stored robot pose so the monotonic-timestamp guard in
+            # update_robot_pose() can't reject re-fed older timestamps
+            # (e.g. replaying a recording after a /reset).
+            self._latest_pose = None
 
             logger.info(f"[WM] Cleared {obj_count} objects ({confirmed_count} confirmed, {proto_count} proto)")
 
