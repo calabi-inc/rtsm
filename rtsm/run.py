@@ -435,3 +435,6 @@ def main():
     finally:
         if recorder is not None:
             recorder.close()
+
+if __name__ == "__main__":
+    main()
