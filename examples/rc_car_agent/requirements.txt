@@ -6,4 +6,5 @@ pygame          # e-stop gamepad reader + teleop
 fastapi
 uvicorn
 anthropic       # single Haiku target-pick call (E1 condition a)
+pytest          # run the test suite: python -m pytest tests/ -v
 # paper/scripts/aggregate.py additionally needs: scipy, pandas

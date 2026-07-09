@@ -1,0 +1,130 @@
+"""
+Thin RTSM REST customer — the agent's ONLY window into RTSM.
+
+Boundary rule (locked): the agent consumes RTSM through its public REST API
+exactly like any external user would. No rtsm imports, no internals.
+
+Endpoints used (shapes verified against rtsm/api/server.py):
+  GET /healthz          -> {"status": "ok"}
+  GET /stats            -> {objects, confirmed, avg_hits, upserts_total,
+                            robot_pose: {xyz, quaternion_xyzw, timestamp} | None}
+  GET /search/semantic  -> {query, robot_pose, results: [{id, score, confirmed,
+                            stability, xyz_world, snapshot_b64?}]}
+
+`robot_pose` updates at WebSocket receive time (~5 Hz input rate, PR #20);
+`PoseSample.fetched_at_mono` is stamped locally so the monitor can measure
+staleness on OUR clock and detect a frozen feed by a non-advancing
+`timestamp` across polls (never by comparing sensor time to wall time).
+"""
+
+from __future__ import annotations
+
+import time
+from dataclasses import dataclass
+from typing import Any, Dict, List, Optional
+
+import requests
+
+_HEADERS = {"Connection": "close"}
+
+
+@dataclass(frozen=True)
+class PoseSample:
+    xyz: List[float]                 # ARKit world, Y up
+    quaternion_xyzw: List[float]     # camera orientation, OpenCV convention
+    timestamp: float                 # sender wall clock (FramePacket)
+    fetched_at_mono: float           # OUR time.monotonic() at response
+
+
+@dataclass(frozen=True)
+class SemanticHit:
+    id: str
+    score: float
+    confirmed: bool
+    stability: float
+    xyz_world: Optional[List[float]]
+
+
+@dataclass(frozen=True)
+class SemanticResult:
+    query: str
+    robot_pose: Optional[PoseSample]
+    results: List[SemanticHit]
+
+
+class RtsmClient:
+    def __init__(self, base_url: str, timeout_s: float = 3.0):
+        self.base_url = base_url.rstrip("/")
+        self.timeout_s = timeout_s
+
+    # ── low-level ────────────────────────────────────────────────────────
+
+    def _get(self, path: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        r = requests.get(
+            f"{self.base_url}{path}",
+            params=params,
+            timeout=self.timeout_s,
+            headers=_HEADERS,
+        )
+        r.raise_for_status()
+        return r.json()
+
+    @staticmethod
+    def _parse_pose(raw: Optional[Dict[str, Any]]) -> Optional[PoseSample]:
+        if not raw:
+            return None
+        xyz = raw.get("xyz")
+        quat = raw.get("quaternion_xyzw")
+        ts = raw.get("timestamp")
+        if xyz is None or quat is None or ts is None:
+            return None
+        return PoseSample(
+            xyz=[float(v) for v in xyz],
+            quaternion_xyzw=[float(v) for v in quat],
+            timestamp=float(ts),
+            fetched_at_mono=time.monotonic(),
+        )
+
+    # ── public API ───────────────────────────────────────────────────────
+
+    def healthz(self) -> bool:
+        """True iff RTSM answers /healthz with status ok. Never raises."""
+        try:
+            return self._get("/healthz").get("status") == "ok"
+        except requests.RequestException:
+            return False
+
+    def stats(self) -> Dict[str, Any]:
+        """Raw /stats payload (object counts + robot_pose). Raises on HTTP error."""
+        return self._get("/stats")
+
+    def object_count(self) -> int:
+        return int(self.stats().get("objects", 0))
+
+    def get_robot_pose(self) -> Optional[PoseSample]:
+        """Latest robot pose via /stats, or None if no frames received yet."""
+        return self._parse_pose(self.stats().get("robot_pose"))
+
+    def semantic_query(self, query: str, top_k: int = 5) -> SemanticResult:
+        """One /search/semantic call — carries BOTH results and robot_pose,
+        which is the client-side MemorySlice assembly (one atomic snapshot)."""
+        data = self._get("/search/semantic", params={"query": query, "top_k": top_k})
+        hits = [
+            SemanticHit(
+                id=str(e.get("id")),
+                score=float(e.get("score", 0.0)),
+                confirmed=bool(e.get("confirmed", False)),
+                stability=float(e.get("stability", 0.0)),
+                xyz_world=(
+                    [float(v) for v in e["xyz_world"]]
+                    if e.get("xyz_world") is not None
+                    else None
+                ),
+            )
+            for e in data.get("results", [])
+        ]
+        return SemanticResult(
+            query=str(data.get("query", query)),
+            robot_pose=self._parse_pose(data.get("robot_pose")),
+            results=hits,
+        )

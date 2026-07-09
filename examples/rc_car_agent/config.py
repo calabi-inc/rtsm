@@ -15,6 +15,7 @@ _DEFAULT_PATH = Path(__file__).resolve().parent / "config.yaml"
 class RtsmCfg:
     url: str
     lifecycle: str          # attach | spawn | off
+    spawn_cmd: str          # RTSM/GPU env interpreter + args (NOT this venv's python)
     kill_on_exit: bool
     diagnostics_for_trials: bool
 

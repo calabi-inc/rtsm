@@ -3,7 +3,11 @@
 
 rtsm:
   url: "http://localhost:8002"        # RTSM REST API
-  lifecycle: "attach"                  # attach | spawn | off  (spawn: launch `python -m rtsm.run` if healthz is down)
+  lifecycle: "attach"                  # attach | spawn | off  (spawn: launch RTSM if healthz is down)
+  # Interpreter + args for spawn mode. MUST be the RTSM/GPU env's python —
+  # NOT this example's .venv (which deliberately has no rtsm/torch installed;
+  # the agent is a pure REST customer). E.g. the repo-root env's python.
+  spawn_cmd: "python -m rtsm"       # canonical entry (rtsm/__main__.py — also configures logging)
   kill_on_exit: false                  # NEVER default true — condition (a) memory must survive agent restarts
   diagnostics_for_trials: true         # spawn RTSM with event-log diagnostics on (paper failure-analysis data)
 
