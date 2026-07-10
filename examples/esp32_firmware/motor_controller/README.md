@@ -1,8 +1,14 @@
 # ESP32 Motor Controller — RTSM Demo 2 RC Car
 
 ESP32 firmware that drives a **Hiwonder Large Metal 4WD chassis** over WiFi.
-The PC sends HTTP commands (`/forward`, `/turn`, `/stop`); the ESP32 talks I²C
-to Hiwonder's 4-channel encoder motor driver to spin the wheels.
+The PC streams wheel velocities (`/drive`) — the ESP32 talks I²C to Hiwonder's
+4-channel encoder motor driver and stops the motors on its own if commands
+cease for 300 ms (watchdog).
+
+**Single-mode firmware (2026-07):** the old open-loop `/forward` + `/turn`
+timed-move endpoints were removed — they blocked `loop()` and suspended the
+watchdog exactly while the car was moving. The desktop agent closes the loop
+against live ARKit pose and speaks continuous wheel velocities only.
 
 This is the actuator half of the RTSM Demo 2 stack. The agent (Python) lives
 in `examples/rc_car_agent/` and is responsible for vision + planning.
@@ -84,13 +90,13 @@ cp secrets.h.example secrets.h
 
 Expected boot output:
 ```
-Booting...
+Booting (single-mode firmware)...
 Motor driver initialized (JGB37, encoder polarity 0)
 Battery: 7800 mV
 Connecting to your-ssid
 ......
 Connected! IP: 192.168.1.189
-HTTP server ready
+HTTP server ready (single-mode: /drive + /stop)
 ```
 
 Note the IP address — that's the ESP32's address for all the HTTP commands below.
@@ -110,31 +116,26 @@ Returns status text including battery voltage and WiFi signal strength.
 Invoke-RestMethod -Uri "http://192.168.1.189/" -Method Get
 ```
 
-### `POST /forward`
+### `POST /drive`
 
-Drive forward (or backward) a distance in meters.
-
-```powershell
-Invoke-WebRequest -Uri "http://192.168.1.189/forward" -Method Post `
-  -Body '{"distance": 1.0}' -ContentType "application/json"
-```
-
-| Field | Type | Default | Notes |
-|---|---|---|---|
-| `distance` | float | 0.5 | Negative = reverse |
-
-### `POST /turn`
-
-Rotate in place by angle in radians.
+**The control interface.** Continuous wheel velocities, held until replaced.
+The firmware's 300 ms watchdog stops the motors if no fresh `/drive` arrives —
+so callers must stream (change-or-heartbeat < 0.3 s; see
+`examples/rc_car_agent/esp32_bridge.py` for the proven client discipline).
 
 ```powershell
-Invoke-WebRequest -Uri "http://192.168.1.189/turn" -Method Post `
-  -Body '{"angle": 1.5708}' -ContentType "application/json"
+Invoke-WebRequest -Uri "http://192.168.1.189/drive" -Method Post `
+  -Body '{"left": 0.5, "right": 0.5}' -ContentType "application/json" -DisableKeepAlive
 ```
 
-| Field | Type | Default | Notes |
+| Field | Type | Range | Notes |
 |---|---|---|---|
-| `angle` | float | 0.0 | Positive = CCW (left). 1.5708 ≈ 90° |
+| `left`  | float | −1..1 | fraction of `TELEOP_MAX_SPEED`; + = forward |
+| `right` | float | −1..1 | `left > right` turns right (CW); `right > left` turns left (CCW) |
+
+A single command moves the car for at most ~0.3 s — that's the watchdog
+working, not a bug. Keep-alive is not supported (Arduino WebServer);
+send `Connection: close` / `-DisableKeepAlive` and stay at ≤ ~10 req/s.
 
 ### `POST /stop`
 
@@ -159,44 +160,32 @@ Returns motor battery voltage in millivolts as JSON.
 
 ---
 
-## Calibration
+## Bring-up & calibration
 
-After flashing, three constants in `motor_controller.ino` need tuning to your
-specific car, battery, and floor surface:
+The firmware itself has only two tunables — `TELEOP_MAX_SPEED` (±50 max) and
+`TELEOP_WATCHDOG_MS` (keep 300). **There is no timing calibration anymore**:
+the old `MS_PER_*` open-loop procedure is gone because the desktop agent
+closes the loop against live pose (`examples/rc_car_agent/calibrate.py`
+derives the camera→car constants agent-side).
 
-```cpp
-const int8_t DRIVE_SPEED      = 30;     // ±50 max — speed for forward/back
-const int8_t TURN_SPEED       = 25;     // speed for in-place rotation
-const unsigned long MS_PER_METER  = 3000;  // ms to travel 1 m
-const unsigned long MS_PER_RADIAN = 800;   // ms to rotate 1 rad
-```
+### Bring-up procedure (wheels in air)
 
-### Procedure
+1. **Identify each motor**: run `/test_m1` through `/test_m4`. Note which
+   physical wheel spins for each port; if the mapping differs from yours,
+   fix the `M1_REVERSED..M4_REVERSED` constants.
+2. **Direction check**: stream `/drive {"left": 0.3, "right": 0.3}` (use
+   `spin_test.py` in `examples/rc_car_agent/`) — all four wheels must roll
+   the car forward.
+3. **Watchdog check (safety gate)**: stream `/drive`, then stop sending —
+   wheels must halt on their own within ~0.3 s.
 
-1. **Wheels in air**: lift the chassis on books so wheels don't touch anything.
-2. **Identify each motor**: run `/test_m1` through `/test_m4`. Note which
-   physical wheel spins for each port. Label them with masking tape.
-3. **Direction check**: run `/forward` with `distance: 0.5`. All four wheels
-   should spin to drive the car forward. If any spin the wrong way, swap that
-   motor's connector orientation or flip its sign in code.
-4. **Floor test, 1 meter**: place the car on the floor, mark the starting
-   position. Run `/forward` with `distance: 1.0`. Measure how far it actually
-   travelled.
-5. **Adjust `MS_PER_METER`** proportionally:
-   ```
-   new_MS_PER_METER = old_MS_PER_METER × (1.0 / measured_distance_m)
-   ```
-6. **Repeat for `MS_PER_RADIAN`** using `/turn` with `angle: 3.14159` (180°)
-   and measuring the actual rotation.
+### Common issues
 
-### Common calibration issues
-
-- **Car drifts left or right** during `/forward`: motors are unbalanced. Adjust
-  individual motor speeds in `setMotorSpeed()`, or check wheel alignment.
-- **Different distances on carpet vs hardwood**: friction matters. Calibrate
-  on the surface used for the demo recording.
-- **Battery drop changes distance**: switch from PWM (open-loop) to fixed
-  speed (closed-loop) mode — already the default in this firmware.
+- **Car drifts left or right** when both sides get equal speed: motors are
+  unbalanced or a wheel is misaligned — the agent's closed loop corrects
+  gentle drift automatically, but check the chassis if it's severe.
+- **A single `/drive` only moves the car briefly**: that's the watchdog —
+  clients must stream (heartbeat < 0.3 s), see `esp32_bridge.py`.
 
 ---
 

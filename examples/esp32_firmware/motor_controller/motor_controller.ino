@@ -1,16 +1,30 @@
 // motor_controller.ino
 //
-// RTSM Demo 2 — RC car ESP32 firmware
+// RTSM Demo 2 — RC car ESP32 firmware (SINGLE-MODE)
 // Target: Hiwonder Large Metal 4WD chassis with 4-ch encoder motor driver
 // Driver I2C address: 0x34 (Hiwonder STM32 motor controller)
 // Motors: JGB37_520_12V_110RPM (4× mecanum)
 //
-// HTTP endpoints (POST):
-//   /forward  {"distance": 1.5}  — drive distance in meters
-//   /turn     {"angle": 1.57}    — turn angle in radians (positive = CCW/left)
-//   /stop                        — emergency stop
-//   /test_m1, /test_m2, /test_m3, /test_m4  — spin one motor 1 sec
-//   /battery                     — read battery voltage
+// HTTP endpoints:
+//   POST /drive    {"left": -1..1, "right": -1..1} — continuous wheel
+//                  velocities, held until replaced; 300 ms watchdog stops
+//                  the motors if commands cease. THE control interface.
+//   POST /stop     — immediate stop (also clears teleop state)
+//   GET  /battery  — battery voltage {"mv": N}
+//   GET  /         — status banner (battery, RSSI)
+//   POST /test_m1..m4 — spin one motor 1 s (bench bring-up diagnostic)
+//
+// SINGLE-MODE (2026-07): the old open-loop /forward + /turn endpoints and
+// their MS_PER_* timing constants are REMOVED. Two reasons:
+//   1. Safety — their driveTimed() blocked loop(), suspending the 300 ms
+//      watchdog exactly while the car was moving (defense-in-depth hole).
+//   2. Architecture — timed blind moves are open-loop; the desktop agent
+//      closes the loop against live ARKit pose and speaks wheel velocities
+//      only. (Historical open-loop calibration data: git history, abdfde1.)
+//
+// FIRMWARE INVARIANT: no code path may block loop() / suspend teleopTick()
+// while motors are energized. Sole bounded exception: handleTestMotor
+// (bench-only, self-terminating 1 s, raw speed 20).
 //
 // Wiring (ESP32 → Hiwonder driver):
 //   GPIO 21 → SDA
@@ -43,22 +57,6 @@ const char* password = WIFI_PASSWORD;
 #define MOTOR_TYPE_N20             2
 #define MOTOR_TYPE_JGB37_520       3   // matches the 110RPM 8V geared motor
 
-// Configuration — adjust during calibration.
-// Using FIXED_SPEED mode (closed-loop with encoders), so speed is pulses per 10ms,
-// range roughly ±50. Per Hiwonder reference Python: speed 50 = forward, -50 = reverse.
-const int8_t DRIVE_SPEED      = 30;      // ±50 max — start gentle, calibrate up
-const int8_t TURN_SPEED       = 25;
-const unsigned long MS_PER_METER  = 6200; // ms to drive 1 m at DRIVE_SPEED — CALIBRATE
-                                          // Calibration log (carpet, DRIVE_SPEED=30):
-                                          //   3000 → 0.42 m (huge undershoot, startup lag)
-                                          //   7150 → 1.15 m (15% overshoot)
-                                          //   6200 → expected ~1.0 m (target)
-const unsigned long MS_PER_RADIAN = 1600; // ms to rotate 1 rad at TURN_SPEED — CALIBRATE
-                                          // Bumped 800→1600 after first test: 1.57 rad
-                                          // commanded produced ~0.78 rad observed.
-                                          // Last test: ~83° vs 90° commanded (8% short,
-                                          // acceptable for demo).
-
 // === Motor port → physical wheel mapping ===
 // Determined empirically by running /test_m1 ... /test_m4, then verified
 // against /drive joystick behavior (stick right -> physically turn right).
@@ -78,10 +76,12 @@ const bool M2_REVERSED = false;  // rear-left
 const bool M3_REVERSED = false;  // front-right
 const bool M4_REVERSED = true;   // rear-right
 
-// === Teleop state (used by /drive endpoint for joystick control) ===
+// === Teleop state (the /drive endpoint — agent nav AND joystick teleop) ===
 // Latest commanded speeds. teleopTick() applies them each loop iteration and
 // stops the motors if no fresh /drive command arrives within the watchdog
 // window — prevents runaway if WiFi or the controlling PC drops.
+// Using FIXED_SPEED mode (closed-loop with encoders): speed is pulses per
+// 10 ms, range roughly ±50 per the Hiwonder reference Python.
 const int8_t  TELEOP_MAX_SPEED     = 40;
 const unsigned long TELEOP_WATCHDOG_MS = 300;
 volatile int8_t teleopLeft  = 0;
@@ -130,20 +130,6 @@ void driveLeftRight(int8_t leftPhysical, int8_t rightPhysical) {
     setMotorSpeed(m1, m2, m3, m4);
 }
 
-// Drive at given LEFT/RIGHT physical speeds for duration_ms, then stop.
-// No resending needed in fixed-speed (closed-loop) mode — STM32 maintains
-// the speed automatically.
-void driveTimed(int8_t leftPhysical, int8_t rightPhysical, unsigned long duration_ms) {
-    driveLeftRight(leftPhysical, rightPhysical);
-    // Yield to HTTP server during the move so we still respond to /stop
-    unsigned long start = millis();
-    while (millis() - start < duration_ms) {
-        server.handleClient();
-        delay(10);
-    }
-    stopMotors();
-}
-
 // Read battery voltage (returns mV)
 uint16_t readBatteryMV() {
     Wire.beginTransmission(MOTOR_ADDR);
@@ -174,38 +160,6 @@ void handleRoot() {
     server.send(200, "text/plain", s);
 }
 
-void handleForward() {
-    float distance = 0.5;
-    if (server.hasArg("plain")) distance = parseFloatArg(server.arg("plain"), "distance", 0.5);
-
-    Serial.printf("Forward: %.3f m\n", distance);
-    unsigned long ms = (unsigned long)(fabs(distance) * MS_PER_METER);
-    int8_t sp = (distance >= 0) ? DRIVE_SPEED : -DRIVE_SPEED;
-    // Forward drive: both sides physically forward at the same speed.
-    driveTimed(sp, sp, ms);
-
-    server.send(200, "application/json", "{\"ok\":true,\"cmd\":\"forward\"}");
-}
-
-void handleTurn() {
-    float angle = 0.0;
-    if (server.hasArg("plain")) angle = parseFloatArg(server.arg("plain"), "angle", 0.0);
-
-    Serial.printf("Turn: %.3f rad\n", angle);
-    unsigned long ms = (unsigned long)(fabs(angle) * MS_PER_RADIAN);
-
-    // In-place rotation. POSITIVE angle = CCW (left turn): left wheels physically
-    // backward, right wheels physically forward.
-    // (The earlier sign-flip workaround was removed once driveLeftRight got
-    // the M1/M2 vs M3/M4 labels in the right places — see the mapping
-    // section above.)
-    int8_t left  = (angle >= 0) ? -TURN_SPEED :  TURN_SPEED;
-    int8_t right = (angle >= 0) ?  TURN_SPEED : -TURN_SPEED;
-    driveTimed(left, right, ms);
-
-    server.send(200, "application/json", "{\"ok\":true,\"cmd\":\"turn\"}");
-}
-
 void handleStop() {
     // Cancel any active teleop drive AND stop the motors.
     teleopLeft = 0;
@@ -216,7 +170,7 @@ void handleStop() {
     server.send(200, "application/json", "{\"ok\":true,\"cmd\":\"stop\"}");
 }
 
-// /drive — non-blocking velocity command for joystick / PS4 teleop.
+// /drive — non-blocking velocity command (agent nav + PS4 teleop).
 // Body: {"left": <-1.0..1.0>, "right": <-1.0..1.0>}
 // Values are fractions of TELEOP_MAX_SPEED. Motors keep running at the
 // commanded speeds until a new /drive (or /stop) arrives, or until the
@@ -263,6 +217,7 @@ void teleopTick() {
 void handleTestMotor(int motorNum) {
     // Spin one motor at raw +20 for 1 sec — does NOT apply polarity correction.
     // Used purely for the bring-up mapping step (figure out which port = which wheel).
+    // NOTE: sole bounded exception to the no-blocking invariant (bench-only).
     int8_t s[4] = {0, 0, 0, 0};
     s[motorNum - 1] = 20;
     Serial.printf("Test M%d for 1 sec (raw, no polarity correction)\n", motorNum);
@@ -273,6 +228,10 @@ void handleTestMotor(int motorNum) {
         delay(10);
     }
     stopMotors();
+    // Re-sync teleopTick's applied-state with reality (motors are now at 0),
+    // so an active /drive stream resumes cleanly instead of silently stalling.
+    teleopAppliedLeft  = 0;
+    teleopAppliedRight = 0;
     String resp = "{\"ok\":true,\"motor\":" + String(motorNum) + "}";
     server.send(200, "application/json", resp);
 }
@@ -289,7 +248,7 @@ void setup() {
     Serial.begin(115200);
     delay(500);
     Serial.println();
-    Serial.println("Booting...");
+    Serial.println("Booting (single-mode firmware)...");
 
     // I2C init
     Wire.begin();   // default SDA=21, SCL=22
@@ -317,12 +276,10 @@ void setup() {
     Serial.print("Connected! IP: ");
     Serial.println(WiFi.localIP());
 
-    // HTTP routes
+    // HTTP routes — /drive + /stop are the ONLY motion interface.
     server.on("/",         HTTP_GET,  handleRoot);
-    server.on("/forward",  HTTP_POST, handleForward);
-    server.on("/turn",     HTTP_POST, handleTurn);
     server.on("/stop",     HTTP_POST, handleStop);
-    server.on("/drive",    HTTP_POST, handleDrive);    // joystick teleop
+    server.on("/drive",    HTTP_POST, handleDrive);
     server.on("/battery",  HTTP_GET,  handleBattery);
     server.on("/test_m1",  HTTP_POST, []() { handleTestMotor(1); });
     server.on("/test_m2",  HTTP_POST, []() { handleTestMotor(2); });
@@ -330,9 +287,12 @@ void setup() {
     server.on("/test_m4",  HTTP_POST, []() { handleTestMotor(4); });
 
     server.begin();
-    Serial.println("HTTP server ready");
+    Serial.println("HTTP server ready (single-mode: /drive + /stop)");
 }
 
+// INVARIANT: loop() must never be blocked while motors are energized —
+// teleopTick() IS the 300 ms watchdog; suspending it suspends the last
+// line of defense. (handleTestMotor is the sole bounded exception.)
 void loop() {
     server.handleClient();
     teleopTick();
