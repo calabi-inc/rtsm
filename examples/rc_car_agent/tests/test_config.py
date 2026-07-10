@@ -24,3 +24,32 @@ def test_config_is_frozen():
     cfg = load_config()
     with pytest.raises(dataclasses.FrozenInstanceError):
         cfg.nav = None  # type: ignore[misc]
+
+
+def test_dotenv_loads_but_never_overrides(tmp_path, monkeypatch):
+    from config import load_dotenv
+
+    envfile = tmp_path / ".env"
+    envfile.write_text(
+        "# comment\n"
+        "FAKE_NEW_KEY=abc123\n"
+        'FAKE_EXISTING_KEY="from-file"\n'
+        "malformed line without equals\n",
+        encoding="utf-8",
+    )
+    monkeypatch.delenv("FAKE_NEW_KEY", raising=False)
+    monkeypatch.setenv("FAKE_EXISTING_KEY", "from-environment")
+
+    n = load_dotenv(envfile)
+
+    assert n == 1                                            # only the new key
+    import os
+    assert os.environ["FAKE_NEW_KEY"] == "abc123"            # quotes stripped, set
+    assert os.environ["FAKE_EXISTING_KEY"] == "from-environment"  # env wins
+    monkeypatch.delenv("FAKE_NEW_KEY", raising=False)
+
+
+def test_dotenv_missing_file_is_noop(tmp_path):
+    from config import load_dotenv
+
+    assert load_dotenv(tmp_path / "does_not_exist.env") == 0

@@ -105,6 +105,17 @@ class RtsmClient:
         """Latest robot pose via /stats, or None if no frames received yet."""
         return self._parse_pose(self.stats().get("robot_pose"))
 
+    def get_object_label(self, object_id: str) -> Optional[str]:
+        """Best-effort label for one object via GET /objects/{id}
+        (label_primary — the semantic search response carries no labels).
+        Returns None on any failure; the planner treats labels as optional."""
+        try:
+            detail = self._get(f"/objects/{object_id}")
+            label = detail.get("label_primary")
+            return str(label) if label else None
+        except (requests.RequestException, ValueError):
+            return None
+
     def semantic_query(self, query: str, top_k: int = 5) -> SemanticResult:
         """One /search/semantic call — carries BOTH results and robot_pose,
         which is the client-side MemorySlice assembly (one atomic snapshot)."""

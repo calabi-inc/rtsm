@@ -1,7 +1,13 @@
-"""Typed loader for config.yaml — one place, validated once at startup."""
+"""Typed loader for config.yaml — one place, validated once at startup.
+
+Also loads an optional `.env` file (same folder, gitignored) for secrets
+like ANTHROPIC_API_KEY. Real environment variables always win over .env —
+so `setx ANTHROPIC_API_KEY ...` (recommended) needs no file at all.
+"""
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional, Tuple
@@ -9,6 +15,29 @@ from typing import Optional, Tuple
 import yaml
 
 _DEFAULT_PATH = Path(__file__).resolve().parent / "config.yaml"
+_DOTENV_PATH = Path(__file__).resolve().parent / ".env"
+
+
+def load_dotenv(path: Optional[Path] = None) -> int:
+    """Minimal .env loader (no dependency): KEY=VALUE lines, `#` comments.
+
+    Sets os.environ ONLY for keys not already present — the process
+    environment always takes precedence. Returns how many keys were set.
+    """
+    p = path if path is not None else _DOTENV_PATH
+    if not p.exists():
+        return 0
+    n = 0
+    for line in p.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key, value = key.strip(), value.strip().strip('"').strip("'")
+        if key and key not in os.environ:
+            os.environ[key] = value
+            n += 1
+    return n
 
 
 @dataclass(frozen=True)
@@ -96,6 +125,7 @@ class Config:
 
 
 def load_config(path: Optional[str] = None) -> Config:
+    load_dotenv()  # secrets first (no-op if .env absent; env vars win)
     p = Path(path) if path else _DEFAULT_PATH
     raw = yaml.safe_load(p.read_text(encoding="utf-8"))
 

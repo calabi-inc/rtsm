@@ -141,3 +141,5 @@ config
 
 # MkDocs build output (should not be committed; deploy via CI or a gh-pages branch)
 site/
+!examples/rc_car_agent/.env.example
+
