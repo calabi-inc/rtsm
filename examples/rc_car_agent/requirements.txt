@@ -7,4 +7,5 @@ fastapi
 uvicorn
 anthropic       # single Haiku target-pick call (E1 condition a)
 pytest          # run the test suite: python -m pytest tests/ -v
+httpx           # FastAPI TestClient (server integration tests)
 # paper/scripts/aggregate.py additionally needs: scipy, pandas

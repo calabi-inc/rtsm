@@ -64,6 +64,13 @@ class Esp32Bridge:
 
         Call this every control tick; the bridge decides whether the wire
         needs a packet. Clamps to [-1, 1]. No-op while e-stop is latched.
+
+        SAFETY: the HTTP POST happens OUTSIDE the lock — the lock guards
+        only gating state, so stop(estop=True) can latch in microseconds
+        even while a drive request is in flight. If the latch was set
+        during our flight, we fire a COMPENSATING /stop behind our own
+        landed command, bounding stray motion to network jitter instead
+        of the 300 ms watchdog window.
         """
         left = max(-1.0, min(1.0, float(left)))
         right = max(-1.0, min(1.0, float(right)))
@@ -82,25 +89,46 @@ class Esp32Bridge:
             if not (changed or heartbeat_due):
                 return False
             # Rate-cap ALL attempts (including failure retries): >~10 Hz
-            # exhausts the ESP32 socket pool.
+            # exhausts the ESP32 socket pool. Reserve the slot under lock.
             if (now - self._last_attempt_mono) < self._min_interval_s:
                 return False
-
             self._last_attempt_mono = now
-            try:
-                requests.post(
-                    f"{self.url}/drive",
-                    json={"left": left, "right": right},
-                    timeout=self._timeout_s,
-                    headers=_HEADERS,
-                )
-            except requests.RequestException:
+
+        # ---- HTTP outside the lock (never blocks the e-stop latch) ----
+        ok = True
+        try:
+            requests.post(
+                f"{self.url}/drive",
+                json={"left": left, "right": right},
+                timeout=self._timeout_s,
+                headers=_HEADERS,
+            )
+        except requests.RequestException:
+            ok = False
+
+        with self._lock:
+            if ok:
+                self._last_sent = (left, right)
+                self._last_success_mono = time.monotonic()
+                self.consecutive_failures = 0
+            else:
                 self.consecutive_failures += 1
-                return False
-            self._last_sent = (left, right)
-            self._last_success_mono = now
-            self.consecutive_failures = 0
+            latched_during_flight = self._estopped
+
+        if ok and latched_during_flight:
+            # Our command may have landed AFTER the e-stop's /stop —
+            # compensate immediately from this thread.
+            self._post_stop_once()
+        return ok
+
+    def _post_stop_once(self) -> bool:
+        try:
+            requests.post(
+                f"{self.url}/stop", timeout=self._timeout_s, headers=_HEADERS
+            )
             return True
+        except requests.RequestException:
+            return False
 
     # ── stop ─────────────────────────────────────────────────────────────
 
@@ -113,18 +141,13 @@ class Esp32Bridge:
         the firmware watchdog stops the car within 300 ms anyway.
         """
         if estop:
-            with self._lock:
+            with self._lock:            # microseconds — no HTTP under this lock
                 self._estopped = True
         ok = False
         for _ in range(2):
-            try:
-                requests.post(
-                    f"{self.url}/stop", timeout=self._timeout_s, headers=_HEADERS
-                )
+            if self._post_stop_once():
                 ok = True
                 break
-            except requests.RequestException:
-                continue
         with self._lock:
             self._last_sent = (0.0, 0.0)
         return ok

@@ -159,6 +159,69 @@ def test_normal_stop_does_not_latch(mock_esp32):
     assert b.drive(0.4, 0.4) is True
 
 
+# ── e-stop decoupling (the Phase-E safety core) ──────────────────────────
+
+
+class _SlowDriveHandler(_RecordingHandler):
+    """Records on arrival, then /drive stalls 0.5 s before responding —
+    simulates the worker's HTTP hanging mid-flight. /stop stays fast."""
+
+    def do_POST(self):
+        length = int(self.headers.get("Content-Length") or 0)
+        raw = self.rfile.read(length) if length else b""
+        self.server.recorded.append(
+            {"path": self.path, "body": json.loads(raw) if raw else None,
+             "connection": self.headers.get("Connection"), "t": time.monotonic()}
+        )
+        if self.path == "/drive":
+            time.sleep(0.5)
+        self._respond({"ok": True})
+
+
+@pytest.fixture()
+def slow_esp32():
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), _SlowDriveHandler)
+    srv.recorded = []
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    yield srv, f"http://127.0.0.1:{srv.server_address[1]}"
+    srv.shutdown()
+
+
+def test_estop_latch_not_blocked_by_inflight_drive(slow_esp32):
+    # An in-flight /drive (0.5 s server stall) must NOT delay the e-stop:
+    # the latch is lock-only (no HTTP under it) and stop() posts on its own.
+    srv, url = slow_esp32
+    b = _bridge(url, http_timeout_s=1.5)
+    worker = threading.Thread(target=lambda: b.drive(0.5, 0.5))
+    worker.start()
+    time.sleep(0.1)                       # drive is now in flight
+
+    t0 = time.monotonic()
+    ok = b.stop(estop=True)
+    dt = time.monotonic() - t0
+
+    assert ok is True
+    assert dt < 0.35, f"e-stop took {dt:.2f}s — serialized behind in-flight drive"
+    assert b.estopped is True
+    worker.join()
+
+    # Compensating stop: the drive landed AFTER the e-stop's /stop, so the
+    # drive thread must have fired another /stop behind its own command.
+    drives = [r for r in srv.recorded if r["path"] == "/drive"]
+    stops = [r for r in srv.recorded if r["path"] == "/stop"]
+    assert drives and stops
+    assert any(s["t"] >= drives[0]["t"] + 0.45 for s in stops), (
+        "no compensating /stop after the in-flight drive landed"
+    )
+
+
+def test_no_compensating_stop_when_not_latched(mock_esp32):
+    srv, url = mock_esp32
+    b = _bridge(url)
+    b.drive(0.5, 0.5)                      # normal drive, no e-stop
+    assert [r["path"] for r in srv.recorded] == ["/drive"]
+
+
 # ── failure handling ─────────────────────────────────────────────────────
 
 
