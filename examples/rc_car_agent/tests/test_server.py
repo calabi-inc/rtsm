@@ -1,9 +1,13 @@
 """Agent-server integration tests — FastAPI TestClient over mock RTSM +
-mock (recording) ESP32. Covers every Gate-E software item."""
+mock (recording) ESP32. Phase E items (boot/preflight/preempt/cancel/
+e-stop/bench) plus the Phase-F mission path: planner -> nav -> monitor,
+closed-loop convergence on the kinematic fake car, frame_epoch abort,
+bounded stale abort, and trial-JSONL output."""
 
 import json
 import threading
 import time
+from dataclasses import replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
@@ -11,14 +15,18 @@ from fastapi.testclient import TestClient
 
 from config import load_config
 from esp32_bridge import Esp32Bridge
+from fake_car import FakeCar, FakeCarEsp32Handler, FakeRtsmHandler
 from rtsm_client import RtsmClient
 from server import BENCH_DUMMY_GOAL, create_app
 from test_esp32_bridge import _RecordingHandler
 
 POSE = {"xyz": [0.0, 0.3, 0.0], "quaternion_xyzw": [0, 0, 0, 1],
-        "timestamp": 1751000000.0}
+        "timestamp": 1751000000.0, "frame_epoch": 7}
 GOOD_STATS = {"objects": 12, "confirmed": 8, "robot_pose": POSE}
 COLD_STATS = {"objects": 0, "confirmed": 0, "robot_pose": None}
+SEMANTIC = {"query": "red mug", "robot_pose": POSE, "results": [
+    {"id": "mug-1", "score": 0.81, "confirmed": True, "stability": 0.9,
+     "xyz_world": [0.5, 0.3, 1.5]}]}
 
 
 class _RtsmHandler(BaseHTTPRequestHandler):
@@ -39,20 +47,65 @@ class _RtsmHandler(BaseHTTPRequestHandler):
 
 
 @pytest.fixture()
-def env():
+def env(monkeypatch, tmp_path):
+    """Static-pose environment: RTSM serves one frozen pose, so missions
+    hold-then-stale_stop (~2.5 s) — long enough to interrupt, short enough
+    for tests. The fake-car env below is the one that converges."""
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)  # deterministic top1
+
     rtsm_srv = ThreadingHTTPServer(("127.0.0.1", 0), _RtsmHandler)
-    rtsm_srv.routes = {"/healthz": {"status": "ok"}, "/stats": dict(GOOD_STATS)}
+    rtsm_srv.routes = {
+        "/healthz": {"status": "ok"},
+        "/stats": dict(GOOD_STATS),
+        "/search/semantic": json.loads(json.dumps(SEMANTIC)),
+        "/objects/mug-1": {"label_primary": "red mug"},
+    }
     threading.Thread(target=rtsm_srv.serve_forever, daemon=True).start()
 
     esp_srv = ThreadingHTTPServer(("127.0.0.1", 0), _RecordingHandler)
     esp_srv.recorded = []
     threading.Thread(target=esp_srv.serve_forever, daemon=True).start()
 
-    cfg = load_config()
+    cfg = replace(load_config(), trials_output_dir=str(tmp_path))
     rtsm = RtsmClient(f"http://127.0.0.1:{rtsm_srv.server_address[1]}", timeout_s=1.0)
     bridge = Esp32Bridge(f"http://127.0.0.1:{esp_srv.server_address[1]}",
                          http_timeout_s=0.4)
     yield cfg, rtsm, bridge, rtsm_srv, esp_srv
+    rtsm_srv.shutdown()
+    esp_srv.shutdown()
+
+
+@pytest.fixture()
+def env_car(monkeypatch, tmp_path):
+    """Kinematic fake-car environment: pose advances in response to /drive,
+    so the loop actually closes. Sped-up nav timings for test runtime."""
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
+    car = FakeCar(x=0.0, z=0.0, yaw=0.0)
+    rtsm_srv = ThreadingHTTPServer(("127.0.0.1", 0), FakeRtsmHandler)
+    rtsm_srv.car = car
+    rtsm_srv.semantic_results = [
+        {"id": "mug-1", "score": 0.81, "confirmed": True, "stability": 0.9,
+         "xyz_world": [0.3, 0.3, 1.5]}]
+    rtsm_srv.objects = {"mug-1": {"label_primary": "red mug"}}
+    threading.Thread(target=rtsm_srv.serve_forever, daemon=True).start()
+
+    esp_srv = ThreadingHTTPServer(("127.0.0.1", 0), FakeCarEsp32Handler)
+    esp_srv.recorded = []
+    esp_srv.car = car
+    threading.Thread(target=esp_srv.serve_forever, daemon=True).start()
+
+    base = load_config()
+    cfg = replace(
+        base,
+        trials_output_dir=str(tmp_path),
+        nav=replace(base.nav, tick_s=0.02, poll_hz=20.0,
+                    pose_stale_s=0.4, stale_abort_s=1.0),
+    )
+    rtsm = RtsmClient(f"http://127.0.0.1:{rtsm_srv.server_address[1]}", timeout_s=1.0)
+    bridge = Esp32Bridge(f"http://127.0.0.1:{esp_srv.server_address[1]}",
+                         http_timeout_s=0.4)
+    yield cfg, rtsm, bridge, rtsm_srv, esp_srv, car, tmp_path
     rtsm_srv.shutdown()
     esp_srv.shutdown()
 
@@ -64,6 +117,10 @@ def _wait(pred, timeout=2.0, every=0.02):
             return True
         time.sleep(every)
     return False
+
+
+def _result(client):
+    return (client.get("/status").json().get("last_result") or {}).get("result")
 
 
 # ── boot & readiness ─────────────────────────────────────────────────────
@@ -102,19 +159,34 @@ def test_command_reprobes_preflight_after_recovery(env):
         assert r.json()["accepted"] is True
 
 
-# ── stub worker: run / preempt / cancel / soft stop ──────────────────────
+# ── mission worker: run / preempt / cancel / soft stop ───────────────────
 
 
-def test_command_runs_stub_and_ticks(env):
-    cfg, rtsm, bridge, *_ = env
+def test_command_runs_mission_and_drives(env):
+    cfg, rtsm, bridge, _, esp_srv = env
     with TestClient(create_app(cfg, rtsm, bridge)) as c:
         r = c.post("/command", json={"goal": "go to the red mug"}).json()
         assert r["accepted"] and r["condition"] == "rtsm"
         assert _wait(lambda: (c.get("/status").json().get("task") or {})
-                     .get("stub_ticks", 0) > 5)
+                     .get("ticks", 0) > 3)
         s = c.get("/status").json()
         assert s["state"] == "RUNNING"
         assert s["task"]["task_id"] == r["task_id"]
+        assert s["task"]["phase"] == "driving"
+        assert s["task"]["planner_path"] == "top1_no_llm"   # no API key
+        assert s["task"]["target_id"] == "mug-1"
+        assert _wait(lambda: any(rec["path"] == "/drive"
+                                 for rec in esp_srv.recorded))
+
+
+def test_not_found_goal_no_motion(env):
+    cfg, rtsm, bridge, rtsm_srv, esp_srv = env
+    rtsm_srv.routes["/search/semantic"] = {"query": "unicorn",
+                                           "robot_pose": POSE, "results": []}
+    with TestClient(create_app(cfg, rtsm, bridge)) as c:
+        c.post("/command", json={"goal": "go to the unicorn"})
+        assert _wait(lambda: _result(c) == "not_found")
+        assert not any(rec["path"] == "/drive" for rec in esp_srv.recorded)
 
 
 def test_second_command_preempts(env):
@@ -122,8 +194,8 @@ def test_second_command_preempts(env):
     with TestClient(create_app(cfg, rtsm, bridge)) as c:
         a = c.post("/command", json={"goal": "go to the red mug"}).json()
         assert _wait(lambda: (c.get("/status").json().get("task") or {})
-                     .get("stub_ticks", 0) > 2)
-        b = c.post("/command", json={"goal": "go to the blue backpack"}).json()
+                     .get("ticks", 0) > 2)
+        b = c.post("/command", json={"goal": "go to the red mug"}).json()
         assert _wait(lambda: (c.get("/status").json().get("task") or {})
                      .get("task_id") == b["task_id"])
         s = c.get("/status").json()
@@ -149,6 +221,18 @@ def test_soft_stop_hits_wire_and_cancels(env):
         c.post("/stop")
         assert _wait(lambda: c.get("/status").json()["state"] == "READY")
         assert any(rec["path"] == "/stop" for rec in esp_srv.recorded)
+
+
+def test_static_pose_mission_stale_stops_bounded(env):
+    """A frozen pose feed must end the mission via stale_stop well before
+    the 60 s trial timeout (bounded blind-driving, audit pin)."""
+    cfg, rtsm, bridge, *_ = env
+    with TestClient(create_app(cfg, rtsm, bridge)) as c:
+        t0 = time.monotonic()
+        c.post("/command", json={"goal": "go to the red mug"})
+        assert _wait(lambda: _result(c) == "stale_stop",
+                     timeout=cfg.nav.stale_abort_s + 3.0)
+        assert time.monotonic() - t0 < cfg.nav.stale_abort_s + 3.0
 
 
 # ── e-stop semantics ─────────────────────────────────────────────────────
@@ -195,4 +279,74 @@ def test_bench_goal_bypasses_preflight_and_drives(env):
                                  for rec in esp_srv.recorded))
         c.post("/cancel")
         assert _wait(lambda: c.get("/status").json()["state"] != "RUNNING")
+        assert any(rec["path"] == "/stop" for rec in esp_srv.recorded)
+
+
+# ── Phase-F Gate: closed loop on the kinematic fake car ──────────────────
+
+
+def test_closed_loop_converges_e2e(env_car):
+    cfg, rtsm, bridge, rtsm_srv, esp_srv, car, tmp_path = env_car
+    target = rtsm_srv.semantic_results[0]["xyz_world"]
+    with TestClient(create_app(cfg, rtsm, bridge)) as c:
+        r = c.post("/command", json={"goal": "go to the red mug"}).json()
+        assert _wait(lambda: _result(c) == "arrived", timeout=15.0)
+        assert car.ground_dist_to(target) <= cfg.nav.arrival_threshold_m + 0.2
+        assert any(rec["path"] == "/stop" for rec in esp_srv.recorded)
+
+        # Trial JSONL: exists, parses, carries the E1 fields.
+        log = tmp_path / f"{r['task_id']}.jsonl"
+        records = [json.loads(l) for l in log.read_text().splitlines()]
+        types = [rec["type"] for rec in records]
+        assert types[0] == "trial_start" and types[-1] == "trial_end"
+        assert "tick" in types
+        assert records[0]["frame_epoch"] == car.epoch
+        assert records[-1]["result"] == "arrived"
+        assert records[-1]["tta_s"] is not None
+        assert records[-1]["censored"] is False
+
+
+def test_frame_epoch_abort_e2e(env_car):
+    cfg, rtsm, bridge, rtsm_srv, esp_srv, car, tmp_path = env_car
+    rtsm_srv.semantic_results[0]["xyz_world"] = [0.0, 0.3, 8.0]   # far target
+    with TestClient(create_app(cfg, rtsm, bridge)) as c:
+        c.post("/command", json={"goal": "go to the red mug"})
+        assert _wait(lambda: (c.get("/status").json().get("task") or {})
+                     .get("ticks", 0) > 3)
+        car.epoch = car.epoch + 1                     # new sender session
+        assert _wait(lambda: _result(c) == "frame_reset", timeout=5.0)
+        assert any(rec["path"] == "/stop" for rec in esp_srv.recorded)
+
+
+def test_stale_abort_bounded_e2e(env_car):
+    cfg, rtsm, bridge, rtsm_srv, esp_srv, car, tmp_path = env_car
+    rtsm_srv.semantic_results[0]["xyz_world"] = [0.0, 0.3, 8.0]   # far target
+    with TestClient(create_app(cfg, rtsm, bridge)) as c:
+        c.post("/command", json={"goal": "go to the red mug"})
+        assert _wait(lambda: (c.get("/status").json().get("task") or {})
+                     .get("ticks", 0) > 3)
+        frozen_at = time.monotonic()
+        car.freeze()
+        assert _wait(lambda: _result(c) == "stale_stop",
+                     timeout=cfg.nav.stale_abort_s + 3.0)
+        # Bounded: stopped within stale_abort_s (+ generous slack), never
+        # blind-driving until the 60 s trial timeout.
+        assert time.monotonic() - frozen_at < cfg.nav.stale_abort_s + 2.0
+        assert any(rec["path"] == "/stop" for rec in esp_srv.recorded)
+
+
+def test_preempt_during_real_nav(env_car):
+    cfg, rtsm, bridge, rtsm_srv, esp_srv, car, tmp_path = env_car
+    rtsm_srv.semantic_results[0]["xyz_world"] = [0.0, 0.3, 8.0]   # far target
+    with TestClient(create_app(cfg, rtsm, bridge)) as c:
+        a = c.post("/command", json={"goal": "go to the red mug"}).json()
+        assert _wait(lambda: (c.get("/status").json().get("task") or {})
+                     .get("ticks", 0) > 3)
+        b = c.post("/command", json={"goal": "go to the red mug"}).json()
+        assert _wait(lambda: (c.get("/status").json().get("task") or {})
+                     .get("task_id") == b["task_id"], timeout=5.0)
+        s = c.get("/status").json()
+        assert s["last_result"]["task_id"] == a["task_id"]
+        assert s["last_result"]["result"] == "preempted"
+        # Safe stop hit the wire between the two drives.
         assert any(rec["path"] == "/stop" for rec in esp_srv.recorded)

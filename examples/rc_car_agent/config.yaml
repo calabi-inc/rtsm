@@ -30,8 +30,14 @@ nav:
   max_speed: 0.5                       # fraction of TELEOP_MAX_SPEED sent to /drive
   max_turn: 0.5
   kp_steer: 1.2                        # proportional steer gain on heading error (rad → differential)
+  tick_s: 0.05                         # control-loop period; MUST be < esp32.heartbeat_s (validated)
+  poll_hz: 10                          # RTSM pose-poll rate inside the nav loop (input is ~5 Hz)
   pose_stale_s: 1.0                    # no fresh pose for this long → hold last /drive, do not re-aim
-  pose_frozen_polls: 8                 # identical timestamp across this many polls → liveness fault → safe stop
+  pose_frozen_polls: 8                 # identical timestamp across this many polls → treat feed as frozen (hold)
+  stale_abort_s: 2.5                   # no fresh pose for this long → SAFE STOP + abort (bounded blind-driving)
+  drift_margin_m: 0.8                  # ground-dist exceeds best-so-far by this → drift verdict → safe stop
+  discontinuity_base_m: 0.5            # pose jump beyond base + rate*dt between fresh poses → frame_reset
+  discontinuity_rate_mps: 1.0          # generous upper bound on real car speed for the jump threshold
   timeout_rtsm_s: 60                   # trial timeout, condition (a)
   timeout_baseline_s: 180              # trial timeout, condition (b) — long so it can't cap the speedup
 

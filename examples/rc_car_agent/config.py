@@ -73,8 +73,14 @@ class NavCfg:
     max_speed: float
     max_turn: float
     kp_steer: float
+    tick_s: float
+    poll_hz: float
     pose_stale_s: float
     pose_frozen_polls: int
+    stale_abort_s: float
+    drift_margin_m: float
+    discontinuity_base_m: float
+    discontinuity_rate_mps: float
     timeout_rtsm_s: float
     timeout_baseline_s: float
 
@@ -166,6 +172,20 @@ def _validate(cfg: Config) -> None:
     if cfg.esp32.heartbeat_s >= 0.3:
         raise ValueError(
             "esp32.heartbeat_s must stay below the 300 ms firmware watchdog window"
+        )
+    # Watchdog chain: the nav loop must tick faster than the bridge heartbeat,
+    # which must beat the 300 ms firmware watchdog — otherwise a "hold last
+    # command" phase silently stops the car mid-trial.
+    if not (0 < cfg.nav.tick_s < cfg.esp32.heartbeat_s):
+        raise ValueError(
+            "nav.tick_s must be positive and < esp32.heartbeat_s "
+            "(hold phases keep the watchdog fed only if ticks outpace heartbeats)"
+        )
+    if cfg.nav.poll_hz <= 0 or (1.0 / cfg.nav.poll_hz) < cfg.nav.tick_s:
+        raise ValueError("nav.poll_hz must be positive and no faster than the tick rate")
+    if cfg.nav.pose_stale_s >= cfg.nav.stale_abort_s:
+        raise ValueError(
+            "nav.pose_stale_s (hold) must be < nav.stale_abort_s (safe-stop bound)"
         )
     if cfg.nav.timeout_baseline_s < cfg.nav.timeout_rtsm_s:
         raise ValueError("baseline timeout must be >= rtsm timeout (censoring policy)")

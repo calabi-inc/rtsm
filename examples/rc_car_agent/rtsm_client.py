@@ -34,6 +34,12 @@ class PoseSample:
     quaternion_xyzw: List[float]     # camera orientation, OpenCV convention
     timestamp: float                 # sender wall clock (FramePacket)
     fetched_at_mono: float           # OUR time.monotonic() at response
+    # RTSM receiver's world-frame discontinuity counter (bumps when the
+    # sender starts a new streaming session — poses across a bump must not
+    # be compared in one frame). None = server predates the field, or the
+    # pose came from an epoch-less path (ZMQ/replay, post-/reset transient);
+    # the monitor's equality gate fires only when BOTH sides are ints.
+    frame_epoch: Optional[int] = None
 
 
 @dataclass(frozen=True)
@@ -78,11 +84,13 @@ class RtsmClient:
         ts = raw.get("timestamp")
         if xyz is None or quat is None or ts is None:
             return None
+        epoch = raw.get("frame_epoch")   # tolerate missing key AND null
         return PoseSample(
             xyz=[float(v) for v in xyz],
             quaternion_xyzw=[float(v) for v in quat],
             timestamp=float(ts),
             fetched_at_mono=time.monotonic(),
+            frame_epoch=int(epoch) if epoch is not None else None,
         )
 
     # ── public API ───────────────────────────────────────────────────────

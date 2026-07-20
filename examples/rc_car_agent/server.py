@@ -21,12 +21,14 @@ Safety model (locked):
   * NOT_READY (preflight failed) -> /command 503 with the reasons; the
     server stays up and re-probes preflight on each /command attempt.
 
-Phase-E scope: the worker is a STUB (updates status ticks; exercises
-accept/preempt/cancel/estop). Phase F replaces the stub body with
-planner -> nav -> monitor. `--bench` additionally allows the special goal
-"__bench_dummy_drive__" (drives 0.2/0.2 through the gated bridge, car on
-blocks, 45 s cap) — the Gate-E hardware e-stop test vehicle; it bypasses
-preflight BY DESIGN and must only be used on the bench.
+Worker (Phase F): planner -> nav -> monitor. One /command = one trial:
+plan() picks the target (Haiku forced-tool, top-1 fallback), NavRunner
+closed-loop drives against live RTSM pose, MissionMonitor is the sole
+arrival/abort authority, TrialLogger writes the E1 JSONL. `--bench`
+additionally allows the special goal "__bench_dummy_drive__" (drives
+0.2/0.2 through the gated bridge, car on blocks, 45 s cap) — the Gate-E
+hardware e-stop test vehicle; it bypasses preflight BY DESIGN and must
+only be used on the bench.
 
 RTSM lifecycle: attach if :8002/healthz answers; else spawn
 cfg.rtsm.spawn_cmd (the GPU env's python, NOT this venv) and wait for
@@ -42,6 +44,7 @@ import threading
 import time
 from contextlib import asynccontextmanager
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 from fastapi import FastAPI, HTTPException
@@ -50,7 +53,10 @@ from pydantic import BaseModel
 from config import Config, load_config
 from esp32_bridge import Esp32Bridge
 from estop import EstopMonitor
+from nav import NavRunner
+from planner import plan as plan_target
 from rtsm_client import RtsmClient
+from trial_logger import TrialLogger
 
 BENCH_DUMMY_GOAL = "__bench_dummy_drive__"
 _BENCH_SPEED = 0.2
@@ -190,13 +196,22 @@ class AgentServer:
 
         with self._lock:
             self._seq += 1
+            # ALL keys pre-seeded: the worker/nav thread only ever updates
+            # values, so status()'s dict() copy never races a size change.
             task = {
                 "task_id": f"t{datetime.now():%Y%m%d}-{self._seq:03d}",
                 "goal": goal,
                 "condition": cond,
                 "phase": "queued",
                 "stub_ticks": 0,
+                "ticks": 0,
+                "ground_dist_m": None,
+                "planner_path": None,
+                "target_id": None,
+                "target_label": None,
+                "trial_log": None,
                 "result": None,
+                "detail": None,
                 "accepted_at": time.time(),
             }
             if self.current is not None:
@@ -255,44 +270,22 @@ class AgentServer:
                 self._run_task(task)
 
     def _run_task(self, task: Dict[str, Any]) -> None:
-        """PHASE-E STUB: ticks status until preempted/cancelled/estopped.
-        Phase F replaces this body with planner -> nav -> monitor.
-        The bench dummy goal streams a gentle /drive so the hardware
-        e-stop test has real motion to kill."""
+        """One task = one trial: bench dummy drive, or the real mission
+        (planner -> nav -> monitor, trial-logged)."""
         with self._lock:
             self.current = task
-            task["phase"] = "stub_running"
+            task["phase"] = "planning"
             prev_state = self.state
             self.state = "RUNNING"
 
-        is_bench = task["goal"] == BENCH_DUMMY_GOAL
-        t0 = time.monotonic()
-        result = "stub_ended"
-        while not self._shutdown.is_set():
-            if self.stop_event.is_set():
-                result = "estopped"                  # monitor already stopped the car
-                break
-            if self._preempt.is_set():
-                self._preempt.clear()
-                self.bridge.stop()                   # safe stop before swap
-                result = "preempted"
-                break
-            if self._cancel.is_set():
-                self._cancel.clear()
-                self.bridge.stop()
-                result = "cancelled"
-                break
-            task["stub_ticks"] += 1
-            if is_bench:
-                self.bridge.drive(_BENCH_SPEED, _BENCH_SPEED)   # gated internally
-                if time.monotonic() - t0 > _BENCH_CAP_S:
-                    self.bridge.stop()
-                    result = "bench_timeout"
-                    break
-            time.sleep(_TICK_S)
+        if task["goal"] == BENCH_DUMMY_GOAL:
+            result, detail = self._run_bench(task), ""
+        else:
+            result, detail = self._run_mission(task)
 
         with self._lock:
             task["result"] = result
+            task["detail"] = detail
             task["phase"] = "finished"
             self.last_result = dict(task)
             self.current = None
@@ -302,6 +295,78 @@ class AgentServer:
                 self.state = "READY" if self._ready else (
                     prev_state if prev_state == "NOT_READY" else "NOT_READY"
                 )
+
+    def _run_bench(self, task: Dict[str, Any]) -> str:
+        """Gentle constant /drive so the hardware e-stop test has real
+        motion to kill (Gate E). Bench-only; preflight bypassed by design."""
+        task["phase"] = "bench_running"
+        t0 = time.monotonic()
+        while not self._shutdown.is_set():
+            if self.stop_event.is_set():
+                return "estopped"                    # monitor already stopped the car
+            if self._preempt.is_set():
+                self._preempt.clear()
+                self.bridge.stop()                   # safe stop before swap
+                return "preempted"
+            if self._cancel.is_set():
+                self._cancel.clear()
+                self.bridge.stop()
+                return "cancelled"
+            task["stub_ticks"] += 1
+            self.bridge.drive(_BENCH_SPEED, _BENCH_SPEED)       # gated internally
+            if time.monotonic() - t0 > _BENCH_CAP_S:
+                self.bridge.stop()
+                return "bench_timeout"
+            time.sleep(_TICK_S)
+        return "shutdown"
+
+    def _run_mission(self, task: Dict[str, Any]) -> tuple:
+        """The Phase-F body: plan once, then closed-loop drive until the
+        monitor (or an interrupt) ends the trial. Always trial-logged."""
+        t0 = time.monotonic()
+        logger: Optional[TrialLogger] = None
+        try:
+            logger = TrialLogger(self._trials_dir(), task["task_id"],
+                                 task["goal"], task["condition"], self.cfg)
+            task["trial_log"] = str(logger.path)
+        except OSError:
+            logger = None                            # never block a mission on disk
+
+        pr = plan_target(task["goal"], self.rtsm, self.cfg)
+        task["planner_path"] = pr.planner_path
+        task["target_id"] = pr.target_id
+        task["target_label"] = pr.label
+        if logger is not None:
+            logger.log_plan(pr)
+
+        if pr.status != "ok":
+            detail = pr.reason or "target not found"
+            if logger is not None:
+                logger.log_end("not_found", detail,
+                               elapsed_s=time.monotonic() - t0)
+            return "not_found", detail
+
+        task["phase"] = "driving"
+        runner = NavRunner(
+            self.cfg, self.bridge, self.rtsm, pr, task["condition"],
+            stop_event=self.stop_event, preempt_event=self._preempt,
+            cancel_event=self._cancel, shutdown_event=self._shutdown,
+            logger=logger, progress=task,
+        )
+        try:
+            result, detail = runner.run()
+        except Exception as e:  # noqa: BLE001 — a nav crash must still stop the car
+            self.bridge.stop()
+            result, detail = "nav_error", f"{type(e).__name__}: {e}"
+        if logger is not None:
+            logger.log_end(result, detail, elapsed_s=time.monotonic() - t0)
+        return result, detail
+
+    def _trials_dir(self) -> Path:
+        p = Path(self.cfg.trials_output_dir)
+        if not p.is_absolute():
+            p = Path(__file__).resolve().parent / p
+        return p
 
 
 # ── FastAPI shell ────────────────────────────────────────────────────────

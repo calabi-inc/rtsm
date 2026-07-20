@@ -12,10 +12,12 @@ Locked design (code-plan-demo2-rc-car.md §5.0, 2026-06-28):
         haiku         — LLM picked, id validated
         top1_fallback — LLM attempted but failed/invalid → ranked top-1
         top1_no_llm   — no API key / client → ranked top-1 directly
-  * frame_epoch: no upstream anchor id exists yet (parking-lot item), so
-    the plan carries `plan_pose` — the robot pose snapshot from the SAME
-    query response — as the reference for the monitor's pose-discontinuity
-    guard (the locked conservative fallback).
+  * frame_epoch (resolved 2026-07-20, rtsm c75e787): RTSM serves a
+    world-frame discontinuity counter on every robot_pose. The plan records
+    the plan-time value (`frame_epoch`, may be None on epoch-less paths)
+    plus `plan_pose` — the robot pose snapshot from the SAME query
+    response — so the monitor can gate on epoch equality (ints only) with
+    the pose-discontinuity heuristic as belt-and-braces.
 
 The planner decides INTENT only (which object). It computes no motion —
 heading/distance are nav's deterministic geometry (invariant 3).
@@ -76,6 +78,7 @@ class PlanResult:
     stability: float = 0.0
     planner_path: str = "none"       # haiku | top1_fallback | top1_no_llm | none
     plan_pose: Optional[PoseSample] = None
+    frame_epoch: Optional[int] = None  # plan-time epoch (from plan_pose)
     reason: Optional[str] = None     # not_found detail or LLM's one-liner
 
 
@@ -151,10 +154,12 @@ def plan(goal: str, rtsm: RtsmClient, cfg: Config,
     res = rtsm.semantic_query(query, top_k=5)
 
     hits = _eligible(res.results)
+    plan_epoch = res.robot_pose.frame_epoch if res.robot_pose else None
     if not hits:
         detail = "no results" if not res.results else "no candidate has a 3D position"
         return PlanResult(status="not_found", goal=goal, query=query,
-                          plan_pose=res.robot_pose, reason=detail)
+                          plan_pose=res.robot_pose, frame_epoch=plan_epoch,
+                          reason=detail)
 
     candidates = [
         Candidate(
@@ -193,7 +198,8 @@ def plan(goal: str, rtsm: RtsmClient, cfg: Config,
         target_id=picked.id, label=picked.label,
         xyz_world=picked.xyz_world, score=picked.score,
         confirmed=picked.confirmed, stability=picked.stability,
-        planner_path=planner_path, plan_pose=res.robot_pose, reason=reason,
+        planner_path=planner_path, plan_pose=res.robot_pose,
+        frame_epoch=plan_epoch, reason=reason,
     )
 
 
