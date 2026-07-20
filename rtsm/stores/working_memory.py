@@ -772,7 +772,13 @@ class WorkingMemory:
     # backward (new device, NTP) recovers instead of freezing the pose.
     _POSE_GUARD_WINDOW_S = 2.0
 
-    def update_robot_pose(self, t_wc: np.ndarray, q_wc_xyzw: np.ndarray, timestamp: float) -> None:
+    def update_robot_pose(
+        self,
+        t_wc: np.ndarray,
+        q_wc_xyzw: np.ndarray,
+        timestamp: float,
+        frame_epoch: Optional[int] = None,
+    ) -> None:
         """Store latest robot pose (passthrough from sensor).
 
         RTSM does NOT compute or filter pose — it stores what the sensor provides.
@@ -787,6 +793,12 @@ class WorkingMemory:
         clock discontinuity self-heals within the window rather than
         rejecting all future updates. Timestamps must come from the same
         clock per session (FramePacket wall time).
+
+        frame_epoch: opaque counter from the receiver that bumps when the
+        sender starts a new streaming session (world origin may have moved
+        — poses across a bump must not be assumed to share a world frame).
+        None means "this writer doesn't know the epoch" (pipeline writer,
+        ZMQ/replay) and PRESERVES the stored value rather than clearing it.
         """
         ts = float(timestamp)
         now_mono = time.monotonic()
@@ -798,10 +810,13 @@ class WorkingMemory:
                 and (now_mono - self._latest_pose_arrival_mono) < self._POSE_GUARD_WINDOW_S
             ):
                 return
+            if frame_epoch is None and lp is not None:
+                frame_epoch = lp.get("frame_epoch")
             self._latest_pose = {
                 "xyz": t_wc.tolist() if hasattr(t_wc, 'tolist') else list(t_wc),
                 "quaternion_xyzw": q_wc_xyzw.tolist() if hasattr(q_wc_xyzw, 'tolist') else list(q_wc_xyzw),
                 "timestamp": ts,
+                "frame_epoch": frame_epoch,
             }
             self._latest_pose_arrival_mono = now_mono
 

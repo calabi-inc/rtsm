@@ -237,10 +237,11 @@ class WebSocketReceiver:
         self._on_pose_corrections_batch = on_pose_corrections_batch
         self._on_raw_message = on_raw_message
         self._on_handshake_done = on_handshake_done
-        # Called as pose_sink(t_wc, q_wc_xyzw, unix_ts) for EVERY frame with
-        # normal tracking — including frames the keyframe/interval throttle
-        # skips — so consumers (e.g. WorkingMemory.update_robot_pose) see
-        # pose at the full input rate, not the pipeline processing rate.
+        # Called as pose_sink(t_wc, q_wc_xyzw, unix_ts, frame_epoch) for
+        # EVERY frame with normal tracking — including frames the
+        # keyframe/interval throttle skips — so consumers (e.g.
+        # WorkingMemory.update_robot_pose) see pose at the full input rate,
+        # not the pipeline processing rate.
         self._pose_sink = pose_sink
         self._latency_analytics = latency_analytics
 
@@ -249,6 +250,15 @@ class WebSocketReceiver:
         self._last_nonkf_enq_mono: float = 0.0
         self._last_enq_ts_ns: Optional[int] = None
         self._active_session_id: Optional[str] = None
+
+        # Frame epoch — SERVER-lifetime, never reset per connection. Bumps
+        # when a hello carries a new session_id: the sender re-created its
+        # streaming session, so its ARKit world origin may have moved and
+        # poses across the boundary must not be assumed to share a world
+        # frame. Same-id reconnects keep the epoch. Delivered to the pose
+        # sink with every pose so consumers can detect the boundary.
+        self._frame_epoch: int = 0
+        self._epoch_session_id: Optional[str] = None
 
         # Threading
         self._server_thread: Optional[threading.Thread] = None
@@ -268,6 +278,18 @@ class WebSocketReceiver:
             await self._handle_stream(ws)
 
         return app
+
+    # ── Frame epoch ──
+
+    def _note_session(self, session_id: str) -> int:
+        """Advance the frame epoch iff ``session_id`` differs from the last
+        session seen. Calabi Lens mints a fresh UUID per connect and resets
+        ARKit tracking per app lifecycle, so a new id marks a potential
+        world-origin change; a same-id reconnect keeps the epoch."""
+        if session_id != self._epoch_session_id:
+            self._epoch_session_id = session_id
+            self._frame_epoch += 1
+        return self._frame_epoch
 
     # ── Handshake + receive loop ──
 
@@ -311,6 +333,7 @@ class WebSocketReceiver:
         session_id = hello.get("session_id", "unknown")
         device_name = hello.get("device_name", "unknown")
         self._active_session_id = session_id
+        self._note_session(session_id)
 
         ack = {
             "type": "hello_ack",
@@ -575,7 +598,7 @@ class WebSocketReceiver:
         # FramePacket carries, so consumers see one consistent convention.
         if self._pose_sink is not None:
             try:
-                self._pose_sink(t_wc, q_xyzw, unix_ts)
+                self._pose_sink(t_wc, q_xyzw, unix_ts, self._frame_epoch)
             except Exception as e:
                 logger.error(f"[websocket] pose_sink callback error: {e}")
 
