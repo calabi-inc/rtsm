@@ -99,8 +99,7 @@ def env_car(monkeypatch, tmp_path):
     cfg = replace(
         base,
         trials_output_dir=str(tmp_path),
-        nav=replace(base.nav, tick_s=0.02, poll_hz=20.0,
-                    pose_stale_s=0.4, stale_abort_s=1.0),
+        nav=replace(base.nav, tick_s=0.02, poll_hz=20.0, stale_abort_s=1.0),
     )
     rtsm = RtsmClient(f"http://127.0.0.1:{rtsm_srv.server_address[1]}", timeout_s=1.0)
     bridge = Esp32Bridge(f"http://127.0.0.1:{esp_srv.server_address[1]}",
@@ -162,7 +161,10 @@ def test_command_reprobes_preflight_after_recovery(env):
 # ── mission worker: run / preempt / cancel / soft stop ───────────────────
 
 
-def test_command_runs_mission_and_drives(env):
+def test_command_runs_mission_dead_feed_never_drives(env):
+    """The static env IS a dead feed (pose timestamp never advances past
+    the plan-time sample) — the mission must run, but the car must NEVER
+    be energized on a feed that died before the mission started."""
     cfg, rtsm, bridge, _, esp_srv = env
     with TestClient(create_app(cfg, rtsm, bridge)) as c:
         r = c.post("/command", json={"goal": "go to the red mug"}).json()
@@ -175,8 +177,9 @@ def test_command_runs_mission_and_drives(env):
         assert s["task"]["phase"] == "driving"
         assert s["task"]["planner_path"] == "top1_no_llm"   # no API key
         assert s["task"]["target_id"] == "mug-1"
-        assert _wait(lambda: any(rec["path"] == "/drive"
-                                 for rec in esp_srv.recorded))
+        assert _wait(lambda: _result(c) == "stale_stop",
+                     timeout=cfg.nav.stale_abort_s + 3.0)
+        assert not any(rec["path"] == "/drive" for rec in esp_srv.recorded)
 
 
 def test_not_found_goal_no_motion(env):
@@ -256,6 +259,79 @@ def test_estop_abandons_blocks_and_rearms(env):
         assert c.post("/reset_estop").json()["state"] == "READY"
         assert c.post("/command",
                       json={"goal": "go to the red mug"}).status_code == 200
+
+
+def test_reset_estop_refused_while_mission_live(env):
+    """CRITICAL review fix: /reset_estop during a live mission would clear
+    the stop_event/latch before nav observes it — the e-stop would be
+    silently un-fired and the car would resume. Re-arm is idle-only."""
+    cfg, rtsm, bridge, *_ = env
+    app = create_app(cfg, rtsm, bridge)
+    with TestClient(app) as c:
+        c.post("/command", json={"goal": "go to the red mug"})
+        assert _wait(lambda: c.get("/status").json()["state"] == "RUNNING")
+        r = c.post("/reset_estop")                    # mission still live
+        assert r.status_code == 409
+        # After the mission finalizes (here: estop it), re-arm works.
+        app.state.srv.monitor.trigger("test-estop")
+        assert _wait(lambda: c.get("/status").json()["state"] == "ESTOPPED")
+        assert c.post("/reset_estop").status_code == 200
+
+
+def test_goal_queued_before_estop_never_autoruns(env):
+    """A command queued before the e-stop must NOT auto-drive the car
+    after /reset_estop — every post-e-stop motion needs a fresh command."""
+    cfg, rtsm, bridge, *_ = env
+    app = create_app(cfg, rtsm, bridge)
+    with TestClient(app) as c:
+        c.post("/command", json={"goal": "go to the red mug"})
+        assert _wait(lambda: c.get("/status").json()["state"] == "RUNNING")
+        c.post("/command", json={"goal": "go to the blue backpack"})  # queued
+        app.state.srv.monitor.trigger("test-estop")
+        assert _wait(lambda: c.get("/status").json()["state"] == "ESTOPPED")
+        c.post("/reset_estop")
+        time.sleep(0.3)                               # worker would have started it
+        s = c.get("/status").json()
+        assert s["state"] != "RUNNING"
+        assert s["task"] is None
+
+
+def test_stale_preempt_flag_does_not_kill_next_mission(env):
+    """Edge-triggered preempt/cancel signals die at the task boundary —
+    a stale flag must never insta-abort a freshly dequeued mission."""
+    cfg, rtsm, bridge, *_ = env
+    app = create_app(cfg, rtsm, bridge)
+    with TestClient(app) as c:
+        app.state.srv._preempt.set()                  # stale, no mission running
+        app.state.srv._cancel.set()
+        c.post("/command", json={"goal": "go to the red mug"})
+        assert _wait(lambda: (c.get("/status").json().get("task") or {})
+                     .get("ticks", 0) > 3)            # mission survives + runs
+        assert c.get("/status").json()["state"] == "RUNNING"
+
+
+def test_baseline_condition_refused_until_phase_h(env):
+    cfg, rtsm, bridge, *_ = env
+    with TestClient(create_app(cfg, rtsm, bridge)) as c:
+        r = c.post("/command", json={"goal": "go to the red mug",
+                                     "condition": "baseline"})
+        assert r.status_code == 501
+        assert "baseline" in str(r.json()["detail"])
+
+
+def test_plan_error_does_not_kill_worker(env):
+    """CRITICAL review fix: a planning-time RTSM error must be a failed
+    TRIAL, not a dead worker thread wedged in RUNNING forever."""
+    cfg, rtsm, bridge, rtsm_srv, _ = env
+    del rtsm_srv.routes["/search/semantic"]           # semantic_query -> HTTP 404
+    with TestClient(create_app(cfg, rtsm, bridge)) as c:
+        c.post("/command", json={"goal": "go to the red mug"})
+        assert _wait(lambda: _result(c) == "plan_error")
+        s = c.get("/status").json()
+        assert s["state"] == "READY"                  # worker alive, not wedged
+        rtsm_srv.routes["/search/semantic"] = json.loads(json.dumps(SEMANTIC))
+        r = c.post("/command", json={"goal": "go to the red mug"})
+        assert r.status_code == 200                   # and still accepting work
 
 
 # ── bench dummy drive (the Gate-E hardware test vehicle) ─────────────────

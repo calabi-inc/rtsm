@@ -59,8 +59,10 @@ def test_trial_start_schema(tmp_path):
     assert start["plan_pose"]["frame_epoch"] == 7
     assert start["config"]["arrival_threshold_m"] == CFG.nav.arrival_threshold_m
     assert start["config"]["is_calibrated"] is False   # pre-Phase-G
+    assert "git_commit" in start["provenance"]         # best-effort, may be null
+    assert start["rng_seed"] is None                   # baseline-only (Phase H)
     # Protocol-era fields: present-but-null, operator-filled post-trial.
-    for key in ("layout_id", "tape_cm", "video_file", "notes"):
+    for key in ("layout_id", "start_pose_id", "tape_cm", "video_file", "notes"):
         assert key in start and start[key] is None
 
 
@@ -87,6 +89,19 @@ def test_timeout_end_censored_no_tta(tmp_path):
     end = _full_trial(tmp_path, "timeout", elapsed=60.0)[-1]
     assert end["censored"] is True
     assert end["tta_s"] is None
+    for key in ("human_interventions", "stop_photo"):   # operator-filled
+        assert key in end and end[key] is None
+
+
+def test_same_trial_id_never_merges_files(tmp_path):
+    """Append mode + an id collision (server restart resets the seq) must
+    produce a SECOND file, never two trials merged into one JSONL."""
+    a = TrialLogger(tmp_path, "t-dup", "g", "rtsm", CFG)
+    a.log_plan(_plan()); a.log_end("arrived", elapsed_s=1.0)
+    b = TrialLogger(tmp_path, "t-dup", "g", "rtsm", CFG)
+    b.log_plan(_plan()); b.log_end("timeout", elapsed_s=60.0)
+    assert a.path != b.path
+    assert len(_read(a.path)) == 2 and len(_read(b.path)) == 2
 
 
 def test_not_found_trial_no_ticks(tmp_path):

@@ -75,7 +75,6 @@ class NavCfg:
     kp_steer: float
     tick_s: float
     poll_hz: float
-    pose_stale_s: float
     pose_frozen_polls: int
     stale_abort_s: float
     drift_margin_m: float
@@ -183,9 +182,13 @@ def _validate(cfg: Config) -> None:
         )
     if cfg.nav.poll_hz <= 0 or (1.0 / cfg.nav.poll_hz) < cfg.nav.tick_s:
         raise ValueError("nav.poll_hz must be positive and no faster than the tick rate")
-    if cfg.nav.pose_stale_s >= cfg.nav.stale_abort_s:
+    # Wire cadence: during a hold, sends happen every max(heartbeat_s,
+    # 1/drive_rate_hz) — that interval must beat the firmware watchdog too
+    # (a legal-looking drive_rate_hz of 3 would starve heartbeats).
+    if max(cfg.esp32.heartbeat_s, 1.0 / cfg.esp32.drive_rate_hz) >= 0.3:
         raise ValueError(
-            "nav.pose_stale_s (hold) must be < nav.stale_abort_s (safe-stop bound)"
+            "max(esp32.heartbeat_s, 1/esp32.drive_rate_hz) must stay below "
+            "the 300 ms firmware watchdog window"
         )
     if cfg.nav.timeout_baseline_s < cfg.nav.timeout_rtsm_s:
         raise ValueError("baseline timeout must be >= rtsm timeout (censoring policy)")

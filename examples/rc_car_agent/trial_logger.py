@@ -24,6 +24,7 @@ after init: a broken disk must not crash the control loop.
 from __future__ import annotations
 
 import json
+import subprocess
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -31,11 +32,30 @@ from typing import Optional
 SCHEMA_VERSION = 1
 
 
+def _git_commit() -> Optional[str]:
+    """Best-effort repo provenance for the paper; never raises."""
+    try:
+        out = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=Path(__file__).resolve().parent, capture_output=True,
+            text=True, timeout=3.0,
+        )
+        return out.stdout.strip() or None
+    except Exception:  # noqa: BLE001
+        return None
+
+
 class TrialLogger:
     def __init__(self, output_dir, trial_id: str, goal: str, condition: str, cfg):
         self.dir = Path(output_dir)
         self.dir.mkdir(parents=True, exist_ok=True)
         self.path = self.dir / f"{trial_id}.jsonl"
+        # Never merge two trials into one file (append mode + an id
+        # collision, e.g. across restarts, would corrupt E1 data).
+        n = 0
+        while self.path.exists():
+            n += 1
+            self.path = self.dir / f"{trial_id}-r{n}.jsonl"
         self.trial_id = trial_id
         self._goal = goal
         self._condition = condition
@@ -86,8 +106,14 @@ class TrialLogger:
                 "yaw_offset_rad": cal.yaw_offset_rad,
                 "rig_id": cal.rig_id,
             },
+            "provenance": {
+                "git_commit": _git_commit(),
+                "config_path": getattr(self._cfg, "source_path", None),
+            },
+            "rng_seed": None,             # baseline condition only (Phase H)
             # Operator-filled after the trial (kept null by software):
             "layout_id": None,
+            "start_pose_id": None,
             "tape_cm": None,
             "video_file": None,
             "notes": None,
@@ -124,6 +150,9 @@ class TrialLogger:
             "tta_s": (round(elapsed_s, 3)
                       if result == "arrived" and elapsed_s is not None else None),
             "censored": result == "timeout",
+            # Operator-filled after the trial:
+            "human_interventions": None,
+            "stop_photo": None,
             "ended_at": datetime.now().isoformat(timespec="seconds"),
         })
         self.close()

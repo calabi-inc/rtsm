@@ -21,7 +21,6 @@ FAST_NAV = replace(
     BASE_CFG.nav,
     tick_s=0.01,
     poll_hz=50.0,
-    pose_stale_s=0.2,
     stale_abort_s=0.5,
     timeout_rtsm_s=20.0,
 )
@@ -253,3 +252,38 @@ def test_closed_loop_converges_from_behind():
     rotate_ticks = [c for c in bridge.drive_calls
                     if (c[1] < 0 < c[2]) or (c[2] < 0 < c[1])]
     assert rotate_ticks, "should have rotated in place first"
+
+
+# ── trial-log pairing (review fix: cmd derived from the SAME tick) ───────
+
+
+class _RecLogger:
+    def __init__(self):
+        self.ticks = []
+
+    def log_tick(self, t, pose, tick, left, right):
+        self.ticks.append((tick, left, right))
+
+
+def test_logged_cmd_pairs_with_same_ticks_heading_err():
+    """E1 analysis pairs fields per JSONL line — each fresh 'ongoing' tick
+    must log the command DERIVED FROM its own heading_err (a one-poll lag
+    would produce phantom steer-sign violations in the paper data)."""
+    car = FakeCar(x=0.0, z=0.0, yaw=0.0)
+    target = [0.3, 0.3, 1.5]
+    bridge, rtsm = _wire_fake_car(car)
+    logger = _RecLogger()
+    events = dict(stop_event=threading.Event(), preempt_event=threading.Event(),
+                  cancel_event=threading.Event(), shutdown_event=threading.Event())
+    runner = NavRunner(FAST_CFG, bridge, rtsm, mk_plan(target=target, epoch=7),
+                       "rtsm", logger=logger, **events)
+    result, _ = runner.run()
+    assert result == "arrived"
+
+    fresh = [(t, l, r) for (t, l, r) in logger.ticks
+             if t.status == "ongoing" and t.pose_fresh and t.heading_err is not None]
+    assert len(fresh) >= 5
+    for tick, left, right in fresh:
+        exp_l, exp_r, _mode = drive_command(tick.heading_err, FAST_CFG.nav)
+        assert left == pytest.approx(exp_l), "logged cmd lags its heading_err"
+        assert right == pytest.approx(exp_r)

@@ -177,6 +177,13 @@ class AgentServer:
         cond = condition or self.cfg.server.default_condition
         if cond not in ("rtsm", "baseline"):
             raise HTTPException(400, f"condition must be rtsm|baseline, got {cond!r}")
+        if cond == "baseline" and goal != BENCH_DUMMY_GOAL:
+            # Honesty guard: baseline_search.py is Phase H. Running the
+            # memory pipeline under a "baseline" label would silently
+            # poison the E1 comparison data.
+            raise HTTPException(
+                501, "condition=baseline is not implemented yet (Phase H) — "
+                     "refusing to run the memory pipeline under a baseline label")
         if self.monitor.triggered or self.bridge.estopped:
             raise HTTPException(503, "ESTOPPED — POST /reset_estop to re-arm (operator action)")
 
@@ -199,7 +206,10 @@ class AgentServer:
             # ALL keys pre-seeded: the worker/nav thread only ever updates
             # values, so status()'s dict() copy never races a size change.
             task = {
-                "task_id": f"t{datetime.now():%Y%m%d}-{self._seq:03d}",
+                # Timestamped to the second: ids stay unique across server
+                # restarts (the seq counter resets), so trial JSONLs never
+                # merge two trials into one file.
+                "task_id": f"t{datetime.now():%Y%m%d-%H%M%S}-{self._seq:03d}",
                 "goal": goal,
                 "condition": cond,
                 "phase": "queued",
@@ -235,6 +245,16 @@ class AgentServer:
         return {"stopped": ok}
 
     def reset_estop(self) -> Dict[str, Any]:
+        with self._lock:
+            # Re-arm is an IDLE-only operation. Clearing the latch and
+            # stop_event while a mission is still live (nav possibly blocked
+            # in an HTTP call, not yet having observed the event) would
+            # silently un-fire the e-stop and the car would resume driving.
+            if self.current is not None or self._pending is not None:
+                raise HTTPException(
+                    409, "mission still active/queued — the e-stop can only "
+                         "be re-armed from idle; wait for the mission to "
+                         "finalize (state ESTOPPED), then retry")
         self.monitor.reset()
         self.bridge.reset_estop()
         with self._lock:
@@ -247,8 +267,15 @@ class AgentServer:
 
     def status(self) -> Dict[str, Any]:
         with self._lock:
+            # The latch is authoritative for display: an e-stop triggered
+            # while IDLE never passes through a mission finalize, so
+            # self.state alone would keep saying READY while /command 503s.
+            state = self.state
+            if state != "RUNNING" and (self.monitor.triggered
+                                       or self.bridge.estopped):
+                state = "ESTOPPED"
             return {
-                "state": self.state,
+                "state": state,
                 "not_ready_reasons": list(self.not_ready_reasons),
                 "task": dict(self.current) if self.current else None,
                 "last_result": dict(self.last_result) if self.last_result else None,
@@ -266,23 +293,43 @@ class AgentServer:
                 self._pending = None
                 if task is None:
                     self._wake.clear()
+                else:
+                    # Atomic handoff: pending -> current under ONE lock hold
+                    # (no window where a preempting submit() can miss both),
+                    # and stale edge-triggered preempt/cancel signals die at
+                    # the task boundary — they always targeted the PREVIOUS
+                    # task, and must never insta-kill this one.
+                    self.current = task
+                    task["phase"] = "planning"
+                    prev_state = self.state
+                    self.state = "RUNNING"
+                    self._preempt.clear()
+                    self._cancel.clear()
             if task is not None:
-                self._run_task(task)
+                # Exception barrier: the single worker thread must survive
+                # ANYTHING a task throws — a dead worker would wedge the
+                # server in RUNNING while still accepting commands.
+                try:
+                    self._run_task(task, prev_state)
+                except Exception as e:  # noqa: BLE001
+                    try:
+                        self.bridge.stop()
+                    except Exception:  # noqa: BLE001
+                        pass
+                    self._finalize_task(task, "worker_error",
+                                        f"{type(e).__name__}: {e}", prev_state)
 
-    def _run_task(self, task: Dict[str, Any]) -> None:
+    def _run_task(self, task: Dict[str, Any], prev_state: str) -> None:
         """One task = one trial: bench dummy drive, or the real mission
         (planner -> nav -> monitor, trial-logged)."""
-        with self._lock:
-            self.current = task
-            task["phase"] = "planning"
-            prev_state = self.state
-            self.state = "RUNNING"
-
         if task["goal"] == BENCH_DUMMY_GOAL:
             result, detail = self._run_bench(task), ""
         else:
             result, detail = self._run_mission(task)
+        self._finalize_task(task, result, detail, prev_state)
 
+    def _finalize_task(self, task: Dict[str, Any], result: str, detail: str,
+                       prev_state: str) -> None:
         with self._lock:
             task["result"] = result
             task["detail"] = detail
@@ -291,6 +338,10 @@ class AgentServer:
             self.current = None
             if result == "estopped":
                 self.state = "ESTOPPED"
+                # A goal queued BEFORE the e-stop must never auto-drive the
+                # car after re-arm — the e-stop abandons EVERYTHING; every
+                # post-e-stop motion needs a fresh operator command.
+                self._pending = None
             else:
                 self.state = "READY" if self._ready else (
                     prev_state if prev_state == "NOT_READY" else "NOT_READY"
@@ -332,7 +383,15 @@ class AgentServer:
         except OSError:
             logger = None                            # never block a mission on disk
 
-        pr = plan_target(task["goal"], self.rtsm, self.cfg)
+        try:
+            pr = plan_target(task["goal"], self.rtsm, self.cfg)
+        except Exception as e:  # noqa: BLE001 — an RTSM/HTTP hiccup at plan
+            # time is a failed TRIAL, never a dead worker thread.
+            detail = f"planning failed: {type(e).__name__}: {e}"
+            if logger is not None:
+                logger.log_end("plan_error", detail,
+                               elapsed_s=time.monotonic() - t0)
+            return "plan_error", detail
         task["planner_path"] = pr.planner_path
         task["target_id"] = pr.target_id
         task["target_label"] = pr.label

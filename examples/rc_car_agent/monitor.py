@@ -25,11 +25,13 @@ If the plan-time epoch was None, the first int epoch seen is adopted as
 the reference so a mid-drive session restart is still caught.
 
 Staleness (locked): freshness = the sensor timestamp ADVANCED since the
-last poll, measured on OUR monotonic clock (never sensor-vs-wall).
-    < pose_stale_s        normal re-aim window
-    >= pose_stale_s       nav holds the last command (still heartbeating)
-    >= stale_abort_s      safe stop + abort — the car never drives blind
-                          until the trial timeout (audit pin 2026-07-20)
+last sample seen, measured on OUR monotonic clock (never sensor-vs-wall).
+The reference is seeded from plan_pose.timestamp, so a feed that died
+BEFORE the mission (still serving the plan-time pose) is never "fresh" —
+the car does not launch on a dead feed. Not-fresh -> nav holds the last
+command (still heartbeating); blind for stale_abort_s -> safe stop +
+abort — never blind until the trial timeout (audit pin 2026-07-20).
+pose_frozen_polls only labels the hold "frozen" in logs (diagnostic).
 """
 
 from __future__ import annotations
@@ -81,7 +83,11 @@ class MissionMonitor:
         self._t0 = float(t0_mono)
 
         self._ref_epoch: Optional[int] = plan_epoch
-        self._last_ts: Optional[float] = None
+        # Freshness reference seeded from the plan-time pose: a dead feed
+        # still serving that exact timestamp must never count as fresh.
+        self._last_ts: Optional[float] = (
+            plan_pose.timestamp if plan_pose is not None else None
+        )
         self._frozen_polls = 0
         self._last_fresh_mono = self._t0
         self._best_dist: Optional[float] = None
@@ -138,6 +144,11 @@ class MissionMonitor:
         except DegenerateHeadingError as e:
             return MonitorTick(status="degenerate_heading", pose_fresh=True,
                                detail=str(e))
+        except ValueError as e:
+            # Malformed quaternion (wrong length / zero norm) that slipped
+            # past the client — a verdict, never a crashed control loop.
+            return MonitorTick(status="degenerate_heading", pose_fresh=True,
+                               detail=f"malformed quaternion: {e}")
         car_x, car_z, car_yaw = camera_to_car(
             pose.xyz, cam_yaw, self._cal.yaw_offset_rad, self._cal.lever_arm_rf
         )

@@ -150,25 +150,35 @@ class NavRunner:
                 self._bridge.stop()
                 return "cancelled", "operator cancel"
 
-            now = time.monotonic()
-            if now >= next_poll:
-                next_poll = now + poll_interval
+            if time.monotonic() >= next_poll:
                 pose = self._safe_pose()
+                # Clock AFTER the fetch: if RTSM blocked us for seconds,
+                # the staleness/timeout verdicts must see that time.
+                now = time.monotonic()
+                next_poll = now + poll_interval
                 tick = self._monitor.assess(pose, now)
                 self._note_progress(tick)
+                if (tick.status == "ongoing" and tick.pose_fresh
+                        and tick.heading_err is not None):
+                    left, right, _mode = drive_command(tick.heading_err, nav)
+                    have_cmd = True
                 if self._logger is not None:
+                    # Logged AFTER the command update: each fresh tick line
+                    # pairs heading_err with the command DERIVED FROM IT
+                    # (hold/terminal ticks carry the held command).
                     self._logger.log_tick(now - self._t0, pose, tick,
                                           left, right)
                 if tick.status != "ongoing":
                     self._bridge.stop()
                     return tick.status, tick.detail
-                if tick.pose_fresh and tick.heading_err is not None:
-                    left, right, _mode = drive_command(tick.heading_err, nav)
-                    have_cmd = True
 
             # HOLD RULE: called every tick, fresh pose or not (see module
-            # docstring) — the bridge decides what hits the wire.
-            if have_cmd:
+            # docstring) — the bridge decides what hits the wire. Skipped
+            # the instant an interrupt is pending (handled next iteration):
+            # a cancelled/e-stopped mission must not push one more command.
+            if have_cmd and not (self._stop_event.is_set()
+                                 or self._preempt.is_set()
+                                 or self._cancel.is_set()):
                 self._bridge.drive(left, right)
 
             time.sleep(nav.tick_s)

@@ -84,11 +84,24 @@ class RtsmClient:
         ts = raw.get("timestamp")
         if xyz is None or quat is None or ts is None:
             return None
+        try:
+            xyz_f = [float(v) for v in xyz]
+            quat_f = [float(v) for v in quat]
+            ts_f = float(ts)
+        except (TypeError, ValueError):
+            return None
+        # A malformed pose is treated as NO pose — it flows through the
+        # monitor's bounded stale-hold path instead of ever reaching the
+        # geometry with a quaternion that can't rotate anything.
+        if len(xyz_f) != 3 or len(quat_f) != 4:
+            return None
+        if sum(v * v for v in quat_f) < 1e-12:       # zero-norm quaternion
+            return None
         epoch = raw.get("frame_epoch")   # tolerate missing key AND null
         return PoseSample(
-            xyz=[float(v) for v in xyz],
-            quaternion_xyzw=[float(v) for v in quat],
-            timestamp=float(ts),
+            xyz=xyz_f,
+            quaternion_xyzw=quat_f,
+            timestamp=ts_f,
             fetched_at_mono=time.monotonic(),
             frame_epoch=int(epoch) if epoch is not None else None,
         )

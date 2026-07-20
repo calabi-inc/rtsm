@@ -16,7 +16,6 @@ CFG = load_config()
 NAV = replace(
     CFG.nav,
     arrival_threshold_m=0.40,
-    pose_stale_s=1.0,
     stale_abort_s=2.5,
     drift_margin_m=0.8,
     discontinuity_base_m=0.5,
@@ -208,7 +207,7 @@ def test_receding_within_margin_is_ongoing():
     assert t.status == "ongoing"
 
 
-# ── degenerate heading ───────────────────────────────────────────────────
+# ── degenerate heading / malformed pose robustness ───────────────────────
 
 
 def test_camera_facing_down_is_a_fault():
@@ -217,3 +216,50 @@ def test_camera_facing_down_is_a_fault():
                       timestamp=1.0, fetched_at_mono=0.0)   # pitch -90°
     m = mk_monitor()
     assert m.assess(pose, 0.1).status == "degenerate_heading"
+
+
+def test_malformed_quaternion_is_a_verdict_not_a_crash():
+    """Review fix: a zero-norm or wrong-length quaternion that reaches the
+    monitor must yield a safe verdict, never an exception that kills the
+    control loop (motors would then only stop via the firmware watchdog)."""
+    m = mk_monitor()
+    zero = PoseSample(xyz=[0, 0.3, 0], quaternion_xyzw=[0, 0, 0, 0],
+                      timestamp=1.0, fetched_at_mono=0.0)
+    assert m.assess(zero, 0.1).status == "degenerate_heading"
+    short = PoseSample(xyz=[0, 0.3, 0], quaternion_xyzw=[0, 0, 0],
+                       timestamp=2.0, fetched_at_mono=0.0)
+    assert m.assess(short, 0.2).status == "degenerate_heading"
+
+
+def test_parse_pose_rejects_malformed_payloads():
+    """Boundary hardening: garbage payloads become None (-> bounded
+    stale-hold path), never an invalid PoseSample."""
+    from rtsm_client import RtsmClient
+    ok = {"xyz": [0, 0.3, 0], "quaternion_xyzw": [0, 0, 0, 1],
+          "timestamp": 1.0}
+    assert RtsmClient._parse_pose(dict(ok)) is not None
+    assert RtsmClient._parse_pose({**ok, "quaternion_xyzw": [0, 0, 0, 0]}) is None
+    assert RtsmClient._parse_pose({**ok, "quaternion_xyzw": [0, 0, 1]}) is None
+    assert RtsmClient._parse_pose({**ok, "xyz": [0, 0.3]}) is None
+    assert RtsmClient._parse_pose({**ok, "timestamp": "not-a-number"}) is None
+
+
+# ── dead-feed launch guard (review fix) ──────────────────────────────────
+
+
+def test_feed_dead_since_plan_never_counts_as_fresh():
+    """A feed that died BEFORE the mission still serves the plan-time
+    timestamp — the first live poll must NOT be 'fresh' (the old behavior
+    launched the car blind for up to stale_abort_s)."""
+    plan_pose = mk_pose(0, 0, ts=100.0)
+    m = mk_monitor(plan_pose=plan_pose)
+    t = m.assess(mk_pose(0, 0, ts=100.0), now_mono=0.2)    # same ts as plan
+    assert t.status == "ongoing" and not t.pose_fresh
+    assert m.assess(mk_pose(0, 0, ts=100.0), now_mono=2.6).status == "stale_stop"
+
+
+def test_live_feed_first_poll_is_fresh():
+    plan_pose = mk_pose(0, 0, ts=100.0)
+    m = mk_monitor(plan_pose=plan_pose)
+    t = m.assess(mk_pose(0, 0.05, ts=100.2), now_mono=0.2)  # ts advanced
+    assert t.status == "ongoing" and t.pose_fresh
