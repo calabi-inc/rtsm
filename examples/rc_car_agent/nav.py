@@ -100,6 +100,7 @@ class NavRunner:
         shutdown_event: threading.Event,
         logger: Optional[TrialLogger] = None,
         progress: Optional[dict] = None,
+        timeout_s_override: Optional[float] = None,
     ):
         self._cfg = cfg
         self._bridge = bridge
@@ -112,8 +113,11 @@ class NavRunner:
         self._logger = logger
         self._progress = progress if progress is not None else {}
 
-        timeout_s = (cfg.nav.timeout_rtsm_s if condition == "rtsm"
-                     else cfg.nav.timeout_baseline_s)
+        # Override: the baseline's search phase spends part of the trial
+        # budget before the drive starts — the drive gets the remainder.
+        timeout_s = timeout_s_override if timeout_s_override is not None else (
+            cfg.nav.timeout_rtsm_s if condition == "rtsm"
+            else cfg.nav.timeout_baseline_s)
         self._t0 = time.monotonic()
         self._monitor = MissionMonitor(
             nav=cfg.nav,

@@ -95,6 +95,13 @@ class PlannerCfg:
 class BaselineCfg:
     freshness_gate_s: float
     rng_seed: int
+    sweep_step_turn: float
+    sweep_step_s: float
+    dwell_s: float
+    steps_per_sweep: int
+    walk_speed: float
+    walk_s: float
+    query_top_k: int
 
 
 @dataclass(frozen=True)

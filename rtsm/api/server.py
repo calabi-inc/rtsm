@@ -548,6 +548,10 @@ def create_app(
                 "confirmed": obj.confirmed if obj else True,
                 "stability": round(float(obj.stability), 3) if obj else 0.0,
                 "xyz_world": obj.xyz_world.tolist() if obj and obj.xyz_world is not None else None,
+                # Server wall clock of the last observation — lets agents
+                # apply recency/freshness gates without a per-object fetch.
+                "last_seen_wall_utc": (float(getattr(obj, "last_seen_wall_utc", 0.0))
+                                       if obj else None),
             }
 
             # Include most recent snapshot for multimodal agent verification

@@ -49,6 +49,11 @@ class SemanticHit:
     confirmed: bool
     stability: float
     xyz_world: Optional[List[float]]
+    # Server wall clock of the object's last observation (None on servers
+    # predating the field). The baseline's freshness gate compares this to
+    # the agent's own time.time() — valid because RTSM and the agent run
+    # on the SAME machine (locked demo topology).
+    last_seen_wall_utc: Optional[float] = None
 
 
 @dataclass(frozen=True)
@@ -150,6 +155,11 @@ class RtsmClient:
                 xyz_world=(
                     [float(v) for v in e["xyz_world"]]
                     if e.get("xyz_world") is not None
+                    else None
+                ),
+                last_seen_wall_utc=(
+                    float(e["last_seen_wall_utc"])
+                    if e.get("last_seen_wall_utc") is not None
                     else None
                 ),
             )

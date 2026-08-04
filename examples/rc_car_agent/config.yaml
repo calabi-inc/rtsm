@@ -47,7 +47,14 @@ planner:
 
 baseline:
   freshness_gate_s: 2.0                # only objects seen within this window count as "currently visible"
-  rng_seed: 0                          # per-trial seed is logged; 0 → derive from trial_id
+  rng_seed: 0                          # per-trial seed is logged; 0 → derive from trial_id (v1 policy uses it only for sweep direction)
+  sweep_step_turn: 0.4                 # differential magnitude of one rotate step
+  sweep_step_s: 0.5                    # one rotate step (~30-40° at calibrated turn rate)
+  dwell_s: 1.2                         # observe pause after each step (frames must arrive + pipeline must process)
+  steps_per_sweep: 12                  # rotate steps per full sweep before relocating
+  walk_speed: 0.3                      # forward relocation speed between sweeps
+  walk_s: 1.2                          # forward relocation duration
+  query_top_k: 5
 
 calibration:
   # Written by calibrate.py — do not hand-edit. Units: rad / m / dimensionless.

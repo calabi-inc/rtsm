@@ -38,12 +38,26 @@ _TS_BASE = 1751000000.0
 class FakeCar:
     def __init__(self, x: float = 0.0, z: float = 0.0, yaw: float = 0.0,
                  speed_scale_mps: float = 2.0, turn_scale_rps: float = 3.0,
-                 epoch: int = 7):
+                 epoch: int = 7,
+                 cam_yaw_offset: float = 0.0,
+                 cam_lever_arm_rf: tuple = (0.0, 0.0)):
+        """(x, z, yaw) is the DRIVE CENTER pose. The served pose is the
+        CAMERA's — displaced by the mount model so calibration routines can
+        be tested by planting constants and asserting recovery:
+          cam_yaw_offset: car_yaw = cam_yaw + offset (geometry.camera_to_car
+              convention), i.e. the camera is skewed CW-of-car by +offset.
+          cam_lever_arm_rf: (right, forward) from CAMERA to DRIVE CENTER in
+              the car body frame — same tuple calibrate.py must recover.
+        Defaults (0, (0,0)) collapse to camera == drive center (all
+        pre-existing tests unchanged)."""
         self._lock = threading.Lock()
         self.x, self.z, self.yaw = float(x), float(z), float(yaw)
         self._speed = float(speed_scale_mps)
         self._turn = float(turn_scale_rps)
         self.epoch = int(epoch)
+        self._cam_yaw_offset = float(cam_yaw_offset)
+        self._cam_lever_r = float(cam_lever_arm_rf[0])
+        self._cam_lever_f = float(cam_lever_arm_rf[1])
         self._left = 0.0
         self._right = 0.0
         self._t0 = time.monotonic()
@@ -90,9 +104,16 @@ class FakeCar:
             self._advance_locked()
             ts = (self._frozen_ts if self._frozen_ts is not None
                   else _TS_BASE + (time.monotonic() - self._t0))
-            half = 0.5 * self.yaw
+            # Camera pose from the drive-center pose via the mount model:
+            # car = cam + f*fwd(yaw) + r*right(yaw)  ->  cam = car - f*fwd - r*right
+            # with fwd = (sin, cos), right = (-cos, sin) at CAR yaw.
+            s, c = math.sin(self.yaw), math.cos(self.yaw)
+            cam_x = self.x - self._cam_lever_f * s + self._cam_lever_r * c
+            cam_z = self.z - self._cam_lever_f * c - self._cam_lever_r * s
+            cam_yaw = self.yaw - self._cam_yaw_offset
+            half = 0.5 * cam_yaw
             return {
-                "xyz": [self.x, 0.3, self.z],
+                "xyz": [cam_x, 0.3, cam_z],
                 "quaternion_xyzw": [0.0, math.sin(half), 0.0, math.cos(half)],
                 "timestamp": ts,
                 "frame_epoch": self.epoch,
@@ -103,6 +124,15 @@ class FakeCar:
             self._advance_locked()
             return math.hypot(float(target_xyz[0]) - self.x,
                               float(target_xyz[2]) - self.z)
+
+    def camera_xz_yaw(self):
+        """(cam_x, cam_z, cam_yaw) — for the handler's visibility model."""
+        with self._lock:
+            self._advance_locked()
+            s, c = math.sin(self.yaw), math.cos(self.yaw)
+            return (self.x - self._cam_lever_f * s + self._cam_lever_r * c,
+                    self.z - self._cam_lever_f * c - self._cam_lever_r * s,
+                    self.yaw - self._cam_yaw_offset)
 
 
 class FakeRtsmHandler(BaseHTTPRequestHandler):
@@ -125,7 +155,7 @@ class FakeRtsmHandler(BaseHTTPRequestHandler):
             return self._json({
                 "query": "q",
                 "robot_pose": car.pose_payload(),
-                "results": list(self.server.semantic_results),
+                "results": self._results_with_freshness(car),
             })
         if path.startswith("/objects/"):
             detail = self.server.objects.get(path.rsplit("/", 1)[1])
@@ -133,6 +163,37 @@ class FakeRtsmHandler(BaseHTTPRequestHandler):
                 return self._json(detail)
         self.send_response(404)
         self.end_headers()
+
+    def _results_with_freshness(self, car: FakeCar) -> list:
+        """Stamp last_seen_wall_utc on each result. Without a visibility
+        model (server.visibility is None/absent): always fresh — memory-
+        condition tests behave exactly as before. WITH one ({fov_deg,
+        range_m}): an object's last-seen only advances while the camera is
+        actually pointed at it — which is what makes the baseline sweep
+        meaningful in tests."""
+        vis = getattr(self.server, "visibility", None)
+        now = time.time()
+        out = []
+        if not hasattr(self.server, "obj_last_seen"):
+            self.server.obj_last_seen = {}
+        for entry in self.server.semantic_results:
+            e = dict(entry)
+            if vis is None:
+                e["last_seen_wall_utc"] = now
+            else:
+                cx, cz, cyaw = car.camera_xz_yaw()
+                tx, tz = e["xyz_world"][0], e["xyz_world"][2]
+                bearing = math.atan2(tx - cx, tz - cz)
+                off = math.atan2(math.sin(bearing - cyaw),
+                                 math.cos(bearing - cyaw))
+                dist = math.hypot(tx - cx, tz - cz)
+                if (abs(off) <= math.radians(vis["fov_deg"]) / 2
+                        and dist <= vis["range_m"]):
+                    self.server.obj_last_seen[e["id"]] = now
+                e["last_seen_wall_utc"] = self.server.obj_last_seen.get(
+                    e["id"], 0.0)
+            out.append(e)
+        return out
 
     def _json(self, payload: dict):
         body = json.dumps(payload).encode()

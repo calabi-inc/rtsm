@@ -67,7 +67,7 @@ class TrialLogger:
 
     # ── records ──────────────────────────────────────────────────────────
 
-    def log_plan(self, plan) -> None:
+    def log_plan(self, plan, rng_seed=None) -> None:
         nav = self._cfg.nav
         cal = self._cfg.calibration
         self._write({
@@ -110,7 +110,7 @@ class TrialLogger:
                 "git_commit": _git_commit(),
                 "config_path": getattr(self._cfg, "source_path", None),
             },
-            "rng_seed": None,             # baseline condition only (Phase H)
+            "rng_seed": rng_seed,         # baseline condition only
             # Operator-filled after the trial (kept null by software):
             "layout_id": None,
             "start_pose_id": None,
@@ -118,6 +118,12 @@ class TrialLogger:
             "video_file": None,
             "notes": None,
         })
+
+    def log_event(self, name: str, t_rel_s: float, **fields) -> None:
+        """Free-form milestone record (e.g. baseline_acquired). Fields must
+        be JSON-serializable."""
+        self._write({"type": "event", "name": name,
+                     "t": round(t_rel_s, 3), **fields})
 
     def log_tick(self, t_rel_s: float, pose, tick, left: float, right: float) -> None:
         self._ticks += 1

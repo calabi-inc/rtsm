@@ -100,6 +100,8 @@ def env_car(monkeypatch, tmp_path):
         base,
         trials_output_dir=str(tmp_path),
         nav=replace(base.nav, tick_s=0.02, poll_hz=20.0, stale_abort_s=1.0),
+        baseline=replace(base.baseline, sweep_step_s=0.25, dwell_s=0.3,
+                         steps_per_sweep=8, walk_s=0.3, walk_speed=0.2),
     )
     rtsm = RtsmClient(f"http://127.0.0.1:{rtsm_srv.server_address[1]}", timeout_s=1.0)
     bridge = Esp32Bridge(f"http://127.0.0.1:{esp_srv.server_address[1]}",
@@ -310,13 +312,13 @@ def test_stale_preempt_flag_does_not_kill_next_mission(env):
         assert c.get("/status").json()["state"] == "RUNNING"
 
 
-def test_baseline_condition_refused_until_phase_h(env):
+def test_baseline_condition_accepted(env):
     cfg, rtsm, bridge, *_ = env
     with TestClient(create_app(cfg, rtsm, bridge)) as c:
         r = c.post("/command", json={"goal": "go to the red mug",
                                      "condition": "baseline"})
-        assert r.status_code == 501
-        assert "baseline" in str(r.json()["detail"])
+        assert r.status_code == 200
+        assert r.json()["condition"] == "baseline"
 
 
 def test_plan_error_does_not_kill_worker(env):
@@ -409,6 +411,33 @@ def test_stale_abort_bounded_e2e(env_car):
         # blind-driving until the 60 s trial timeout.
         assert time.monotonic() - frozen_at < cfg.nav.stale_abort_s + 2.0
         assert any(rec["path"] == "/stop" for rec in esp_srv.recorded)
+
+
+def test_baseline_e2e_sweeps_acquires_arrives(env_car):
+    """Phase-H gate: condition (b) end-to-end. Target starts OUTSIDE the
+    camera's field of view (behind the car); the freshness gate keeps the
+    memory answer invisible; the sweep rotates until the target is
+    actually seen; then the same closed-loop drive arrives."""
+    cfg, rtsm, bridge, rtsm_srv, esp_srv, car, tmp_path = env_car
+    rtsm_srv.visibility = {"fov_deg": 70, "range_m": 8.0}
+    target = [0.0, 0.3, -1.5]                        # directly behind (yaw 0)
+    rtsm_srv.semantic_results[0]["xyz_world"] = target
+    with TestClient(create_app(cfg, rtsm, bridge)) as c:
+        r = c.post("/command", json={"goal": "go to the red mug",
+                                     "condition": "baseline"}).json()
+        assert _wait(lambda: _result(c) == "arrived", timeout=30.0)
+        assert car.ground_dist_to(target) <= cfg.nav.arrival_threshold_m + 0.2
+
+        records = [json.loads(l) for l in
+                   (tmp_path / f"{r['task_id']}.jsonl").read_text().splitlines()]
+        start = records[0]
+        assert start["condition"] == "baseline"
+        assert start["planner"]["planner_path"] == "baseline_fresh"
+        assert start["rng_seed"] is not None
+        events = [rec for rec in records if rec["type"] == "event"]
+        assert any(e["name"] == "baseline_acquired" and e["search_time_s"] > 0
+                   for e in events)
+        assert records[-1]["result"] == "arrived"
 
 
 def test_preempt_during_real_nav(env_car):

@@ -50,11 +50,12 @@ from typing import Any, Dict, Optional
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
+from baseline_search import BaselineSearcher, derive_seed
 from config import Config, load_config
 from esp32_bridge import Esp32Bridge
 from estop import EstopMonitor
 from nav import NavRunner
-from planner import plan as plan_target
+from planner import PlanResult, extract_query, plan as plan_target
 from rtsm_client import RtsmClient
 from trial_logger import TrialLogger
 
@@ -177,13 +178,6 @@ class AgentServer:
         cond = condition or self.cfg.server.default_condition
         if cond not in ("rtsm", "baseline"):
             raise HTTPException(400, f"condition must be rtsm|baseline, got {cond!r}")
-        if cond == "baseline" and goal != BENCH_DUMMY_GOAL:
-            # Honesty guard: baseline_search.py is Phase H. Running the
-            # memory pipeline under a "baseline" label would silently
-            # poison the E1 comparison data.
-            raise HTTPException(
-                501, "condition=baseline is not implemented yet (Phase H) — "
-                     "refusing to run the memory pipeline under a baseline label")
         if self.monitor.triggered or self.bridge.estopped:
             raise HTTPException(503, "ESTOPPED — POST /reset_estop to re-arm (operator action)")
 
@@ -324,6 +318,8 @@ class AgentServer:
         (planner -> nav -> monitor, trial-logged)."""
         if task["goal"] == BENCH_DUMMY_GOAL:
             result, detail = self._run_bench(task), ""
+        elif task["condition"] == "baseline":
+            result, detail = self._run_baseline_mission(task)
         else:
             result, detail = self._run_mission(task)
         self._finalize_task(task, result, detail, prev_state)
@@ -417,6 +413,86 @@ class AgentServer:
         except Exception as e:  # noqa: BLE001 — a nav crash must still stop the car
             self.bridge.stop()
             result, detail = "nav_error", f"{type(e).__name__}: {e}"
+        if logger is not None:
+            logger.log_end(result, detail, elapsed_s=time.monotonic() - t0)
+        return result, detail
+
+    def _run_baseline_mission(self, task: Dict[str, Any]) -> tuple:
+        """E1 condition (b): freshness-gated search until the target is
+        CURRENTLY visible, then the same closed-loop drive with whatever
+        remains of the 180 s budget. One hard total clock — search time is
+        the cost of memorylessness and is meant to show up in TTA."""
+        t0 = time.monotonic()
+        logger: Optional[TrialLogger] = None
+        try:
+            logger = TrialLogger(self._trials_dir(), task["task_id"],
+                                 task["goal"], task["condition"], self.cfg)
+            task["trial_log"] = str(logger.path)
+        except OSError:
+            logger = None
+
+        query = extract_query(task["goal"])
+        seed = derive_seed(self.cfg.baseline.rng_seed, task["task_id"])
+        task["planner_path"] = "baseline_fresh"
+        if logger is not None:
+            logger.log_plan(PlanResult(status="searching", goal=task["goal"],
+                                       query=query, planner_path="baseline_fresh"),
+                            rng_seed=seed)
+
+        budget = self.cfg.nav.timeout_baseline_s
+        task["phase"] = "searching"
+        searcher = BaselineSearcher(
+            self.cfg, self.bridge, self.rtsm,
+            stop_event=self.stop_event, preempt_event=self._preempt,
+            cancel_event=self._cancel, shutdown_event=self._shutdown,
+            logger=logger, progress=task,
+        )
+        try:
+            acq = searcher.acquire(query, task["task_id"], budget)
+        except Exception as e:  # noqa: BLE001 — a search crash must stop the car
+            self.bridge.stop()
+            result, detail = "search_error", f"{type(e).__name__}: {e}"
+            if logger is not None:
+                logger.log_end(result, detail, elapsed_s=time.monotonic() - t0)
+            return result, detail
+
+        if acq.status != "acquired":
+            result = acq.status
+            detail = acq.detail or f"search ended after {acq.sweeps} sweeps"
+        else:
+            if logger is not None:
+                logger.log_event("baseline_acquired", time.monotonic() - t0,
+                                 target_id=acq.hit.id,
+                                 xyz_world=acq.hit.xyz_world,
+                                 sweeps=acq.sweeps,
+                                 search_time_s=round(acq.elapsed_s, 3))
+            task["target_id"] = acq.hit.id
+            remaining = budget - (time.monotonic() - t0)
+            if remaining <= 0:
+                result, detail = "timeout", "budget exhausted at acquisition"
+            else:
+                pr = PlanResult(
+                    status="ok", goal=task["goal"], query=query,
+                    target_id=acq.hit.id, xyz_world=acq.hit.xyz_world,
+                    score=acq.hit.score, confirmed=acq.hit.confirmed,
+                    stability=acq.hit.stability, planner_path="baseline_fresh",
+                    plan_pose=acq.pose,
+                    frame_epoch=acq.pose.frame_epoch if acq.pose else None,
+                )
+                task["phase"] = "driving"
+                runner = NavRunner(
+                    self.cfg, self.bridge, self.rtsm, pr, "baseline",
+                    stop_event=self.stop_event, preempt_event=self._preempt,
+                    cancel_event=self._cancel, shutdown_event=self._shutdown,
+                    logger=logger, progress=task,
+                    timeout_s_override=remaining,
+                )
+                try:
+                    result, detail = runner.run()
+                except Exception as e:  # noqa: BLE001
+                    self.bridge.stop()
+                    result, detail = "nav_error", f"{type(e).__name__}: {e}"
+
         if logger is not None:
             logger.log_end(result, detail, elapsed_s=time.monotonic() - t0)
         return result, detail
