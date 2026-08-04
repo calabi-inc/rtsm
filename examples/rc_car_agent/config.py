@@ -102,6 +102,8 @@ class BaselineCfg:
     walk_speed: float
     walk_s: float
     query_top_k: int
+    gate_fetch_k: int
+    clock_skew_tol_s: float
 
 
 @dataclass(frozen=True)

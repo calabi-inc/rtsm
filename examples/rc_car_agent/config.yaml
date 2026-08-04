@@ -55,6 +55,8 @@ baseline:
   walk_speed: 0.3                      # forward relocation speed between sweeps
   walk_s: 1.2                          # forward relocation duration
   query_top_k: 5
+  gate_fetch_k: 50                     # fetch depth for gated polls — top-5 over ALL memory would let stale objects crowd out a visible target
+  clock_skew_tol_s: 0.5                # stamps ahead of our clock beyond this are rejected (backward wall-clock step guard)
 
 calibration:
   # Written by calibrate.py — do not hand-edit. Units: rad / m / dimensionless.

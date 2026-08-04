@@ -428,16 +428,32 @@ def test_baseline_e2e_sweeps_acquires_arrives(env_car):
         assert _wait(lambda: _result(c) == "arrived", timeout=30.0)
         assert car.ground_dist_to(target) <= cfg.nav.arrival_threshold_m + 0.2
 
-        records = [json.loads(l) for l in
-                   (tmp_path / f"{r['task_id']}.jsonl").read_text().splitlines()]
+        log_path = tmp_path / f"{r['task_id']}.jsonl"
+        records = [json.loads(l) for l in log_path.read_text().splitlines()]
         start = records[0]
         assert start["condition"] == "baseline"
         assert start["planner"]["planner_path"] == "baseline_fresh"
         assert start["rng_seed"] is not None
-        events = [rec for rec in records if rec["type"] == "event"]
-        assert any(e["name"] == "baseline_acquired" and e["search_time_s"] > 0
-                   for e in events)
+        acquired = [rec for rec in records if rec["type"] == "event"
+                    and rec["name"] == "baseline_acquired"]
+        assert len(acquired) == 1
+        ev = acquired[0]
+        assert ev["search_time_s"] > 0
+        assert ev["planner_path"] == "baseline_fresh_top1"   # no API key
+        assert ev["pose"] is not None and ev["xyz_world"] is not None
+        assert ev["hit_age_s"] is not None
         assert records[-1]["result"] == "arrived"
+
+        # The server-written log must satisfy the aggregation parser —
+        # including the baseline PE denominator (writer/parser contract).
+        from aggregate import parse_trial
+        parsed = parse_trial(log_path)
+        assert parsed["optimal_m"] is not None and parsed["optimal_m"] > 0.5
+        assert parsed["path_len_m"] is not None
+        assert parsed["search_time_s"] == ev["search_time_s"]
+        # Drive ticks share the MISSION clock: they come after acquisition.
+        ticks = [rec for rec in records if rec["type"] == "tick"]
+        assert ticks and ticks[0]["t"] >= ev["t"]
 
 
 def test_preempt_during_real_nav(env_car):

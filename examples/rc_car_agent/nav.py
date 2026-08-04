@@ -101,6 +101,7 @@ class NavRunner:
         logger: Optional[TrialLogger] = None,
         progress: Optional[dict] = None,
         timeout_s_override: Optional[float] = None,
+        log_t0_mono: Optional[float] = None,
     ):
         self._cfg = cfg
         self._bridge = bridge
@@ -119,6 +120,11 @@ class NavRunner:
             cfg.nav.timeout_rtsm_s if condition == "rtsm"
             else cfg.nav.timeout_baseline_s)
         self._t0 = time.monotonic()
+        # Log clock: all records in one trial JSONL must share ONE epoch
+        # (the mission's t0), even though the monitor's timeout budget runs
+        # from drive start — for baseline trials the two differ by the
+        # whole search phase.
+        self._log_t0 = log_t0_mono if log_t0_mono is not None else self._t0
         self._monitor = MissionMonitor(
             nav=cfg.nav,
             calibration=cfg.calibration,
@@ -170,7 +176,7 @@ class NavRunner:
                     # Logged AFTER the command update: each fresh tick line
                     # pairs heading_err with the command DERIVED FROM IT
                     # (hold/terminal ticks carry the held command).
-                    self._logger.log_tick(now - self._t0, pose, tick,
+                    self._logger.log_tick(now - self._log_t0, pose, tick,
                                           left, right)
                 if tick.status != "ongoing":
                     self._bridge.stop()

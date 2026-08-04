@@ -147,20 +147,21 @@ def _default_anthropic_client(cfg: Config):
         return None
 
 
-def plan(goal: str, rtsm: RtsmClient, cfg: Config,
-         anthropic_client=None, use_llm: bool = True) -> PlanResult:
-    """One-shot plan: query RTSM, pick a target, return it with provenance."""
-    query = extract_query(goal)
-    res = rtsm.semantic_query(query, top_k=5)
+def select_target_from_hits(hits, goal: str, rtsm: RtsmClient, cfg: Config,
+                            anthropic_client=None, use_llm: bool = True):
+    """THE target-selection rule, shared by BOTH E1 conditions so the
+    comparison masks persistence and nothing else: eligibility filter
+    (3D position, confirmed-first), best-effort label enrichment, one
+    forced-tool Haiku pick over the given candidates, deterministic
+    ranked-top-1 fallback.
 
-    hits = _eligible(res.results)
-    plan_epoch = res.robot_pose.frame_epoch if res.robot_pose else None
-    if not hits:
-        detail = "no results" if not res.results else "no candidate has a 3D position"
-        return PlanResult(status="not_found", goal=goal, query=query,
-                          plan_pose=res.robot_pose, frame_epoch=plan_epoch,
-                          reason=detail)
-
+    Returns (picked: Candidate, planner_path, reason) or None if no
+    candidate is eligible. `hits` is whatever candidate set the caller is
+    ALLOWED to see — all of memory for condition (a), the freshness-gated
+    currently-visible set for condition (b)."""
+    eligible = _eligible(hits)
+    if not eligible:
+        return None
     candidates = [
         Candidate(
             id=h.id,
@@ -170,7 +171,7 @@ def plan(goal: str, rtsm: RtsmClient, cfg: Config,
             stability=h.stability,
             xyz_world=list(h.xyz_world or []),
         )
-        for h in hits
+        for h in eligible
     ]
     by_id = {c.id: c for c in candidates}
 
@@ -192,6 +193,25 @@ def plan(goal: str, rtsm: RtsmClient, cfg: Config,
 
     if picked is None:
         picked = candidates[0]               # ranked top-1 (confirmed first)
+    return picked, planner_path, reason
+
+
+def plan(goal: str, rtsm: RtsmClient, cfg: Config,
+         anthropic_client=None, use_llm: bool = True) -> PlanResult:
+    """One-shot plan: query RTSM, pick a target, return it with provenance."""
+    query = extract_query(goal)
+    res = rtsm.semantic_query(query, top_k=5)
+
+    plan_epoch = res.robot_pose.frame_epoch if res.robot_pose else None
+    sel = select_target_from_hits(res.results, goal, rtsm, cfg,
+                                  anthropic_client=anthropic_client,
+                                  use_llm=use_llm)
+    if sel is None:
+        detail = "no results" if not res.results else "no candidate has a 3D position"
+        return PlanResult(status="not_found", goal=goal, query=query,
+                          plan_pose=res.robot_pose, frame_epoch=plan_epoch,
+                          reason=detail)
+    picked, planner_path, reason = sel
 
     return PlanResult(
         status="ok", goal=goal, query=query,

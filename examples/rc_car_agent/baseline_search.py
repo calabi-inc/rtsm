@@ -5,11 +5,29 @@ The baseline agent is FORBIDDEN to act on anything it is not currently
 seeing. Mechanism: the freshness gate — a semantic hit counts only if its
 last observation is younger than `baseline.freshness_gate_s` (2 s).
 Everything older sits invisible in memory. Same RTSM, same perception,
-same pose stream, same nav/monitor/safety; the ONLY masked capability is
-persistence. (Clock note: `last_seen_wall_utc` is the RTSM server's wall
-clock; the gate compares it to our own time.time(), valid because agent
-and RTSM run on the same machine — the locked demo topology. The ~0.5 s
-pipeline processing lag is inside the 2 s gate by design.)
+same pose stream, same nav/monitor/safety, and (via the server) the SAME
+target-selection rule as condition (a); the ONLY masked capability is
+persistence.
+
+Gate fine print (audited 2026-08-03):
+  * `last_seen_wall_utc` is stamped at pipeline UPSERT time, not frame-
+    capture time — the physical age of an observation is stamp age PLUS
+    the ~0.5 s processing lag, so the effective window is gate + lag
+    (~2.5 s of history, about one sweep step). Conservative for the
+    memory-faster claim; the accepted hit's stamp age is logged per
+    acquisition so it is auditable.
+  * The gate is two-sided: a stamp AHEAD of our clock by more than
+    `clock_skew_tol_s` is rejected — a backward wall-clock step (NTP,
+    resume from sleep) must never turn stale memory "fresh".
+  * Retrieval fetches DEEP (`gate_fetch_k`, default 50) before gating:
+    top-5 over ALL of memory would let stale objects crowd a currently
+    visible target out of the candidate list entirely.
+  * The acquisition poll itself is frame_epoch-guarded: a Lens restart
+    between dwells must not let a pre-restart observation (fresh stamp,
+    old-frame coordinate) be acquired.
+  * Clock note: writer and reader share one machine (locked topology),
+    so time.time() comparisons are valid up to step events, which the
+    two-sided gate handles.
 
 Search policy (v1, deliberately near-deterministic for the paper — no
 seed-sensitivity questions):
@@ -46,8 +64,10 @@ class AcquireResult:
                                       # frame_reset | estopped | preempted |
                                       # cancelled | shutdown
     detail: str = ""
-    hit: Optional[SemanticHit] = None
+    hits: tuple = ()                  # ALL fresh hits, ranked (selection is
+                                      # the server's job — same rule as (a))
     pose: Optional[PoseSample] = None  # robot pose from the acquiring query
+    hit_age_s: Optional[float] = None  # stamp age of the top fresh hit
     elapsed_s: float = 0.0
     sweeps: int = 0
 
@@ -59,15 +79,18 @@ def derive_seed(cfg_seed: int, trial_id: str) -> int:
     return sum(ord(c) for c in trial_id) * 2654435761 % (2 ** 31)
 
 
-def fresh_hits(hits, now_wall: float, gate_s: float):
+def fresh_hits(hits, now_wall: float, gate_s: float, skew_tol_s: float = 0.5):
     """The freshness gate: navigable hits observed within gate_s of now.
-    A hit without last_seen_wall_utc (old server) is NEVER fresh — the
-    baseline must fail closed, not quietly become the memory condition."""
+    Fail-closed twice over: a hit without last_seen_wall_utc (old server)
+    is NEVER fresh, and a stamp more than skew_tol_s AHEAD of our clock is
+    rejected too — a backward wall-clock step must not resurrect stale
+    memory as 'fresh'."""
     out = []
     for h in hits:
         if h.xyz_world is None or h.last_seen_wall_utc is None:
             continue
-        if (now_wall - h.last_seen_wall_utc) <= gate_s:
+        age = now_wall - h.last_seen_wall_utc
+        if -skew_tol_s <= age <= gate_s:
             out.append(h)
     return out
 
@@ -105,16 +128,21 @@ class BaselineSearcher:
         sweep_sign = rng.choice((-1.0, 1.0))          # CCW or CW sweep
         t0 = time.monotonic()
         deadline = t0 + budget_s
-        last_ts: Optional[float] = None
-        ref_epoch: Optional[int] = None
-        last_fresh_mono = t0
+        # Shared per-mission pose/epoch state, seen by BOTH the dwell
+        # watcher and the acquisition polls (a Lens restart between the
+        # two must not slip through).
+        self._st = {"last_ts": None, "ref_epoch": None, "last_fresh_mono": t0}
+        self._seed_epoch()
         sweeps = 0
 
         # Try before moving at all — the target might already be in view.
         first = self._gated_poll(query)
+        if isinstance(first, AcquireResult):
+            return self._stamp(first, t0, 0)
         if first is not None:
-            return AcquireResult(status="acquired", hit=first[0], pose=first[1],
-                                 detail="visible at start",
+            hits, pose, age = first
+            return AcquireResult(status="acquired", hits=tuple(hits), pose=pose,
+                                 hit_age_s=age, detail="visible at start",
                                  elapsed_s=time.monotonic() - t0, sweeps=0)
 
         while True:
@@ -126,17 +154,17 @@ class BaselineSearcher:
                                b.sweep_step_s, deadline)
                 if r is not None:
                     return self._interrupted(r, t0, sweeps)
-                r = self._dwell_and_watch_pose(b.dwell_s, deadline,
-                                               last_ts, ref_epoch,
-                                               last_fresh_mono)
-                if isinstance(r, AcquireResult):
+                r = self._dwell_and_watch_pose(b.dwell_s, deadline)
+                if r is not None:
                     return self._stamp(r, t0, sweeps)
-                last_ts, ref_epoch, last_fresh_mono = r
 
                 found = self._gated_poll(query)
+                if isinstance(found, AcquireResult):
+                    return self._stamp(found, t0, sweeps)
                 if found is not None:
-                    return AcquireResult(status="acquired", hit=found[0],
-                                         pose=found[1],
+                    hits, pose, age = found
+                    return AcquireResult(status="acquired", hits=tuple(hits),
+                                         pose=pose, hit_age_s=age,
                                          detail=f"sweep {sweeps} step {step_in_sweep}",
                                          elapsed_s=time.monotonic() - t0,
                                          sweeps=sweeps)
@@ -152,20 +180,51 @@ class BaselineSearcher:
 
     # ── helpers ──────────────────────────────────────────────────────────
 
+    def _seed_epoch(self) -> None:
+        try:
+            pose = self._rtsm.get_robot_pose()
+        except Exception:  # noqa: BLE001
+            pose = None
+        if pose is not None and pose.frame_epoch is not None:
+            self._st["ref_epoch"] = pose.frame_epoch
+
+    def _note_epoch(self, epoch: Optional[int]) -> Optional[str]:
+        """Int-vs-int equality gate, adopt-first-int, None never aborts —
+        the same matrix the monitor uses."""
+        if epoch is None:
+            return None
+        if self._st["ref_epoch"] is None:
+            self._st["ref_epoch"] = epoch
+            return None
+        if epoch != self._st["ref_epoch"]:
+            return f"frame_epoch {self._st['ref_epoch']} -> {epoch}"
+        return None
+
     def _gated_poll(self, query):
-        """One freshness-gated query. Returns (hit, pose) or None."""
+        """One freshness-gated query, fetched DEEP so stale memory cannot
+        crowd a visible target out of the candidate list. Returns:
+        (fresh_hits, pose, top_age_s) on success, an AcquireResult(status=
+        frame_reset) if the query's pose reveals a new sender session, or
+        None for a miss."""
+        b = self._cfg.baseline
         try:
             res = self._rtsm.semantic_query(query,
-                                            top_k=self._cfg.baseline.query_top_k)
+                                            top_k=max(b.gate_fetch_k,
+                                                      b.query_top_k))
         except Exception:  # noqa: BLE001 — an RTSM hiccup is a missed poll
             return None
-        fresh = fresh_hits(res.results, self._now_wall(),
-                           self._cfg.baseline.freshness_gate_s)
+        if res.robot_pose is not None:
+            bad = self._note_epoch(res.robot_pose.frame_epoch)
+            if bad is not None:
+                return AcquireResult(status="frame_reset",
+                                     detail=f"{bad} at acquisition poll")
+        now = self._now_wall()
+        fresh = fresh_hits(res.results, now, b.freshness_gate_s,
+                           b.clock_skew_tol_s)
         if not fresh:
             return None
-        confirmed = [h for h in fresh if h.confirmed]
-        best = (confirmed or fresh)[0]                # ranked order preserved
-        return best, res.robot_pose
+        age = now - fresh[0].last_seen_wall_utc
+        return fresh, res.robot_pose, age
 
     def _check_interrupts(self) -> Optional[str]:
         if self._shutdown.is_set():
@@ -200,13 +259,13 @@ class BaselineSearcher:
             self._bridge.stop()
         return None
 
-    def _dwell_and_watch_pose(self, dwell_s: float, deadline: float,
-                              last_ts, ref_epoch, last_fresh_mono):
+    def _dwell_and_watch_pose(self, dwell_s: float, deadline: float):
         """Stationary observation pause. Watches the pose stream for the
         same faults the drive phase would abort on: frozen feed past
         stale_abort_s -> stale_stop; frame_epoch change -> frame_reset.
-        Returns updated (last_ts, ref_epoch, last_fresh_mono) or an
-        AcquireResult fault."""
+        Updates the shared per-mission state; returns None on a normal
+        dwell or an AcquireResult fault."""
+        st = self._st
         t_end = time.monotonic() + dwell_s
         while time.monotonic() < t_end:
             if time.monotonic() >= deadline:
@@ -219,21 +278,19 @@ class BaselineSearcher:
             except Exception:  # noqa: BLE001
                 pose = None
             now = time.monotonic()
-            if pose is not None and (last_ts is None or pose.timestamp != last_ts):
-                last_ts = pose.timestamp
-                last_fresh_mono = now
-                if pose.frame_epoch is not None:
-                    if ref_epoch is None:
-                        ref_epoch = pose.frame_epoch
-                    elif pose.frame_epoch != ref_epoch:
-                        return AcquireResult(
-                            status="frame_reset",
-                            detail=f"frame_epoch {ref_epoch} -> {pose.frame_epoch} during search")
-            elif now - last_fresh_mono > self._cfg.nav.stale_abort_s:
+            if pose is not None and (st["last_ts"] is None
+                                     or pose.timestamp != st["last_ts"]):
+                st["last_ts"] = pose.timestamp
+                st["last_fresh_mono"] = now
+                bad = self._note_epoch(pose.frame_epoch)
+                if bad is not None:
+                    return AcquireResult(status="frame_reset",
+                                         detail=f"{bad} during search")
+            elif now - st["last_fresh_mono"] > self._cfg.nav.stale_abort_s:
                 return AcquireResult(status="stale_stop",
                                      detail="pose feed died during search")
             time.sleep(self._cfg.nav.tick_s * 2)
-        return last_ts, ref_epoch, last_fresh_mono
+        return None
 
     def _interrupted(self, name: str, t0: float, sweeps: int) -> AcquireResult:
         return AcquireResult(status=name, elapsed_s=time.monotonic() - t0,
@@ -241,6 +298,6 @@ class BaselineSearcher:
 
     @staticmethod
     def _stamp(r: AcquireResult, t0: float, sweeps: int) -> AcquireResult:
-        return AcquireResult(status=r.status, detail=r.detail, hit=r.hit,
-                             pose=r.pose, elapsed_s=time.monotonic() - t0,
-                             sweeps=sweeps)
+        return AcquireResult(status=r.status, detail=r.detail, hits=r.hits,
+                             pose=r.pose, hit_age_s=r.hit_age_s,
+                             elapsed_s=time.monotonic() - t0, sweeps=sweeps)

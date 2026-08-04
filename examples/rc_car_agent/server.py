@@ -55,7 +55,8 @@ from config import Config, load_config
 from esp32_bridge import Esp32Bridge
 from estop import EstopMonitor
 from nav import NavRunner
-from planner import PlanResult, extract_query, plan as plan_target
+from planner import (PlanResult, extract_query, plan as plan_target,
+                     select_target_from_hits)
 from rtsm_client import RtsmClient
 from trial_logger import TrialLogger
 
@@ -406,7 +407,7 @@ class AgentServer:
             self.cfg, self.bridge, self.rtsm, pr, task["condition"],
             stop_event=self.stop_event, preempt_event=self._preempt,
             cancel_event=self._cancel, shutdown_event=self._shutdown,
-            logger=logger, progress=task,
+            logger=logger, progress=task, log_t0_mono=t0,
         )
         try:
             result, detail = runner.run()
@@ -448,7 +449,10 @@ class AgentServer:
             logger=logger, progress=task,
         )
         try:
-            acq = searcher.acquire(query, task["task_id"], budget)
+            # The searcher's deadline must coincide with the mission clock:
+            # logger/plan overhead before this point already spent budget.
+            acq = searcher.acquire(query, task["task_id"],
+                                   max(0.0, budget - (time.monotonic() - t0)))
         except Exception as e:  # noqa: BLE001 — a search crash must stop the car
             self.bridge.stop()
             result, detail = "search_error", f"{type(e).__name__}: {e}"
@@ -460,22 +464,45 @@ class AgentServer:
             result = acq.status
             detail = acq.detail or f"search ended after {acq.sweeps} sweeps"
         else:
+            # SAME selection rule as condition (a), applied over the
+            # freshness-gated (currently visible) set — the comparison
+            # masks persistence, never target-selection intelligence.
+            sel = select_target_from_hits(list(acq.hits), task["goal"],
+                                          self.rtsm, self.cfg)
+            if sel is None:                          # defensive: gate always
+                result = "not_found"                 # requires xyz_world
+                detail = "no eligible fresh candidate"
+                if logger is not None:
+                    logger.log_end(result, detail,
+                                   elapsed_s=time.monotonic() - t0)
+                return result, detail
+            picked, sel_path, sel_reason = sel
+            planner_path = ("baseline_fresh_haiku" if sel_path == "haiku"
+                            else "baseline_fresh_top1")
+            task["planner_path"] = planner_path
+            task["target_id"] = picked.id
+            task["target_label"] = picked.label
             if logger is not None:
-                logger.log_event("baseline_acquired", time.monotonic() - t0,
-                                 target_id=acq.hit.id,
-                                 xyz_world=acq.hit.xyz_world,
-                                 sweeps=acq.sweeps,
-                                 search_time_s=round(acq.elapsed_s, 3))
-            task["target_id"] = acq.hit.id
+                logger.log_event(
+                    "baseline_acquired", time.monotonic() - t0,
+                    target_id=picked.id, label=picked.label,
+                    xyz_world=picked.xyz_world,
+                    pose=TrialLogger._pose_dict(acq.pose),
+                    hit_age_s=(round(acq.hit_age_s, 3)
+                               if acq.hit_age_s is not None else None),
+                    n_fresh=len(acq.hits), planner_path=planner_path,
+                    reason=sel_reason, sweeps=acq.sweeps,
+                    search_time_s=round(acq.elapsed_s, 3))
             remaining = budget - (time.monotonic() - t0)
             if remaining <= 0:
                 result, detail = "timeout", "budget exhausted at acquisition"
             else:
                 pr = PlanResult(
                     status="ok", goal=task["goal"], query=query,
-                    target_id=acq.hit.id, xyz_world=acq.hit.xyz_world,
-                    score=acq.hit.score, confirmed=acq.hit.confirmed,
-                    stability=acq.hit.stability, planner_path="baseline_fresh",
+                    target_id=picked.id, label=picked.label,
+                    xyz_world=picked.xyz_world,
+                    score=picked.score, confirmed=picked.confirmed,
+                    stability=picked.stability, planner_path=planner_path,
                     plan_pose=acq.pose,
                     frame_epoch=acq.pose.frame_epoch if acq.pose else None,
                 )
@@ -485,7 +512,7 @@ class AgentServer:
                     stop_event=self.stop_event, preempt_event=self._preempt,
                     cancel_event=self._cancel, shutdown_event=self._shutdown,
                     logger=logger, progress=task,
-                    timeout_s_override=remaining,
+                    timeout_s_override=remaining, log_t0_mono=t0,
                 )
                 try:
                     result, detail = runner.run()

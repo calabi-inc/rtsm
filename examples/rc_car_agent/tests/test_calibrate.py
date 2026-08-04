@@ -67,8 +67,12 @@ def test_lever_arm_recovered():
     assert diag["radius_m"] == pytest.approx(math.hypot(*PLANT_LEVER), abs=0.01)
 
 
-def test_zero_lever_arm_at_drive_center():
-    car = FakeCar(turn_scale_rps=PLANT_TURN)          # camera == drive center
+def test_zero_lever_arm_at_drive_center_far_from_origin():
+    """Review fix: the raw Kåsa fit's min-norm solution depended on the
+    distance from the WORLD ORIGIN — a zero-lever rig rotating at (5, 5)
+    fitted a phantom 3.5 m circle and produced a garbage lever. The
+    centered fit must land in the camera-at-drive-center branch anywhere."""
+    car = FakeCar(x=5.0, z=5.0, turn_scale_rps=PLANT_TURN)   # camera == center
     pose = lambda: RtsmClient._parse_pose(car.pose_payload())
     track = collect_maneuver(car.set_drive, car.stop, pose, -0.4, 0.4,
                              duration_s=4.5)
@@ -141,6 +145,85 @@ def test_too_little_motion_rejected():
         compute_yaw_offset(track)
 
 
+# ── synthetic-track guards (review fixes; pure math, no sleeps) ──────────
+
+
+def _sample(x, z, yaw, ts):
+    from rtsm_client import PoseSample
+    half = 0.5 * yaw
+    return PoseSample(xyz=[x, 0.3, z],
+                      quaternion_xyzw=[0.0, math.sin(half), 0.0, math.cos(half)],
+                      timestamp=ts, fetched_at_mono=0.0, frame_epoch=7)
+
+
+def _curved_track(sweep_rad, length_m=0.6, n=24, lever=(0.05, 0.15),
+                  yaw_offset=PLANT_YAW):
+    """Constant-curvature drive-center path + the camera mount model —
+    what a weak motor produces during 'straight' routine A."""
+    track = []
+    x = z = 0.0
+    psi = 0.4
+    ds = length_m / n
+    for i in range(n + 1):
+        r, f = lever
+        s, c = math.sin(psi), math.cos(psi)
+        cam_x = x - f * s + r * c
+        cam_z = z - f * c - r * s
+        track.append(_sample(cam_x, cam_z, psi - yaw_offset, 100.0 + 0.1 * i))
+        x += ds * s
+        z += ds * c
+        psi += sweep_rad / n
+    return track
+
+
+def test_arcing_straight_run_rejected():
+    """Review fix: a 25° arc during routine A + a real lever arm biases
+    yaw_offset by ~5-6° with healthy-looking diagnostics — must abort."""
+    with pytest.raises(CalibrationError, match="arcing"):
+        compute_yaw_offset(_curved_track(math.radians(25)))
+
+
+def test_gentle_run_passes_with_sweep_diagnostic():
+    offset, diag = compute_yaw_offset(_curved_track(math.radians(2)))
+    assert offset == pytest.approx(PLANT_YAW, abs=0.03)
+    assert diag["sweep_deg"] == pytest.approx(2.0, abs=0.5)
+
+
+def test_turn_scale_sensor_gap_aborts():
+    """Review fix: a pose-feed stall under the 2.5 s abort threshold lets
+    np.unwrap alias (lose 2*pi) and silently write a 2-3x-low turn_scale."""
+    track = [_sample(0, 0, 0.3 * i, 100.0 + 0.1 * i) for i in range(10)]
+    track += [_sample(0, 0, 0.3 * i, 102.2 + 0.1 * i) for i in range(10, 20)]
+    with pytest.raises(CalibrationError, match="sensor gap"):
+        compute_turn_scale(track, 0.4)
+
+
+def test_lever_arm_sensor_gap_aborts():
+    track = [_sample(0.2 * math.sin(t), 0.2 * math.cos(t), t, 100.0 + 0.1 * i)
+             for i, t in enumerate([0.3 * j for j in range(12)])]
+    gap = [_sample(0.2 * math.sin(t), 0.2 * math.cos(t), t, 103.5 + 0.1 * i)
+           for i, t in enumerate([0.3 * j for j in range(12, 22)])]
+    with pytest.raises(CalibrationError, match="sensor gap"):
+        compute_lever_arm(track + gap, 0.0)
+
+
+def test_turn_scale_min_sweep_rejected():
+    track = [_sample(0, 0, 0.01 * i, 100.0 + 0.1 * i) for i in range(12)]
+    with pytest.raises(CalibrationError, match="swept only"):
+        compute_turn_scale(track, 0.4)
+
+
+def test_inconsistent_lever_projections_rejected():
+    """Review fix: a clean-looking circle whose yaws don't match the
+    rotation (fit center is not the true rotation center) must abort
+    instead of averaging garbage — the per-sample spread gate."""
+    thetas = [0.25 * i for i in range(20)]            # position angle
+    track = [_sample(0.2 * math.sin(t), 0.2 * math.cos(t), 2.0 * t,   # yaw 2x
+                     100.0 + 0.1 * i) for i, t in enumerate(thetas)]
+    with pytest.raises(CalibrationError, match="inconsistent"):
+        compute_lever_arm(track, 0.0)
+
+
 # ── config writeback ─────────────────────────────────────────────────────
 
 
@@ -176,3 +259,35 @@ def test_write_calibration_missing_key_raises(tmp_path):
                                 "lever_arm_forward_m": 0.0,
                                 "speed_scale_mps": 1.0,
                                 "turn_scale_rps": 1.0}, "rig")
+
+
+_VALUES = {"yaw_offset_rad": 0.1, "lever_arm_right_m": 0.02,
+           "lever_arm_forward_m": 0.15, "speed_scale_mps": 1.9,
+           "turn_scale_rps": 2.8}
+
+
+def test_rig_id_with_unsafe_characters_refused(tmp_path):
+    """Review fix: a spaced rig_id parses on the FIRST write but bricks
+    config.yaml on the SECOND (the matcher consumes one token); quotes
+    break the YAML; backslashes expand as group references. Refuse all."""
+    src = Path(load_config().source_path)
+    copy = tmp_path / "config.yaml"
+    shutil.copy(src, copy)
+    for bad in ("hiwonder 4wd v1", 'rig"x', "rig\\1", "", " lead"):
+        with pytest.raises(CalibrationError, match="rig_id"):
+            write_calibration(copy, _VALUES, bad)
+
+
+def test_write_calibration_twice_still_loads(tmp_path):
+    """Review fix: the second writeback (recalibration weeks later) must
+    produce a loadable file, not corrupt it."""
+    src = Path(load_config().source_path)
+    copy = tmp_path / "config.yaml"
+    shutil.copy(src, copy)
+    write_calibration(copy, _VALUES, "rig-v1")
+    second = dict(_VALUES, yaw_offset_rad=-0.271828)  # negative too
+    write_calibration(copy, second, "rig-v2")
+    cfg = load_config(str(copy))
+    assert cfg.calibration.yaw_offset_rad == pytest.approx(-0.271828)
+    assert cfg.calibration.rig_id == "rig-v2"
+    assert cfg.calibration.is_calibrated is True

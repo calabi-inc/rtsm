@@ -36,6 +36,7 @@ class StubRtsm:
     def __init__(self, results_fn):
         self._results_fn = results_fn
         self.queries = 0
+        self.top_ks = []
         self._pose_calls = 0
         self._ts = 100.0
         self.freeze_at = None
@@ -55,6 +56,7 @@ class StubRtsm:
 
     def semantic_query(self, query, top_k=5):
         self.queries += 1
+        self.top_ks.append(top_k)
         return SemanticResult(query=query, robot_pose=self.get_robot_pose(),
                               results=self._results_fn(self.queries))
 
@@ -95,6 +97,16 @@ def test_gate_fails_closed_without_last_seen_field():
     assert fresh_hits(hits, time.time(), 2.0) == []
 
 
+def test_gate_rejects_stamps_from_the_future():
+    """A backward wall-clock step (NTP, resume from sleep) puts old stamps
+    AHEAD of our clock — they must not become 'fresh'."""
+    now = time.time()
+    future = [mk_hit(age_s=-90.0, hid="future")]     # stamp 90 s ahead
+    assert fresh_hits(future, now, 2.0) == []
+    barely = [mk_hit(age_s=-0.3, hid="skew")]        # benign write/read skew
+    assert [h.id for h in fresh_hits(barely, now, 2.0)] == ["skew"]
+
+
 def test_derive_seed_deterministic():
     assert derive_seed(42, "anything") == 42
     assert derive_seed(0, "t20260803-120000-001") == derive_seed(0, "t20260803-120000-001")
@@ -110,8 +122,20 @@ def test_visible_at_start_acquires_without_motion():
     acq = mk_searcher(FAST, bridge, rtsm).acquire("red mug", "t-1", budget_s=5.0)
     assert acq.status == "acquired"
     assert acq.sweeps == 0 and "start" in acq.detail
+    assert acq.hits and acq.hits[0].id == "mug-1"
+    assert acq.hit_age_s == pytest.approx(0.1, abs=0.05)
     assert acq.pose is not None                      # pose from the same query
     assert bridge.drive_calls == [], "no motion needed when already visible"
+
+
+def test_gated_poll_fetches_deep():
+    """Retrieval must fetch gate_fetch_k deep — top-5 over ALL memory
+    would let stale objects crowd a visible target out of the list."""
+    bridge = FakeBridge()
+    rtsm = StubRtsm(lambda n: [mk_hit(age_s=0.1)])
+    mk_searcher(FAST, bridge, rtsm).acquire("red mug", "t-1b", budget_s=5.0)
+    assert rtsm.top_ks[0] == max(FAST.baseline.gate_fetch_k,
+                                 FAST.baseline.query_top_k)
 
 
 def test_acquires_after_sweeping():
@@ -119,10 +143,24 @@ def test_acquires_after_sweeping():
     rtsm = StubRtsm(lambda n: [mk_hit(age_s=0.1)] if n >= 4 else [mk_hit(age_s=99)])
     acq = mk_searcher(FAST, bridge, rtsm).acquire("red mug", "t-2", budget_s=10.0)
     assert acq.status == "acquired"
+    assert acq.hits
     rotate = [c for c in bridge.drive_calls if (c[1] < 0 < c[2]) or (c[2] < 0 < c[1])]
     assert rotate, "should have rotated while searching"
     assert bridge.stop_calls, "each step must end stopped"
     assert rtsm.queries >= 4
+
+
+def test_epoch_change_at_acquisition_poll_aborts():
+    """The poll the searcher ACTS on is epoch-guarded too: a Lens restart
+    between dwells must not let a fresh-stamped, old-frame observation be
+    acquired (the drive would then adopt the NEW epoch and its own guard
+    could never fire)."""
+    bridge = FakeBridge()
+    rtsm = StubRtsm(lambda n: [mk_hit(age_s=0.1)])   # always "fresh"
+    rtsm.bump_epoch_at = 2      # call 1 seeds epoch 7; the poll sees 8
+    acq = mk_searcher(FAST, bridge, rtsm).acquire("m", "t-2b", budget_s=5.0)
+    assert acq.status == "frame_reset"
+    assert "acquisition poll" in acq.detail
 
 
 def test_never_fresh_times_out_bounded():

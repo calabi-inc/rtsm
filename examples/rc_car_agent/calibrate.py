@@ -61,9 +61,18 @@ POLL_EVERY_TICKS = 2              # pose poll ~10 Hz
 STALE_ABORT_S = 2.5
 
 MIN_STRAIGHT_DISP_M = 0.25        # below this, motion_dir is noise
+MAX_STRAIGHT_SWEEP_RAD = math.radians(10)  # more heading change than this in
+                                  # routine A = the car is ARCING (weak motor,
+                                  # surface pull); the lever arm then biases
+                                  # the chord by ~f*sweep and yaw_offset is off
 MIN_YAW_SWEEP_RAD = math.radians(270)
+MIN_TURN_SWEEP_RAD = math.radians(45)
 MIN_LEVER_RADIUS_M = 0.03         # smaller than this = camera at drive center
 MAX_CIRCLE_RMS_M = 0.06
+MAX_LEVER_SPREAD_M = 0.02         # per-sample lever estimates must agree; a
+                                  # bigger spread = the circle fit is lying
+MAX_SAMPLE_GAP_S = 0.5            # sensor-time gap between fresh poses above
+                                  # which np.unwrap can alias (lose 2*pi)
 
 
 class CalibrationError(RuntimeError):
@@ -137,8 +146,16 @@ def circular_mean(angles: np.ndarray) -> float:
                             float(np.mean(np.cos(angles)))))
 
 
+def _max_sensor_gap(track: Sequence[PoseSample]) -> float:
+    ts = np.array([p.timestamp for p in track])
+    return float(np.max(np.diff(ts))) if len(ts) > 1 else 0.0
+
+
 def compute_yaw_offset(track: Sequence[PoseSample]) -> Tuple[float, dict]:
-    """Routine A. Camera displacement direction minus mean camera heading."""
+    """Routine A. Camera displacement direction minus mean camera heading.
+    Guards: the run must actually be STRAIGHT — with a lever arm, an arcing
+    run displaces the camera chord by ~f*sweep and silently biases the
+    offset by degrees."""
     if len(track) < 5:
         raise CalibrationError(f"straight run collected only {len(track)} fresh poses")
     pts = _xz(track)
@@ -148,16 +165,33 @@ def compute_yaw_offset(track: Sequence[PoseSample]) -> Tuple[float, dict]:
         raise CalibrationError(
             f"straight run moved only {disp_norm:.2f} m "
             f"(need >= {MIN_STRAIGHT_DISP_M}) — wheels slipping or speed too low?")
+    yaws = np.unwrap(_cam_yaws(track))
+    sweep = float(abs(yaws[-1] - yaws[0]))
+    if sweep > MAX_STRAIGHT_SWEEP_RAD:
+        raise CalibrationError(
+            f"straight run swept {math.degrees(sweep):.0f}° of heading "
+            f"(need < {math.degrees(MAX_STRAIGHT_SWEEP_RAD):.0f}°) — car is "
+            "arcing (one motor weak? surface pull?)")
     motion_yaw = math.atan2(disp[0], disp[1])          # atan2(dx, dz) — pinned
     cam_mean = circular_mean(_cam_yaws(track))
     offset = wrap_angle(motion_yaw - cam_mean)
     return offset, {"disp_m": disp_norm, "motion_yaw": motion_yaw,
-                    "cam_yaw_mean": cam_mean, "samples": len(track)}
+                    "cam_yaw_mean": cam_mean, "sweep_deg": math.degrees(sweep),
+                    "samples": len(track)}
 
 
 def fit_circle(points: np.ndarray) -> Tuple[float, float, float, float]:
-    """Kåsa algebraic least-squares circle fit -> (cx, cz, radius, rms)."""
-    x, z = points[:, 0], points[:, 1]
+    """Kåsa algebraic least-squares circle fit -> (cx, cz, radius, rms).
+
+    Points are CENTERED first: the raw Kåsa system is near-singular for a
+    degenerate (tiny/point-like) blob, and lstsq's min-norm answer then
+    depends on the distance from the WORLD ORIGIN — a zero-lever rig
+    rotating at (5, 5) would fit a phantom 3.5 m circle. Centered, the
+    same blob fits center ≈ centroid with millimeter radius and correctly
+    lands in the camera-at-drive-center branch."""
+    mu = points.mean(axis=0)
+    p = points - mu
+    x, z = p[:, 0], p[:, 1]
     A = np.column_stack([2 * x, 2 * z, np.ones_like(x)])
     b = x * x + z * z
     sol, *_ = np.linalg.lstsq(A, b, rcond=None)
@@ -165,7 +199,7 @@ def fit_circle(points: np.ndarray) -> Tuple[float, float, float, float]:
     r = math.sqrt(max(float(c + cx * cx + cz * cz), 0.0))
     residuals = np.hypot(x - cx, z - cz) - r
     rms = float(np.sqrt(np.mean(residuals ** 2)))
-    return float(cx), float(cz), r, rms
+    return float(cx + mu[0]), float(cz + mu[1]), r, rms
 
 
 def compute_lever_arm(
@@ -175,6 +209,11 @@ def compute_lever_arm(
     frame — the exact tuple geometry.camera_to_car consumes."""
     if len(track) < 10:
         raise CalibrationError(f"rotation collected only {len(track)} fresh poses")
+    gap = _max_sensor_gap(track)
+    if gap > MAX_SAMPLE_GAP_S:
+        raise CalibrationError(
+            f"{gap:.2f} s sensor gap between poses — yaw unwrap unreliable "
+            "(pose feed stalled mid-rotation?); redo the routine")
     yaws = np.unwrap(_cam_yaws(track))
     sweep = float(abs(yaws[-1] - yaws[0]))
     if sweep < MIN_YAW_SWEEP_RAD:
@@ -197,10 +236,18 @@ def compute_lever_arm(
         vx, vz = cx - p.xyz[0], cz - p.xyz[2]          # camera -> center
         fs.append(vx * s + vz * c)                     # dot(v, forward=(s, c))
         rs.append(vx * -c + vz * s)                    # dot(v, right=(-c, s))
+    spread_r, spread_f = float(np.std(rs)), float(np.std(fs))
+    if spread_r > MAX_LEVER_SPREAD_M or spread_f > MAX_LEVER_SPREAD_M:
+        # A consistent rig gives near-identical per-sample (r, f); a big
+        # spread means the fitted center is not the real rotation center.
+        raise CalibrationError(
+            f"lever-arm per-sample estimates inconsistent (spread right "
+            f"{spread_r:.3f} m / forward {spread_f:.3f} m > "
+            f"{MAX_LEVER_SPREAD_M}) — circle fit unreliable; redo the rotate")
     lever = (float(np.mean(rs)), float(np.mean(fs)))
     return lever, {"radius_m": radius, "rms_m": rms,
                    "sweep_deg": math.degrees(sweep),
-                   "spread_r": float(np.std(rs)), "spread_f": float(np.std(fs))}
+                   "spread_r": spread_r, "spread_f": spread_f}
 
 
 def compute_speed_scale(track: Sequence[PoseSample], commanded: float) -> Tuple[float, dict]:
@@ -219,38 +266,69 @@ def compute_speed_scale(track: Sequence[PoseSample], commanded: float) -> Tuple[
 
 def compute_turn_scale(track: Sequence[PoseSample], commanded_turn: float) -> Tuple[float, dict]:
     """Routine D. Unwrapped yaw slope over sensor time, scaled to 1.0.
-    Camera yaw rate == car yaw rate (constant mount offset)."""
+    Camera yaw rate == car yaw rate (constant mount offset). Guards: a
+    sensor gap wide enough for unwrap to alias (lose 2*pi) aborts, and the
+    sweep must be substantial — a silently 2-3x-low scale is worse than a
+    redo."""
     if len(track) < 8:
         raise CalibrationError("turn run collected too few fresh poses")
+    gap = _max_sensor_gap(track)
+    if gap > MAX_SAMPLE_GAP_S:
+        raise CalibrationError(
+            f"{gap:.2f} s sensor gap between poses — yaw unwrap unreliable "
+            "(pose feed stalled mid-rotation?); redo the routine")
     yaws = np.unwrap(_cam_yaws(track))
     dt = track[-1].timestamp - track[0].timestamp
     if dt <= 0.5:
         raise CalibrationError("turn run sensor-time span too short")
-    rate = float(abs(yaws[-1] - yaws[0]) / dt)
+    sweep = float(abs(yaws[-1] - yaws[0]))
+    if sweep < MIN_TURN_SWEEP_RAD:
+        raise CalibrationError(
+            f"turn run swept only {math.degrees(sweep):.0f}° "
+            f"(need >= {math.degrees(MIN_TURN_SWEEP_RAD):.0f}°) — too little "
+            "rotation to measure a rate")
+    rate = float(sweep / dt)
     scale = rate / abs(commanded_turn)
-    return scale, {"sweep_deg": math.degrees(abs(yaws[-1] - yaws[0])),
-                   "dt_s": dt, "rate_rps": rate}
+    return scale, {"sweep_deg": math.degrees(sweep), "dt_s": dt, "rate_rps": rate}
 
 
 # ── config writeback (regex, comment-preserving) ─────────────────────────
 
 
+_RIG_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+
+
 def write_calibration(config_path, values: dict, rig_id: str) -> None:
     """Replace the calibration numbers in config.yaml IN PLACE, preserving
     every comment. values keys: yaw_offset_rad, lever_arm_right_m,
-    lever_arm_forward_m, speed_scale_mps, turn_scale_rps."""
+    lever_arm_forward_m, speed_scale_mps, turn_scale_rps.
+
+    rig_id is restricted to [A-Za-z0-9._-]: it is interpolated into a
+    regex replacement AND into YAML — a space would parse on the first
+    write but brick the file on the SECOND (the matcher consumes one
+    token), a backslash would expand as a group reference, and a quote
+    would break the YAML. Refusing here beats corrupting a file whose
+    header says "do not hand-edit". Replacements use a callable so no
+    character in a value is ever regex-expanded."""
+    if not _RIG_ID_RE.match(rig_id):
+        raise CalibrationError(
+            f"rig_id {rig_id!r} invalid — use only letters, digits, '.', "
+            "'_' and '-' (e.g. hiwonder4wd-iphone13-tray-v1)")
     text = Path(config_path).read_text(encoding="utf-8")
     for key, val in values.items():
+        num = repr(round(float(val), 6))
         pattern = rf"^(\s*{re.escape(key)}:\s*)[^\s#]+(.*)$"
-        replacement = rf"\g<1>{round(float(val), 6)}\g<2>"
-        text, n = re.subn(pattern, replacement, text, count=1, flags=re.MULTILINE)
+        text, n = re.subn(pattern, lambda m, v=num: m.group(1) + v + m.group(2),
+                          text, count=1, flags=re.MULTILINE)
         if n != 1:
             raise CalibrationError(f"config key {key!r} not found for writeback")
     stamp = datetime.now().isoformat(timespec="seconds")
     text, n1 = re.subn(r"^(\s*calibrated_at:\s*)\S+(.*)$",
-                       rf'\g<1>"{stamp}"\g<2>', text, count=1, flags=re.MULTILINE)
+                       lambda m: m.group(1) + f'"{stamp}"' + m.group(2),
+                       text, count=1, flags=re.MULTILINE)
     text, n2 = re.subn(r"^(\s*rig_id:\s*)\S+(.*)$",
-                       rf'\g<1>"{rig_id}"\g<2>', text, count=1, flags=re.MULTILINE)
+                       lambda m: m.group(1) + f'"{rig_id}"' + m.group(2),
+                       text, count=1, flags=re.MULTILINE)
     if n1 != 1 or n2 != 1:
         raise CalibrationError("provenance keys not found for writeback")
     Path(config_path).write_text(text, encoding="utf-8")
