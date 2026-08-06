@@ -63,6 +63,7 @@ class Candidate:
     confirmed: bool
     stability: float
     xyz_world: List[float]
+    last_seen_wall_utc: Optional[float] = None   # observation provenance
 
 
 @dataclass(frozen=True)
@@ -79,6 +80,11 @@ class PlanResult:
     planner_path: str = "none"       # haiku | top1_fallback | top1_no_llm | none
     plan_pose: Optional[PoseSample] = None
     frame_epoch: Optional[int] = None  # plan-time epoch (from plan_pose)
+    # When the chosen target was last observed (server wall clock) — makes
+    # the memory condition's coordinate age at plan time AUDITABLE (the
+    # map keeps ingesting during trials; reviewers can check whether plans
+    # ran on scan-age or approach-refreshed coordinates).
+    target_last_seen_wall_utc: Optional[float] = None
     reason: Optional[str] = None     # not_found detail or LLM's one-liner
 
 
@@ -170,6 +176,7 @@ def select_target_from_hits(hits, goal: str, rtsm: RtsmClient, cfg: Config,
             confirmed=h.confirmed,
             stability=h.stability,
             xyz_world=list(h.xyz_world or []),
+            last_seen_wall_utc=h.last_seen_wall_utc,
         )
         for h in eligible
     ]
@@ -219,7 +226,9 @@ def plan(goal: str, rtsm: RtsmClient, cfg: Config,
         xyz_world=picked.xyz_world, score=picked.score,
         confirmed=picked.confirmed, stability=picked.stability,
         planner_path=planner_path, plan_pose=res.robot_pose,
-        frame_epoch=plan_epoch, reason=reason,
+        frame_epoch=plan_epoch,
+        target_last_seen_wall_utc=picked.last_seen_wall_utc,
+        reason=reason,
     )
 
 

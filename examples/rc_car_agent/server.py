@@ -393,7 +393,7 @@ class AgentServer:
         task["target_id"] = pr.target_id
         task["target_label"] = pr.label
         if logger is not None:
-            logger.log_plan(pr)
+            logger.log_plan(pr, rtsm_stats=self._safe_stats())
 
         if pr.status != "ok":
             detail = pr.reason or "target not found"
@@ -402,12 +402,23 @@ class AgentServer:
                                elapsed_s=time.monotonic() - t0)
             return "not_found", detail
 
+        # Symmetric budget semantics: 60 s is a hard TOTAL clock from
+        # command receipt — planning/selection time counts here exactly as
+        # search time counts in the baseline's 180 s (audited 2026-08-06).
+        remaining = self.cfg.nav.timeout_rtsm_s - (time.monotonic() - t0)
+        if remaining <= 0:
+            detail = "budget exhausted at planning"
+            if logger is not None:
+                logger.log_end("timeout", detail,
+                               elapsed_s=time.monotonic() - t0)
+            return "timeout", detail
         task["phase"] = "driving"
         runner = NavRunner(
             self.cfg, self.bridge, self.rtsm, pr, task["condition"],
             stop_event=self.stop_event, preempt_event=self._preempt,
             cancel_event=self._cancel, shutdown_event=self._shutdown,
             logger=logger, progress=task, log_t0_mono=t0,
+            timeout_s_override=remaining,
         )
         try:
             result, detail = runner.run()
@@ -415,7 +426,8 @@ class AgentServer:
             self.bridge.stop()
             result, detail = "nav_error", f"{type(e).__name__}: {e}"
         if logger is not None:
-            logger.log_end(result, detail, elapsed_s=time.monotonic() - t0)
+            logger.log_end(result, detail, elapsed_s=time.monotonic() - t0,
+                           rtsm_stats=self._safe_stats())
         return result, detail
 
     def _run_baseline_mission(self, task: Dict[str, Any]) -> tuple:
@@ -438,7 +450,7 @@ class AgentServer:
         if logger is not None:
             logger.log_plan(PlanResult(status="searching", goal=task["goal"],
                                        query=query, planner_path="baseline_fresh"),
-                            rng_seed=seed)
+                            rng_seed=seed, rtsm_stats=self._safe_stats())
 
         budget = self.cfg.nav.timeout_baseline_s
         task["phase"] = "searching"
@@ -521,7 +533,8 @@ class AgentServer:
                     result, detail = "nav_error", f"{type(e).__name__}: {e}"
 
         if logger is not None:
-            logger.log_end(result, detail, elapsed_s=time.monotonic() - t0)
+            logger.log_end(result, detail, elapsed_s=time.monotonic() - t0,
+                           rtsm_stats=self._safe_stats())
         return result, detail
 
     def _trials_dir(self) -> Path:
@@ -529,6 +542,16 @@ class AgentServer:
         if not p.is_absolute():
             p = Path(__file__).resolve().parent / p
         return p
+
+    def _safe_stats(self) -> Optional[Dict[str, Any]]:
+        """Best-effort RTSM /stats snapshot for trial-log throughput
+        auditing (upserts delta start->end per trial). Never raises."""
+        try:
+            s = self.rtsm.stats()
+            return {"objects": s.get("objects"), "confirmed": s.get("confirmed"),
+                    "upserts_total": s.get("upserts_total")}
+        except Exception:  # noqa: BLE001
+            return None
 
 
 # ── FastAPI shell ────────────────────────────────────────────────────────

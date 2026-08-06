@@ -15,7 +15,8 @@ from aggregate import (COMMON_HORIZON_S, mann_whitney_u, parse_trial,
 
 def _write_trial(dirp, trial_id, condition, result, tta=None, elapsed=None,
                  tape_cm=None, ticks=None, target=(0.0, 0.3, 3.0),
-                 start_xyz=(0.0, 0.3, 0.0), search_time=None, budget=None):
+                 start_xyz=(0.0, 0.3, 0.0), search_time=None, budget=None,
+                 layout=None, notes=None, calibrated=True, rig="test-rig"):
     """Server-faithful trial JSONL. Memory trials carry plan_pose+target in
     trial_start; baseline trials carry them ONLY on the acquired event."""
     is_baseline = condition == "baseline"
@@ -34,10 +35,11 @@ def _write_trial(dirp, trial_id, condition, result, tta=None, elapsed=None,
                             "frame_epoch": 7}),
         "config": {"timeout_rtsm_s": 60.0 if not is_baseline else 60.0,
                    "timeout_baseline_s": budget if is_baseline else 180.0,
-                   **({"timeout_rtsm_s": budget} if not is_baseline else {})},
+                   **({"timeout_rtsm_s": budget} if not is_baseline else {}),
+                   "is_calibrated": calibrated, "rig_id": rig},
         "provenance": {"git_commit": "abc"}, "rng_seed": 7 if is_baseline else None,
-        "layout_id": None, "start_pose_id": None, "tape_cm": tape_cm,
-        "video_file": None, "notes": None,
+        "layout_id": layout, "start_pose_id": None, "session_id": None,
+        "tape_cm": tape_cm, "video_file": None, "notes": notes,
     }]
     if search_time is not None:
         lines.append({"type": "event", "name": "baseline_acquired",
@@ -109,6 +111,82 @@ def test_off_protocol_budget_excluded_and_counted(tmp_path):
     s = summarize(tmp_path)
     assert s["n_files"] == 1
     assert s["off_protocol_n"] == 1
+
+
+# ── exclusion machinery (protocol-review fixes) ──────────────────────────
+
+
+def test_invalid_marked_trials_excluded_and_counted(tmp_path):
+    """The protocol's INVALID marker must actually exclude — a phone-crash
+    trial the operator voided must not enter TCR/TTA/MW."""
+    _write_trial(tmp_path, "t-ok", "baseline", "arrived", tta=90.0,
+                 search_time=70.0)
+    _write_trial(tmp_path, "t-bad", "baseline", "stale_stop", elapsed=95.0,
+                 notes="INVALID — app crash mid-trial")
+    s = summarize(tmp_path)
+    assert s["n_files"] == 1
+    assert s["excluded"]["invalid_marked"] == 1
+    assert s["conditions"]["baseline"]["n"] == 1        # only the valid one
+
+
+def test_operator_results_excluded_and_counted(tmp_path):
+    """cancelled/preempted/shutdown are interventions, not failures —
+    never failures-at-cap (the shakedown-debris scenario)."""
+    _write_trial(tmp_path, "t-ok", "rtsm", "arrived", tta=10.0)
+    _write_trial(tmp_path, "t-c", "rtsm", "cancelled", elapsed=5.0)
+    _write_trial(tmp_path, "t-p", "rtsm", "preempted", elapsed=3.0)
+    s = summarize(tmp_path)
+    assert s["excluded"]["operator_result"] == 2
+    assert s["conditions"]["rtsm"]["tta_n"] == 1        # no phantom failures
+
+
+def test_uncalibrated_trials_excluded(tmp_path):
+    _write_trial(tmp_path, "t-ok", "rtsm", "arrived", tta=10.0)
+    _write_trial(tmp_path, "t-uncal", "rtsm", "arrived", tta=9.0,
+                 calibrated=False, rig=None)
+    s = summarize(tmp_path)
+    assert s["excluded"]["uncalibrated"] == 1
+    assert s["n_files"] == 1
+
+
+# ── verdict-gated TCR (pre-registered threshold semantics) ───────────────
+
+
+def test_headline_tcr_requires_arrival_verdict(tmp_path):
+    """A drift-abort that happens to halt at 45 cm is NOT a completion in
+    the headline; it IS counted in the any-verdict secondary."""
+    _write_trial(tmp_path, "t-1", "rtsm", "arrived", tta=10.0, tape_cm=30)
+    _write_trial(tmp_path, "t-2", "rtsm", "drift", elapsed=20.0, tape_cm=45)
+    s = summarize(tmp_path)
+    r = s["conditions"]["rtsm"]
+    assert r["tcr_tape"] == pytest.approx(0.5)          # only the arrival
+    assert r["tcr_tape_any_verdict"] == pytest.approx(1.0)
+    assert set(r["tcr_sweep"].keys()) == {"40cm", "50cm", "60cm"}
+
+
+def test_terminal_error_decomposition(tmp_path):
+    _write_trial(tmp_path, "t-1", "rtsm", "arrived", tta=10.0, tape_cm=60)
+    # final_dist_m is 0.3 in the fixture end record -> |0.3 - 0.6| = 0.3
+    s = summarize(tmp_path)
+    r = s["conditions"]["rtsm"]
+    assert r["terminal_err_median_m"] == pytest.approx(0.3)
+    assert r["believed_arrived_tape_failed"] == 1       # 60 > 50 threshold
+
+
+# ── clustering robustness (per-layout sign test) ─────────────────────────
+
+
+def test_sign_test_by_layout(tmp_path):
+    for lid, (r_tta, b_tta) in {"L1": (10.0, 100.0), "L2": (12.0, 120.0),
+                                "L3": (14.0, 90.0)}.items():
+        _write_trial(tmp_path, f"t-r-{lid}", "rtsm", "arrived", tta=r_tta,
+                     layout=lid)
+        _write_trial(tmp_path, f"t-b-{lid}", "baseline", "arrived", tta=b_tta,
+                     layout=lid, search_time=b_tta - 15)
+    s = summarize(tmp_path)
+    st = s["sign_test_by_layout"]
+    assert st["memory_wins"] == 3 and st["of_layouts"] == 3
+    assert st["p_one_sided"] == pytest.approx(1 / 8)    # exact binomial 3/3
 
 
 # ── censoring (the review's CRITICAL finding) ────────────────────────────

@@ -62,8 +62,11 @@ def test_trial_start_schema(tmp_path):
     assert "git_commit" in start["provenance"]         # best-effort, may be null
     assert start["rng_seed"] is None                   # baseline-only (Phase H)
     # Protocol-era fields: present-but-null, operator-filled post-trial.
-    for key in ("layout_id", "start_pose_id", "tape_cm", "video_file", "notes"):
+    for key in ("layout_id", "start_pose_id", "session_id", "tape_cm",
+                "video_file", "notes"):
         assert key in start and start[key] is None
+    assert "target_age_at_plan_s" in start["planner"]   # coordinate-age audit
+    assert "rtsm_stats" in start                        # throughput audit
 
 
 def test_tick_schema(tmp_path):
@@ -89,8 +92,9 @@ def test_timeout_end_censored_no_tta(tmp_path):
     end = _full_trial(tmp_path, "timeout", elapsed=60.0)[-1]
     assert end["censored"] is True
     assert end["tta_s"] is None
-    for key in ("human_interventions", "stop_photo"):   # operator-filled
-        assert key in end and end[key] is None
+    # trial_end is MACHINE-ONLY (review fix): no operator-filled fields —
+    # interventions live in `result`, photos in the <task_id>.jpg convention.
+    assert "human_interventions" not in end and "stop_photo" not in end
 
 
 def test_same_trial_id_never_merges_files(tmp_path):

@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -67,9 +68,10 @@ class TrialLogger:
 
     # ── records ──────────────────────────────────────────────────────────
 
-    def log_plan(self, plan, rng_seed=None) -> None:
+    def log_plan(self, plan, rng_seed=None, rtsm_stats=None) -> None:
         nav = self._cfg.nav
         cal = self._cfg.calibration
+        last_seen = getattr(plan, "target_last_seen_wall_utc", None)
         self._write({
             "type": "trial_start",
             "schema_version": SCHEMA_VERSION,
@@ -86,8 +88,17 @@ class TrialLogger:
                 "confirmed": plan.confirmed,
                 "stability": plan.stability,
                 "xyz_world": plan.xyz_world,
+                # Coordinate-age provenance: when the chosen target was
+                # last observed vs when this plan ran — auditable answer
+                # to "did memory plan on the scan or a fresher upsert?"
+                "target_last_seen_wall_utc": last_seen,
+                "target_age_at_plan_s": (round(time.time() - last_seen, 3)
+                                         if last_seen is not None else None),
                 "reason": plan.reason,
             },
+            # Pipeline-throughput audit point (upserts delta start->end
+            # reveals thermal/throughput drift within a session).
+            "rtsm_stats": rtsm_stats,
             "frame_epoch": plan.frame_epoch,
             "plan_pose": self._pose_dict(plan.plan_pose),
             "config": {
@@ -111,9 +122,11 @@ class TrialLogger:
                 "config_path": getattr(self._cfg, "source_path", None),
             },
             "rng_seed": rng_seed,         # baseline condition only
-            # Operator-filled after the trial (kept null by software):
+            # Operator-filled after the trial (kept null by software;
+            # trial_start is the ONLY operator-editable record):
             "layout_id": None,
             "start_pose_id": None,
+            "session_id": None,
             "tape_cm": None,
             "video_file": None,
             "notes": None,
@@ -143,7 +156,10 @@ class TrialLogger:
         })
 
     def log_end(self, result: str, detail: str = "",
-                elapsed_s: Optional[float] = None) -> None:
+                elapsed_s: Optional[float] = None, rtsm_stats=None) -> None:
+        # trial_end is MACHINE-ONLY (operators edit trial_start's nulls).
+        # Interventions are encoded in result ("estopped"); photos are
+        # recoverable by the <task_id>.jpg naming convention.
         self._write({
             "type": "trial_end",
             "trial_id": self.trial_id,
@@ -156,9 +172,7 @@ class TrialLogger:
             "tta_s": (round(elapsed_s, 3)
                       if result == "arrived" and elapsed_s is not None else None),
             "censored": result == "timeout",
-            # Operator-filled after the trial:
-            "human_interventions": None,
-            "stop_photo": None,
+            "rtsm_stats": rtsm_stats,
             "ended_at": datetime.now().isoformat(timespec="seconds"),
         })
         self.close()
