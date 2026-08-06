@@ -366,13 +366,14 @@ def create_app(
         Clears:
         - WorkingMemory (all objects, proto/confirmed)
         - ProximityIndex (spatial grid, via WM.clear())
+        - Vector store (FAISS LTM index — stale ids otherwise surface as
+          ghost objects in /search/semantic after reset)
         - SweepCache (sweep timestamps, camera snapshots)
         - FrameWindow (buffered RGB-D frames)
         - VisualizationServer registry (keyframes/point clouds)
 
         Does NOT clear:
         - FastSAM / CLIP models (expensive to reload)
-        - FAISS LTM vectors (preserves long-term memory)
         - Configuration
         """
         result: Dict[str, Any] = {
@@ -387,6 +388,17 @@ def create_app(
             result["cleared"]["working_memory"] = wm_result
         except Exception as e:
             result["cleared"]["working_memory"] = {"error": str(e)}
+
+        # Clear vector store — WM.clear() only clears the spatial index;
+        # the FAISS index is a separate store and must be reset with it.
+        if vectors is not None:
+            try:
+                if hasattr(vectors, "clear"):
+                    result["cleared"]["vector_store"] = vectors.clear()
+                else:
+                    result["cleared"]["vector_store"] = {"error": "vector store has no clear()"}
+            except Exception as e:
+                result["cleared"]["vector_store"] = {"error": str(e)}
 
         # Clear SweepCache
         if reset_components and reset_components.sweep_cache:
@@ -545,7 +557,9 @@ def create_app(
             entry: Dict[str, Any] = {
                 "id": oid,
                 "score": round(float(score), 4),
-                "confirmed": obj.confirmed if obj else True,
+                # A vector-store id with no WM object is stale (e.g. survived
+                # a partial clear) — never advertise it as confirmed.
+                "confirmed": obj.confirmed if obj else False,
                 "stability": round(float(obj.stability), 3) if obj else 0.0,
                 "xyz_world": obj.xyz_world.tolist() if obj and obj.xyz_world is not None else None,
             }
