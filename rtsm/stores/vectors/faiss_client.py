@@ -14,6 +14,7 @@ class FaissClient:
     - upsert_batch(records)
     - search(emb, top_k)
     - delete(ids)
+    - clear()
     - save(path)
     - load(path)
     - close()
@@ -138,6 +139,27 @@ class FaissClient:
                 self.save(self.persistent_path)
             except Exception:
                 pass
+
+    def clear(self) -> Dict[str, int]:
+        """
+        Remove all vectors and reset the index (called on /reset).
+
+        Returns dict with count of what was cleared.
+        """
+        vec_count = len(self._row_to_id)
+        self._metadata.clear()
+        self._embeddings.clear()
+        self._row_to_id = []
+        self._id_to_row = {}
+        self._ensure_index()
+        self._index.reset()
+        # Persist the empty state, else a restart reloads the old vectors
+        if self.persistent_path:
+            try:
+                self.save(self.persistent_path)
+            except Exception:
+                pass
+        return {"vectors_cleared": vec_count}
 
     def save(self, path: str) -> None:
         if self._index is None:
