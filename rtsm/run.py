@@ -28,6 +28,7 @@ from rtsm.io.ingest_queue import IngestQueue
 from rtsm.io.zeromq import ZeroMQSubscriber
 from rtsm.io.websocket import WebSocketReceiver
 from rtsm.utils.net import print_server_addresses, get_local_ipv4_addresses
+from rtsm.utils.static_dir import find_static_dir
 from rtsm.stores.sweep_policy import SweepPolicy
 from rtsm.api.server import create_app, start_server, ResetComponents
 from rtsm.cfg import load_config, cfg_path
@@ -49,22 +50,6 @@ logging.getLogger("rtsm.stores.proximity_index").setLevel(logging.WARNING)
 logging.getLogger("rtsm.core.association").setLevel(logging.INFO)
 
 logger = logging.getLogger(__name__)
-
-
-def _find_static_dir() -> str | None:
-    """Locate the built frontend static directory.
-
-    Search order (dev build wins so you never need to copy):
-      1. demo/dist/ (dev, after npm run build)
-      2. rtsm/static/ (packaged release)
-    """
-    dev_dist = Path("demo/dist")
-    if dev_dist.is_dir() and (dev_dist / "index.html").is_file():
-        return str(dev_dist.resolve())
-    pkg_static = Path(__file__).parent / "static"
-    if pkg_static.is_dir() and (pkg_static / "index.html").is_file():
-        return str(pkg_static)
-    return None
 
 
 def main():
@@ -350,7 +335,7 @@ def main():
     mcp_enabled = bool(mcp_cfg.get("enable", False))
 
     # Resolve frontend static dir and viz broadcaster for single-port serving
-    static_dir = _find_static_dir()
+    static_dir = find_static_dir()
     vis_broadcaster = vis_server.broadcaster if vis_server else None
     vis_server_registry = vis_server.registry if vis_server else None
 

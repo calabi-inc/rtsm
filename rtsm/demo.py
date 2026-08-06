@@ -63,22 +63,6 @@ def _find_demo_data() -> str:
     )
 
 
-def _find_static_dir() -> str | None:
-    """Locate the built frontend static directory.
-
-    Search order (dev build wins so you never need to copy):
-      1. demo/dist/ (dev, after npm run build)
-      2. rtsm/static/ (packaged release)
-    """
-    dev_dist = Path("demo/dist")
-    if dev_dist.is_dir() and (dev_dist / "index.html").is_file():
-        return str(dev_dist.resolve())
-    pkg_static = Path(__file__).parent / "static"
-    if pkg_static.is_dir() and (pkg_static / "index.html").is_file():
-        return str(pkg_static)
-    return None
-
-
 def run_demo(argv: list[str] | None = None) -> None:
     """Run the RTSM demo."""
     parser = argparse.ArgumentParser(
@@ -152,6 +136,7 @@ def run_demo(argv: list[str] | None = None) -> None:
     from rtsm.io.replayer import ReplayReceiver
     from rtsm.api.server import create_app, start_server, ResetComponents
     from rtsm.utils.net import get_local_ipv4_addresses
+    from rtsm.utils.static_dir import find_static_dir
     from rtsm.analytics import SegAnalyticsBuffer, PipelineLatencyBuffer
 
     io_cfg = cfg.get("io", {})
@@ -249,7 +234,7 @@ def run_demo(argv: list[str] | None = None) -> None:
     )
 
     # ── Start API + viz WebSocket + static frontend on single port ──
-    static_dir = _find_static_dir()
+    static_dir = find_static_dir()
     local_ips = get_local_ipv4_addresses()
     display_host = local_ips[0] if local_ips else "localhost"
     port = args.port
