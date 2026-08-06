@@ -85,9 +85,12 @@ specific scan.
    6800 mV and only at preflight — the 7000 rule is operator-enforced.)
 3. PS4 controller paired BEFORE starting the agent server; verify
    `/status` shows `gamepad_available: true`.
-4. Boot order: RTSM (`python -m rtsm`, wait for models) → phone streams
-   (`ws://<desktop-ip>:8765/stream`) → **scan** → agent server (with
-   ANTHROPIC_API_KEY injected) → `READY`.
+4. Boot order: **FRESH RTSM process** (`python -m rtsm`, wait for models)
+   → phone streams (`ws://<desktop-ip>:8765/stream`) → **scan** → agent
+   server (with ANTHROPIC_API_KEY injected) → `READY`.
+   **Never build a campaign map on top of `POST /reset`** — reset clears
+   working memory but leaves ghost entries in the vector index that crowd
+   retrieval (found live 2026-08-07). Fresh process = fresh index.
 5. **Scan procedure (reproducibility):** walk the SAME loop each session —
    perimeter of the drivable area, one slow lap, then a direct look at
    each layout object from ~1–1.5 m, two angles each. Target ~2–4 min.
