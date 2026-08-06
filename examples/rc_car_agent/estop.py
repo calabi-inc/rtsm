@@ -15,8 +15,10 @@ Triggers:
     and by tests.
 
 Degraded mode: if no gamepad is connected at start, the thread stays up
-(trigger() still works, Ctrl-C still works) and exposes
-gamepad_available=False so /status can warn the operator.
+(trigger() still works, Ctrl-C still works), exposes
+gamepad_available=False so /status can warn the operator, and keeps
+retrying detection so a controller paired after server boot is picked
+up without a restart.
 
 A chat/HTTP "stop" is NOT this channel — POST /stop is a convenience;
 THIS is the safety guarantee (together with the ESP32 300 ms watchdog,
@@ -48,6 +50,7 @@ class EstopMonitor:
         self._period_s = 1.0 / float(poll_hz)
 
         self._thread: Optional[threading.Thread] = None
+        self._retry_s = 1.0           # gamepad re-detection cadence
         self._shutdown = threading.Event()
         self._trigger_lock = threading.Lock()
 
@@ -111,11 +114,13 @@ class EstopMonitor:
 
     def _run(self) -> None:
         joy = self._init_gamepad()
+        while joy is None and not self._shutdown.is_set():
+            # Degraded: no gamepad. trigger() remains the (only) software
+            # path (Ctrl-C wiring lives in the server); keep retrying so a
+            # controller paired after boot is detected without a restart.
+            self._shutdown.wait(self._retry_s)
+            joy = self._init_gamepad()
         if joy is None:
-            # Degraded: no gamepad. Thread idles so trigger() remains the
-            # (only) software path; Ctrl-C wiring lives in the server.
-            while not self._shutdown.is_set():
-                time.sleep(0.2)
             return
 
         import pygame
@@ -130,7 +135,7 @@ class EstopMonitor:
                 self.gamepad_name = None
                 joy = None
                 while not self._shutdown.is_set() and joy is None:
-                    time.sleep(1.0)
+                    self._shutdown.wait(self._retry_s)
                     joy = self._init_gamepad()
                 continue
             time.sleep(self._period_s)
@@ -140,6 +145,10 @@ class EstopMonitor:
             import pygame
             if not pygame.get_init():
                 pygame.init()
+            # SDL only enumerates devices when the joystick subsystem
+            # initializes — a plain init() after the first is a no-op, so
+            # quit first to force a rescan (we hold no live Joystick here).
+            pygame.joystick.quit()
             pygame.joystick.init()
             if pygame.joystick.get_count() <= self._joy_index:
                 self.gamepad_available = False

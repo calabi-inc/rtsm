@@ -1,7 +1,9 @@
 """EstopMonitor tests — fake bridge, no pygame/gamepad required."""
 
+import sys
 import threading
 import time
+import types
 
 from estop import EstopMonitor
 
@@ -73,5 +75,64 @@ def test_thread_runs_degraded_without_gamepad():
     assert m.gamepad_available is False
     assert m.status()["triggered"] is False
     assert m.trigger("ctrl-c") is True             # software path still works
+    m.shutdown()
+    assert not m._thread.is_alive()
+
+
+class FakeJoystick:
+    def __init__(self):
+        self.pressed = False
+
+    def get_button(self, index):
+        return 1 if self.pressed else 0
+
+
+def _wait_for(pred, timeout=3.0):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if pred():
+            return True
+        time.sleep(0.01)
+    return False
+
+
+def test_gamepad_paired_after_start_is_detected_without_restart(monkeypatch):
+    # The poll loop only needs pygame.event.pump(); stub it so no real
+    # pygame/display is required.
+    fake_pygame = types.ModuleType("pygame")
+    fake_pygame.event = types.SimpleNamespace(pump=lambda: None)
+    monkeypatch.setitem(sys.modules, "pygame", fake_pygame)
+
+    m, b, ev = _monitor()
+    m._retry_s = 0.05                              # fast re-detection for test
+    joy = FakeJoystick()
+    calls = {"n": 0}
+
+    def fake_init_gamepad():
+        calls["n"] += 1
+        if calls["n"] <= 2:                        # controller not paired yet
+            m.gamepad_available = False
+            return None
+        m.gamepad_available = True                 # mimic the real contract
+        m.gamepad_name = "Fake PS4 Controller"
+        return joy
+
+    m._init_gamepad = fake_init_gamepad
+    m.start()
+
+    assert m.trigger("probe") is True              # trigger() works while degraded
+    m.reset()
+    b.calls.clear()
+
+    # Detection must happen on the SAME thread run — no restart.
+    assert _wait_for(lambda: m.gamepad_available)
+    assert calls["n"] >= 3
+    assert m.gamepad_name == "Fake PS4 Controller"
+    assert m._thread.is_alive()
+
+    joy.pressed = True                             # now press the e-stop button
+    assert _wait_for(lambda: m.triggered)
+    assert m.trigger_source == "gamepad-button0"
+    assert b.calls == [{"estop": True, "event_already_set": False}]
     m.shutdown()
     assert not m._thread.is_alive()
