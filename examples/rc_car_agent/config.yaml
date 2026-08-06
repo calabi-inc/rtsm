@@ -2,7 +2,7 @@
 # Every tunable lives here — code contains no magic numbers.
 
 rtsm:
-  url: "http://localhost:8002"        # RTSM REST API
+  url: "http://127.0.0.1:8002"        # RTSM REST API — IP literal, NOT "localhost": Python requests tries IPv6 ::1 first and eats ~2 s per fresh connection (uvicorn binds IPv4 only)
   lifecycle: "attach"                  # attach | spawn | off  (spawn: launch RTSM if healthz is down)
   # Interpreter + args for spawn mode. MUST be the RTSM/GPU env's python —
   # NOT this example's .venv (which deliberately has no rtsm/torch installed;
