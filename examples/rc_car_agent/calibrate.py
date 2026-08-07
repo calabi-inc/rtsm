@@ -52,12 +52,12 @@ from rtsm_client import PoseSample
 
 # Motion parameters — deliberately gentle; a calibration run should never
 # need more than ~1.5 m of floor.
-STRAIGHT_SPEED = 0.35
-STRAIGHT_DURATION_S = 2.0
-ROTATE_TURN = 0.4
-ROTATE_DURATION_S = 8.0
+STRAIGHT_SPEED = 0.5
+STRAIGHT_DURATION_S = 8.0
+ROTATE_TURN = 0.65
+ROTATE_DURATION_S = 24.0
 TICK_S = 0.05                     # < heartbeat_s (0.25) — hold rule applies here too
-POLL_EVERY_TICKS = 2              # pose poll ~10 Hz
+POLL_EVERY_TICKS = 1              # pose poll ~10 Hz
 STALE_ABORT_S = 2.5
 
 MIN_STRAIGHT_DISP_M = 0.25        # below this, motion_dir is noise
@@ -71,7 +71,7 @@ MIN_LEVER_RADIUS_M = 0.03         # smaller than this = camera at drive center
 MAX_CIRCLE_RMS_M = 0.06
 MAX_LEVER_SPREAD_M = 0.02         # per-sample lever estimates must agree; a
                                   # bigger spread = the circle fit is lying
-MAX_SAMPLE_GAP_S = 0.5            # sensor-time gap between fresh poses above
+MAX_SAMPLE_GAP_S = 1.5            # sensor-time gap between fresh poses above
                                   # which np.unwrap can alias (lose 2*pi)
 
 
@@ -181,9 +181,9 @@ def compute_yaw_offset(track: Sequence[PoseSample]) -> Tuple[float, dict]:
 
 
 def fit_circle(points: np.ndarray) -> Tuple[float, float, float, float]:
-    """Kåsa algebraic least-squares circle fit -> (cx, cz, radius, rms).
+    """KÃ¥sa algebraic least-squares circle fit -> (cx, cz, radius, rms).
 
-    Points are CENTERED first: the raw Kåsa system is near-singular for a
+    Points are CENTERED first: the raw KÃ¥sa system is near-singular for a
     degenerate (tiny/point-like) blob, and lstsq's min-norm answer then
     depends on the distance from the WORLD ORIGIN — a zero-lever rig
     rotating at (5, 5) would fit a phantom 3.5 m circle. Centered, the
@@ -376,6 +376,10 @@ def main() -> int:
         return 1
 
     def drive(l, r):
+        # Main-thread SDL pump (2026-08-07): DirectInput delivers input
+        # only to the initializing thread — this wrapper runs on it every
+        # tick, so pumping here is what keeps the X button audible.
+        estop.pump_once()
         if stop_event.is_set():
             raise CalibrationError("e-stop triggered")
         bridge.drive(l, r)

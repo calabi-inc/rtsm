@@ -576,10 +576,23 @@ def create_app(cfg: Optional[Config] = None,
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        import asyncio
+
         srv.startup()
+        # MAIN-THREAD SDL pump: Windows DirectInput delivers joystick
+        # input only to the thread that initialized SDL (found live
+        # 2026-08-07). startup() bound the pads on THIS thread; this task
+        # keeps input flowing so the e-stop poll thread reads real state.
+        async def _sdl_pump():
+            while True:
+                srv.monitor.pump_once()
+                await asyncio.sleep(0.05)
+
+        pump_task = asyncio.create_task(_sdl_pump())
         try:
             yield
         finally:
+            pump_task.cancel()
             srv.shutdown()
 
     app = FastAPI(title="rc_car_agent", lifespan=lifespan)

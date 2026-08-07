@@ -1,15 +1,22 @@
-"""EstopMonitor tests — fake bridge, no real gamepad required.
+"""EstopMonitor tests — fake bridge + fake pygame, no real gamepad.
 
 HARD LIMIT OF THIS FILE (read before trusting green):
-A mocked pygame CANNOT catch the class of failure that motivated the
-2026-08-07 rewrite — a binding that enumerates correctly (get_count /
-get_name fine) while SDL never delivers its input reports, so
-get_button() reads 0 forever. 39d7ec7's mocked retry test was green
-while a real operator's mid-drive X press was silently lost. These
-tests verify the monitor's LOGIC (event dispatch, binding lifecycle,
-liveness bookkeeping, trigger ordering); only the E1 protocol's
-live-fire X check — and hw_estop_check.py after any estop.py change —
-verifies the hardware path.
+Mocked pygame CANNOT catch the class of failure that motivated the
+2026-08-07 rewrites — bindings that enumerate correctly while SDL never
+delivers input reports. Mocked tests were green TWICE while a real
+operator's mid-drive X press was silently lost (deaf HIDAPI rebind, then
+the thread-affinity gap: DirectInput delivers input only to the SDL-
+initializing thread). These tests verify the monitor's LOGIC (trigger
+ordering, all-pads binding, liveness bookkeeping, hotplug lifecycle,
+main-thread/poll-thread split); only the E1 protocol's live-fire X check
+verifies the hardware path — before the first trial, and after any pad
+sleep/reconnect.
+
+Design under test (hardware-verified live 2026-08-07):
+  * start()/pump_once()/init_gamepads() = MAIN-thread half (SDL owner);
+    the daemon thread ONLY reads button state.
+  * ALL pads bound, kill buttons {0, 1} (DS4 X on both SDL channels) —
+    any pad's kill button latches; any button press proves liveness.
 """
 
 import collections
@@ -101,75 +108,55 @@ def test_status_exposes_liveness_fields():
     assert s["gamepad_available"] is False
 
 
-# ── degraded mode (real pygame if installed) ────────────────────────────
-
-
-def test_thread_runs_degraded_without_gamepad():
-    # joystick_index=9 guarantees "no gamepad" even if a controller is
-    # paired: the boot scan needs count > 9, and hotplug JOYDEVICEADDED
-    # events carry device_index 0 for a single pad, which != 9.
-    m, b, ev = _monitor(joystick_index=9)
-    m.start()
-    time.sleep(0.3)
-    assert m._thread is not None and m._thread.is_alive()
-    assert m.gamepad_available is False
-    assert m.status()["triggered"] is False
-    assert m.trigger("ctrl-c") is True             # software path still works
-    m.shutdown()
-    assert not m._thread.is_alive()
-
-
-# ── hotplug lifecycle against a fake pygame ─────────────────────────────
+# ── fake pygame matching exactly the surface estop.py uses ──────────────
 
 
 class FakeJoystick:
-    _next_iid = 0
-
-    def __init__(self, name="Fake PS4 Controller"):
+    def __init__(self, name="Fake PS4 Controller", numbuttons=14):
         self._name = name
-        self._iid = FakeJoystick._next_iid
-        FakeJoystick._next_iid += 1
+        self._n = numbuttons
         self.buttons = collections.defaultdict(int)
+
+    def init(self):
+        pass
 
     def get_name(self):
         return self._name
 
-    def get_instance_id(self):
-        return self._iid
+    def get_numbuttons(self):
+        return self._n
 
     def get_button(self, index):
         return self.buttons[index]
 
 
 def _make_fake_pygame():
-    """Fake of exactly the pygame surface estop.py uses.
-
-    get_init() returns True: the process looks ALREADY initialized, the
-    precondition of the 2026-08-07 incident. The monitor must bind purely
-    from the device list + event queue — a pygame.joystick.quit()/init()
-    rescan (the old, broken path) would raise AttributeError here and
-    fail the test, which is intentional: the fix forbids subsystem
-    restarts."""
     pg = types.ModuleType("pygame")
     pg.JOYDEVICEADDED = 100
     pg.JOYDEVICEREMOVED = 101
-    pg.JOYBUTTONDOWN = 102
-    pg._devices = []                       # device_index -> FakeJoystick
-    pg._queue = collections.deque()        # atomic append/popleft
+    pg._devices = []
+    pg._queue = collections.deque()
 
-    def _get():
-        evs = []
+    def _get(type_filter=None):
+        keep, out = collections.deque(), []
         while True:
             try:
-                evs.append(pg._queue.popleft())
+                e = pg._queue.popleft()
             except IndexError:
-                return evs
+                break
+            if type_filter is None or e.type in type_filter:
+                out.append(e)
+            else:
+                keep.append(e)
+        pg._queue = keep
+        return out
 
     pg.get_init = lambda: True
     pg.init = lambda: None
-    pg.event = types.SimpleNamespace(get=_get, pump=lambda: None)
+    pg.event = types.SimpleNamespace(get=_get, pump=lambda: None,
+                                     clear=lambda: pg._queue.clear())
     pg.joystick = types.SimpleNamespace(
-        get_init=lambda: True,
+        quit=lambda: None,
         init=lambda: None,
         get_count=lambda: len(pg._devices),
         Joystick=lambda i: pg._devices[i],
@@ -177,60 +164,37 @@ def _make_fake_pygame():
     return pg
 
 
-def _plug(pg, joy, index=0):
-    pg._devices.insert(index, joy)
-    pg._queue.append(types.SimpleNamespace(
-        type=pg.JOYDEVICEADDED, device_index=index))
+def _device_event(pg, kind):
+    pg._queue.append(types.SimpleNamespace(type=kind))
 
 
-def _unplug(pg, joy):
-    pg._devices.remove(joy)
-    pg._queue.append(types.SimpleNamespace(
-        type=pg.JOYDEVICEREMOVED, instance_id=joy.get_instance_id()))
+# ── binding + kill semantics ────────────────────────────────────────────
 
 
-def _press_event(pg, joy, button=0):
-    pg._queue.append(types.SimpleNamespace(
-        type=pg.JOYBUTTONDOWN, instance_id=joy.get_instance_id(),
-        button=button))
-
-
-def test_gamepad_paired_after_start_binds_and_button_reads(monkeypatch):
-    # Successor to 39d7ec7's retry test — but exercising the REAL binding
-    # code against the event queue instead of stubbing _init_gamepad.
-    # Still cannot prove the hardware path (see module docstring).
+def test_boot_bind_and_kill_button_0(monkeypatch):
     pg = _make_fake_pygame()
+    joy = FakeJoystick()
+    pg._devices.append(joy)
     monkeypatch.setitem(sys.modules, "pygame", pg)
 
     m, b, ev = _monitor()
     m.start()
+    assert m.gamepad_available is True             # bound on caller thread
+    assert m.binding_verified is False             # enumeration is not proof
 
-    time.sleep(0.1)                                # let the loop spin unbound
-    assert m.gamepad_available is False
-    assert m.trigger("probe") is True              # trigger() works degraded
-    m.reset()
-    b.calls.clear()
-
-    joy = FakeJoystick()
-    _plug(pg, joy)                                 # pad pairs mid-run
-    assert _wait_for(lambda: m.gamepad_available)  # same thread — no restart
-    assert m.gamepad_name == "Fake PS4 Controller"
-    assert m.binding_verified is False             # not proof until a press
-    assert m.last_button_press_mono is None
-
-    _press_event(pg, joy, button=0)                # operator presses X
+    joy.buttons[0] = 1                             # X on the HIDAPI mapping
     assert _wait_for(lambda: m.triggered)
-    assert m.trigger_source == "gamepad-button0"
-    assert b.calls == [{"estop": True, "event_already_set": False}]
+    assert m.trigger_source == "gamepad0-button0"
     assert m.binding_verified is True
     assert m.last_button_press_mono is not None
+    assert b.calls == [{"estop": True, "event_already_set": False}]
     m.shutdown()
     assert not m._thread.is_alive()
 
 
-def test_boot_time_pad_binds_by_index_and_polled_button_triggers(monkeypatch):
-    # Fresh-boot path: pad present before start(), no events needed; the
-    # 50 Hz get_button() poll alone must latch and count as liveness.
+def test_kill_button_1_also_latches(monkeypatch):
+    # DS4 X is button 1 on the DirectInput channel — the mapping that a
+    # single-button watch silently missed on hardware (2026-08-07).
     pg = _make_fake_pygame()
     joy = FakeJoystick()
     pg._devices.append(joy)
@@ -238,17 +202,34 @@ def test_boot_time_pad_binds_by_index_and_polled_button_triggers(monkeypatch):
 
     m, b, ev = _monitor()
     m.start()
-    assert _wait_for(lambda: m.gamepad_available)
-    assert m.binding_verified is False
-
-    joy.buttons[0] = 1                             # held X, seen by the poll
+    joy.buttons[1] = 1
     assert _wait_for(lambda: m.triggered)
-    assert m.trigger_source == "gamepad-button0"
-    assert m.binding_verified is True
+    assert m.trigger_source == "gamepad0-button1"
     m.shutdown()
 
 
-def test_non_estop_button_verifies_binding_without_triggering(monkeypatch):
+def test_second_pads_kill_press_latches(monkeypatch):
+    # ALL pads are armed. On hardware the winning press arrived via the
+    # USB enumeration while index 0 held the deaf Bluetooth ghost — a
+    # single-index binding is a lottery (2026-08-07). A stranger's press
+    # costing a re-arm is acceptable; a missed press is not.
+    pg = _make_fake_pygame()
+    ghost, wired = FakeJoystick("BT ghost"), FakeJoystick("USB pad")
+    pg._devices.extend([ghost, wired])
+    monkeypatch.setitem(sys.modules, "pygame", pg)
+
+    m, b, ev = _monitor()
+    m.start()
+    assert m.gamepad_available is True
+    assert "USB pad" in m.gamepad_name
+
+    wired.buttons[1] = 1                           # press on pad #2 only
+    assert _wait_for(lambda: m.triggered)
+    assert m.trigger_source == "gamepad1-button1"
+    m.shutdown()
+
+
+def test_non_kill_button_verifies_binding_without_triggering(monkeypatch):
     pg = _make_fake_pygame()
     joy = FakeJoystick()
     pg._devices.append(joy)
@@ -256,19 +237,59 @@ def test_non_estop_button_verifies_binding_without_triggering(monkeypatch):
 
     m, b, ev = _monitor()
     m.start()
-    assert _wait_for(lambda: m.gamepad_available)
-
-    _press_event(pg, joy, button=3)                # e.g. Triangle
+    joy.buttons[5] = 1                             # e.g. a shoulder button
     assert _wait_for(lambda: m.binding_verified)   # liveness proven...
     assert m.triggered is False                    # ...without an e-stop
     assert b.calls == []
     m.shutdown()
 
 
-def test_disconnect_flips_available_and_rebind_resets_verified(monkeypatch):
-    # The incident shape end-to-end: verified pad sleeps → available goes
-    # False at once (no silent zeros); it reconnects → bound again but
-    # binding_verified is False until a NEW press on the NEW binding.
+# ── degraded mode + main-thread retry ───────────────────────────────────
+
+
+def test_degraded_without_gamepad_trigger_still_works(monkeypatch):
+    pg = _make_fake_pygame()                       # zero devices
+    monkeypatch.setitem(sys.modules, "pygame", pg)
+
+    m, b, ev = _monitor()
+    m.start()
+    assert m.gamepad_available is False
+    assert m._thread.is_alive()
+    assert m.trigger("ctrl-c") is True             # software path still works
+    m.shutdown()
+    assert not m._thread.is_alive()
+
+
+def test_pad_paired_after_start_binds_via_pump(monkeypatch):
+    # The mid-run pairing path: pump_once() (MAIN thread) retries and
+    # binds — no server restart. The daemon thread then hears the press.
+    pg = _make_fake_pygame()
+    monkeypatch.setitem(sys.modules, "pygame", pg)
+
+    m, b, ev = _monitor()
+    m.start()
+    assert m.gamepad_available is False
+
+    joy = FakeJoystick()
+    pg._devices.append(joy)                        # pad pairs mid-run
+    m._last_reinit_mono = 0                        # bypass retry throttle
+    m._last_housekeep_mono = 0                     # bypass housekeep throttle
+    m.pump_once()                                  # main-thread retry
+    assert m.gamepad_available is True
+
+    joy.buttons[0] = 1
+    assert _wait_for(lambda: m.triggered)
+    m.shutdown()
+
+
+# ── hotplug lifecycle (the incident shape, end-to-end) ──────────────────
+
+
+def test_sleep_wake_resets_verified_and_new_press_reverifies(monkeypatch):
+    # Verified pad sleeps → available flips False at once (no silent
+    # zeros); it reconnects → bound again but binding_verified is False
+    # until a NEW press on the NEW binding. Press HISTORY is kept —
+    # an old press proves nothing, hiding it would lie the other way.
     pg = _make_fake_pygame()
     joy = FakeJoystick()
     pg._devices.append(joy)
@@ -276,48 +297,31 @@ def test_disconnect_flips_available_and_rebind_resets_verified(monkeypatch):
 
     m, b, ev = _monitor()
     m.start()
-    assert _wait_for(lambda: m.gamepad_available)
-
-    _press_event(pg, joy, button=0)                # live-fire: prove binding 1
-    assert _wait_for(lambda: m.binding_verified)
+    joy.buttons[0] = 1                             # live-fire: prove binding 1
+    assert _wait_for(lambda: m.triggered)
     first_press = m.last_button_press_mono
-    m.reset()                                      # operator re-arm
+    joy.buttons[0] = 0
+    m.reset()
     b.calls.clear()
 
-    _unplug(pg, joy)                               # pad sleeps mid-session
-    assert _wait_for(lambda: not m.gamepad_available)
-    assert m.gamepad_name is None
+    pg._devices.remove(joy)                        # pad sleeps mid-session
+    _device_event(pg, pg.JOYDEVICEREMOVED)
+    m._last_housekeep_mono = 0                     # bypass housekeep throttle
+    m.pump_once()                                  # main thread notices
+    assert m.gamepad_available is False
     assert m.binding_verified is False
 
-    _plug(pg, joy)                                 # pad wakes / re-pairs
-    assert _wait_for(lambda: m.gamepad_available)
+    pg._devices.append(joy)                        # pad wakes / re-pairs
+    _device_event(pg, pg.JOYDEVICEADDED)
+    m._last_housekeep_mono = 0
+    m.pump_once()
+    assert m.gamepad_available is True
     assert m.binding_verified is False             # old press proves NOTHING
-    assert m.last_button_press_mono == first_press  # history is kept, honest
+    assert m.last_button_press_mono == first_press  # history kept, honest
 
-    _press_event(pg, joy, button=0)                # live-fire on binding 2
+    joy.buttons[0] = 1                             # live-fire on binding 2
     assert _wait_for(lambda: m.triggered)
     assert m.binding_verified is True
     assert m.last_button_press_mono > first_press
     assert b.calls == [{"estop": True, "event_already_set": False}]
-    m.shutdown()
-
-
-def test_other_joystick_events_are_ignored(monkeypatch):
-    # A second pad's removal or presses must not touch our binding.
-    pg = _make_fake_pygame()
-    ours, other = FakeJoystick(), FakeJoystick()
-    pg._devices.append(ours)
-    monkeypatch.setitem(sys.modules, "pygame", pg)
-
-    m, b, ev = _monitor()
-    m.start()
-    assert _wait_for(lambda: m.gamepad_available)
-
-    _press_event(pg, other, button=0)              # not our instance_id
-    pg._queue.append(types.SimpleNamespace(
-        type=pg.JOYDEVICEREMOVED, instance_id=other.get_instance_id()))
-    time.sleep(0.2)
-    assert m.gamepad_available is True             # still bound
-    assert m.binding_verified is False             # stranger's press ≠ ours
-    assert m.triggered is False
     m.shutdown()

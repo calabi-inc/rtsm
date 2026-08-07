@@ -9,52 +9,67 @@ GIL-blocked or crashed control loop can never delay the stop. On trigger:
     2. sets the shared stop_event — the worker aborts at its next check.
 
 Triggers:
-  * gamepad button (PS4 X = button 0, per the hardware-verified teleop
-    mapping) — JOYBUTTONDOWN events plus a ~50 Hz get_button() poll via
-    pygame (headless-safe).
+  * ANY kill button on ANY bound gamepad — polled at ~50 Hz.
   * trigger() called directly — used by the server's Ctrl-C/SIGINT path
     and by tests.
-
-Hotplug (2026-08-07 incident, mission t20260806-172610-001):
-  The old retry loop re-detected a late-connecting pad by cycling
-  pygame.joystick.quit()/init() and re-opening by index. On Windows
-  (SDL 2.28) a joystick opened after such a mid-run subsystem restart can
-  ENUMERATE correctly (get_count()/get_name() fine) while its input
-  reports are never associated with the restarted subsystem instance —
-  get_button() reads 0 forever. gamepad_available said True and the
-  operator's real mid-drive X press was silently lost. Fix: initialize
-  the joystick subsystem exactly ONCE per process and NEVER restart it;
-  SDL2's supported hotplug path pushes JOYDEVICEADDED / JOYDEVICEREMOVED
-  events (including ADDED for pads already present at init), and a
-  Joystick opened from those events shares the driver association that
-  actually delivers input.
-
-  Because that failure mode is invisible to every software check
-  (detection, name, and a mocked unit test all looked fine), status()
-  additionally reports binding_verified — True only after a real button
-  press has been observed on the CURRENT binding, reset on every rebind —
-  and last_button_press_mono. gamepad_available means "a device is
-  bound", never "the kill switch works"; the E1 protocol's live-fire X
-  check before motion remains mandatory.
-
-Degraded mode: if no gamepad is connected at start, the thread stays up
-(trigger() still works, Ctrl-C still works), exposes
-gamepad_available=False so /status can warn the operator, and a
-controller paired after server boot binds via JOYDEVICEADDED without a
-restart. A pad that sleeps or unpairs mid-run flips
-gamepad_available=False on its JOYDEVICEREMOVED event instead of reading
-silent zeros forever.
 
 A chat/HTTP "stop" is NOT this channel — POST /stop is a convenience;
 THIS is the safety guarantee (together with the ESP32 300 ms watchdog,
 which needs no desktop at all).
+
+════════════════════════════════════════════════════════════════════════
+HARD-WON ARCHITECTURE (a full hardware session of forensics, 2026-08-07;
+a real operator's mid-drive kill press was silently lost to the old
+design — read before "simplifying"):
+
+1. THREAD AFFINITY. Windows DirectInput delivers input only to the
+   thread that initialized SDL; a background thread reads permanent
+   zeros while the main thread sees every press. (SDL's HIDAPI channel
+   is thread-agnostic — which is why the old all-in-daemon-thread
+   structure ever appeared to work, and why it failed unpredictably as
+   the pad's Bluetooth session hopped channels.) Therefore: start()
+   binds pads on the CALLER's thread, the host must call pump_once()
+   periodically from that SAME thread (the agent server runs an asyncio
+   pump task; calibrate.py pumps in its drive wrapper), and the daemon
+   poll thread ONLY READS button state.
+
+2. ALL PADS, PLURAL KILL BUTTONS. A wired pad and its lingering
+   Bluetooth ghost enumerate as separate devices in shuffling order, and
+   the DS4's X button is index 0 on SDL-HIDAPI but index 1 on
+   DirectInput. Binding one index and watching one button is a double
+   lottery where the losing ticket is a deaf kill switch. ANY bound
+   device hearing ANY kill button latches. (A stranger's pad triggering
+   an e-stop is a re-arm's worth of nuisance; a missed press is a crash.)
+
+3. CHANNEL PINNING. The SDL_JOYSTICK_* env below pins the DirectInput
+   path — the channel Windows' own joy.cpl validates — and allows
+   background event delivery for a windowless server process.
+
+4. HONEST LIVENESS. gamepad_available means ENUMERATED, nothing more —
+   a binding can enumerate perfectly and still be deaf.
+   binding_verified flips True only when a real button press is observed
+   on the CURRENT binding (any button counts as proof of life; only kill
+   buttons trigger) and resets on every rebind. The E1 protocol's
+   live-fire X check before the first trial remains mandatory; mocked
+   tests were green TWICE while the hardware path was broken.
+
+Degraded mode: if no gamepad is bound, the thread stays up (trigger()
+still works, Ctrl-C still works), exposes gamepad_available=False, and
+pump_once() keeps retrying detection on the main thread.
 """
 
 from __future__ import annotations
 
+import os
 import threading
 import time
 from typing import Optional
+
+# MUST be set before pygame/SDL initializes — see ARCHITECTURE note 3.
+os.environ.setdefault("SDL_JOYSTICK_HIDAPI", "0")
+os.environ.setdefault("SDL_JOYSTICK_RAWINPUT", "0")
+os.environ.setdefault("SDL_JOYSTICK_THREAD", "1")
+os.environ.setdefault("SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS", "1")
 
 from esp32_bridge import Esp32Bridge
 
@@ -64,43 +79,139 @@ class EstopMonitor:
         self,
         bridge: Esp32Bridge,
         stop_event: threading.Event,
-        button_index: int = 0,        # PS4 X on Windows (teleop mapping)
-        joystick_index: int = 0,
+        button_indices: tuple = (0, 1),   # DS4 X on both SDL channels —
+                                          # see ARCHITECTURE note 2
+        joystick_index: int = 0,          # kept for API compat; ALL pads
+                                          # are bound regardless
         poll_hz: float = 50.0,
     ):
         self._bridge = bridge
         self._stop_event = stop_event
-        self._button = int(button_index)
+        self._buttons = tuple(int(b) for b in button_indices)
         self._joy_index = int(joystick_index)
         self._period_s = 1.0 / float(poll_hz)
 
         self._thread: Optional[threading.Thread] = None
-        self._retry_s = 1.0           # backoff after pygame init/poll failures
+        self._retry_s = 1.0           # gamepad re-detection cadence
         self._shutdown = threading.Event()
         self._trigger_lock = threading.Lock()
-        self._joy = None              # bound Joystick — poll thread only
+        self._joys: list = []         # bound on the MAIN thread only
+        self._last_reinit_mono = 0.0
+        self._last_housekeep_mono = 0.0
 
         self.triggered = False
         self.trigger_source: Optional[str] = None
         self.triggered_at_mono: Optional[float] = None
         self.gamepad_available = False
         self.gamepad_name: Optional[str] = None
-        # Honest liveness: True only once a real press has been observed on
-        # the CURRENT binding (reset on every rebind). A binding that has
-        # not been live-fired must never be trusted — see module docstring.
+        # Honest liveness (ARCHITECTURE note 4): True only after a real
+        # press on the CURRENT binding; reset on every rebind. The press
+        # history (last_button_press_mono) is kept across rebinds — an
+        # old press proves nothing about a new binding, but hiding the
+        # history would be lying in the other direction.
         self.binding_verified = False
         self.last_button_press_mono: Optional[float] = None
 
-    # ── lifecycle ────────────────────────────────────────────────────────
+    # ── lifecycle (main-thread half) ─────────────────────────────────────
 
     def start(self) -> "EstopMonitor":
+        """Bind pads on the CALLER's thread (must be the thread that will
+        keep calling pump_once()), then start the read-only poll thread."""
         if self._thread is not None:
             return self
+        self.init_gamepads()
         self._thread = threading.Thread(
             target=self._run, name="estop-monitor", daemon=True
         )
         self._thread.start()
         return self
+
+    def pump_once(self) -> None:
+        """MAIN-THREAD ONLY, call at ~20 Hz: pumps SDL so input flows
+        (note 1). The expensive parts — hotplug-event drain (a sleeping
+        pad must flip gamepad_available, not read silent zeros), queue
+        clearing, and unbound-retry — are internally throttled to ~2 Hz
+        so a host event loop is never saturated (50 Hz of full SDL work
+        starved the GIL enough to slow the whole server, found in tests
+        2026-08-07)."""
+        try:
+            import pygame
+            if self._joys:
+                pygame.event.pump()               # cheap; input delivery
+            now = time.monotonic()
+            if (now - self._last_housekeep_mono) < 0.5:
+                return
+            self._last_housekeep_mono = now
+            added = getattr(pygame, "JOYDEVICEADDED", None)
+            removed = getattr(pygame, "JOYDEVICEREMOVED", None)
+            events = []
+            if added is not None and removed is not None:
+                try:
+                    events = pygame.event.get([added, removed])
+                except Exception:  # noqa: BLE001 — queue quirks never fatal
+                    events = []
+            if events:
+                # Any device topology change → full main-thread rebind.
+                self.init_gamepads(settle_s=0.3)
+                return
+            if self._joys:
+                # Keep the queue from silting up with unread button/axis
+                # events (state is POLLED, not event-driven): a full SDL
+                # queue drops new events — including the hotplug ones.
+                try:
+                    pygame.event.clear()
+                except Exception:  # noqa: BLE001
+                    pass
+            elif (now - self._last_reinit_mono) >= self._retry_s:
+                self.init_gamepads(settle_s=0.3)
+        except Exception:  # noqa: BLE001 — the pump must never kill the host
+            pass
+
+    def init_gamepads(self, settle_s: float = 1.0) -> bool:
+        """MAIN-THREAD ONLY: (re)bind EVERY connected joystick (note 2).
+        Resets binding_verified — a new binding is unproven by definition."""
+        self._last_reinit_mono = time.monotonic()
+        try:
+            import pygame
+            if not pygame.get_init():
+                pygame.init()
+            # SDL only (re)enumerates when the joystick subsystem inits —
+            # quit first to force a rescan. Safe here and ONLY here: this
+            # runs on the SDL-owning thread.
+            pygame.joystick.quit()
+            pygame.joystick.init()
+            # Enumeration after a rescan is not instantaneous on Windows;
+            # an instant check misses pads and a 1 s retry then wipes and
+            # re-asks, racing itself forever. Give it a settle window.
+            settle_deadline = time.monotonic() + settle_s
+            while time.monotonic() < settle_deadline:
+                pygame.event.pump()
+                if pygame.joystick.get_count() > 0:
+                    break
+                time.sleep(0.05)
+            n = pygame.joystick.get_count()
+            if n == 0:
+                self._joys = []
+                self.gamepad_available = False
+                self.gamepad_name = None
+                self.binding_verified = False
+                return False
+            joys = []
+            for i in range(n):
+                j = pygame.joystick.Joystick(i)
+                j.init()
+                joys.append(j)
+            self._joys = joys
+            self.gamepad_available = True
+            self.gamepad_name = ", ".join(j.get_name() for j in joys)
+            self.binding_verified = False
+            return True
+        except Exception:  # noqa: BLE001
+            self._joys = []
+            self.gamepad_available = False
+            self.gamepad_name = None
+            self.binding_verified = False
+            return False
 
     def shutdown(self) -> None:
         """Stop the polling thread (does NOT trigger an e-stop)."""
@@ -143,99 +254,31 @@ class EstopMonitor:
             "trigger_source": self.trigger_source,
         }
 
-    # ── polling thread ───────────────────────────────────────────────────
+    # ── polling thread (read-only half) ──────────────────────────────────
 
     def _run(self) -> None:
-        pygame = None
-        while pygame is None and not self._shutdown.is_set():
-            pygame = self._init_pygame()
-            if pygame is None:
-                # Degraded: pygame unusable. trigger() remains the (only)
-                # software path (Ctrl-C wiring lives in the server).
-                self._shutdown.wait(self._retry_s)
-        if pygame is None:
-            return
-
-        # Bind a pad already present at boot by configured index — the
-        # hardware-proven fresh-boot path. Late or re-connecting pads bind
-        # via JOYDEVICEADDED below; the subsystem is never restarted.
-        self._bind_by_index(pygame)
-
+        """READ-ONLY poll loop (daemon thread). Never touches SDL init or
+        the event pump — main-thread work (note 1). Scans EVERY button of
+        EVERY bound pad: any press proves liveness; kill buttons latch."""
         while not self._shutdown.is_set():
-            try:
-                for event in pygame.event.get():
-                    self._handle_event(pygame, event)
-                if self._joy is not None and self._joy.get_button(self._button):
-                    self._note_button_press()
-                    self.trigger(f"gamepad-button{self._button}")
-                    # keep polling; trigger() is idempotent
-            except Exception:  # noqa: BLE001 — monitor must never die silently
-                self._drop_binding()
+            joys = self._joys
+            if not joys:
                 self._shutdown.wait(self._retry_s)
                 continue
-            self._shutdown.wait(self._period_s)
-
-    def _init_pygame(self):
-        """Init pygame + the joystick subsystem exactly once per process.
-
-        NEVER call pygame.joystick.quit() after this: a mid-run subsystem
-        restart is what produced enumerate-but-deaf bindings (module
-        docstring). Returns the module, or None on failure."""
-        try:
-            import pygame
-            if not pygame.get_init():
-                pygame.init()
-            if not pygame.joystick.get_init():
-                pygame.joystick.init()
-            return pygame
-        except Exception:  # noqa: BLE001
-            self.gamepad_available = False
-            return None
-
-    def _bind_by_index(self, pygame) -> None:
-        try:
-            pygame.event.pump()       # let SDL run one device-detection pass
-            if pygame.joystick.get_count() > self._joy_index:
-                self._bind(pygame.joystick.Joystick(self._joy_index))
-        except Exception:  # noqa: BLE001
-            self._drop_binding()
-
-    def _handle_event(self, pygame, event) -> None:
-        if event.type == pygame.JOYDEVICEADDED:
-            # SDL also delivers this for pads already present at subsystem
-            # init, so boot-time and hotplug binding share one path. The
-            # device_index match keeps joystick_index semantics; on a
-            # single-pad rig a reconnecting pad always re-adds at index 0.
-            if self._joy is None and event.device_index == self._joy_index:
-                self._bind(pygame.joystick.Joystick(event.device_index))
-        elif event.type == pygame.JOYDEVICEREMOVED:
-            # Sleeping/unpaired pad → honest unavailable, immediately.
-            if self._joy is not None and \
-                    event.instance_id == self._joy.get_instance_id():
-                self._drop_binding()
-        elif event.type == pygame.JOYBUTTONDOWN:
-            if self._joy is not None and \
-                    event.instance_id == self._joy.get_instance_id():
-                self._note_button_press()   # ANY button proves liveness
-                if event.button == self._button:
-                    self.trigger(f"gamepad-button{self._button}")
-
-    def _bind(self, joy) -> None:
-        self._joy = joy
-        self.gamepad_available = True
-        self.gamepad_name = joy.get_name()
-        # Every (re)bind must re-prove itself with a real press — exactly
-        # the state the 2026-08-07 incident showed can be deaf.
-        self.binding_verified = False
-
-    def _drop_binding(self) -> None:
-        self._joy = None
-        self.gamepad_available = False
-        self.gamepad_name = None
-        self.binding_verified = False
-
-    def _note_button_press(self) -> None:
-        # last_button_press_mono is deliberately NOT cleared on rebind: it is
-        # global history; binding_verified carries the per-binding truth.
-        self.last_button_press_mono = time.monotonic()
-        self.binding_verified = True
+            try:
+                for joy_i, j in enumerate(joys):
+                    n = j.get_numbuttons()
+                    for b in range(n):
+                        if not j.get_button(b):
+                            continue
+                        self.binding_verified = True
+                        self.last_button_press_mono = time.monotonic()
+                        if b in self._buttons:
+                            self.trigger(f"gamepad{joy_i}-button{b}")
+                            # keep polling; trigger() is idempotent
+            except Exception:  # noqa: BLE001 — monitor must never die silently
+                self._joys = []
+                self.gamepad_available = False
+                self.gamepad_name = None
+                self.binding_verified = False
+            time.sleep(self._period_s)

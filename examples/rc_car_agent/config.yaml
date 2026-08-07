@@ -1,19 +1,19 @@
-# RC-car agent configuration (Demo 2)
-# Every tunable lives here — code contains no magic numbers.
+﻿# RC-car agent configuration (Demo 2)
+# Every tunable lives here â€” code contains no magic numbers.
 
 rtsm:
-  url: "http://127.0.0.1:8002"        # RTSM REST API — IP literal, NOT "localhost": Python requests tries IPv6 ::1 first and eats ~2 s per fresh connection (uvicorn binds IPv4 only)
+  url: "http://127.0.0.1:8002"        # RTSM REST API â€” IP literal, NOT "localhost": Python requests tries IPv6 ::1 first and eats ~2 s per fresh connection (uvicorn binds IPv4 only)
   lifecycle: "attach"                  # attach | spawn | off  (spawn: launch RTSM if healthz is down)
-  # Interpreter + args for spawn mode. MUST be the RTSM/GPU env's python —
+  # Interpreter + args for spawn mode. MUST be the RTSM/GPU env's python â€”
   # NOT this example's .venv (which deliberately has no rtsm/torch installed;
   # the agent is a pure REST customer). E.g. the repo-root env's python.
-  spawn_cmd: "python -m rtsm"       # canonical entry (rtsm/__main__.py — also configures logging)
-  kill_on_exit: false                  # NEVER default true — condition (a) memory must survive agent restarts
+  spawn_cmd: "python -m rtsm"       # canonical entry (rtsm/__main__.py â€” also configures logging)
+  kill_on_exit: false                  # NEVER default true â€” condition (a) memory must survive agent restarts
   diagnostics_for_trials: true         # spawn RTSM with event-log diagnostics on (paper failure-analysis data)
 
 esp32:
   url: "http://192.168.1.189"          # from the ESP32 boot log
-  drive_rate_hz: 10                    # cap — Arduino WebServer has no keep-alive; >10 Hz exhausts sockets
+  drive_rate_hz: 10                    # cap â€” Arduino WebServer has no keep-alive; >10 Hz exhausts sockets
   heartbeat_s: 0.25                    # re-send held command to feed the 300 ms firmware watchdog
   change_epsilon: 0.04                 # only send /drive when command changed by more than this
   http_timeout_s: 0.6
@@ -26,19 +26,19 @@ server:
 
 nav:
   arrival_threshold_m: 0.40            # E1 success radius (judged by TAPE, this is the controller stop radius)
-  rotate_in_place_deg: 90              # |heading err| above this → rotate in place before translating
+  rotate_in_place_deg: 90              # |heading err| above this â†’ rotate in place before translating
   max_speed: 0.5                       # fraction of TELEOP_MAX_SPEED sent to /drive
   max_turn: 0.5
-  kp_steer: 1.2                        # proportional steer gain on heading error (rad → differential)
+  kp_steer: 1.2                        # proportional steer gain on heading error (rad â†’ differential)
   tick_s: 0.05                         # control-loop period; MUST be < esp32.heartbeat_s (validated)
   poll_hz: 10                          # RTSM pose-poll rate inside the nav loop (input is ~5 Hz)
   pose_frozen_polls: 8                 # DIAGNOSTIC ONLY: polls with identical timestamp before the hold is labeled "frozen" in logs; the safety bound is stale_abort_s
-  stale_abort_s: 2.5                   # no fresh pose for this long → SAFE STOP + abort (bounded blind-driving)
-  drift_margin_m: 0.8                  # ground-dist exceeds best-so-far by this → drift verdict → safe stop
-  discontinuity_base_m: 0.5            # pose jump beyond base + rate*dt between fresh poses → frame_reset
+  stale_abort_s: 2.5                   # no fresh pose for this long â†’ SAFE STOP + abort (bounded blind-driving)
+  drift_margin_m: 0.8                  # ground-dist exceeds best-so-far by this â†’ drift verdict â†’ safe stop
+  discontinuity_base_m: 0.5            # pose jump beyond base + rate*dt between fresh poses â†’ frame_reset
   discontinuity_rate_mps: 1.0          # generous upper bound on real car speed for the jump threshold
   timeout_rtsm_s: 60                   # trial timeout, condition (a)
-  timeout_baseline_s: 180              # trial timeout, condition (b) — long so it can't cap the speedup
+  timeout_baseline_s: 180              # trial timeout, condition (b) â€” long so it can't cap the speedup
 
 planner:
   model: "claude-haiku-4-5"            # single forced-tool target-pick call (E1 condition a)
@@ -47,22 +47,22 @@ planner:
 
 baseline:
   freshness_gate_s: 2.0                # only objects seen within this window count as "currently visible"
-  rng_seed: 0                          # per-trial seed is logged; 0 → derive from trial_id (v1 policy uses it only for sweep direction)
+  rng_seed: 0                          # per-trial seed is logged; 0 â†’ derive from trial_id (v1 policy uses it only for sweep direction)
   sweep_step_turn: 0.4                 # differential magnitude of one rotate step
-  sweep_step_s: 0.5                    # one rotate step (~30-40° at calibrated turn rate)
+  sweep_step_s: 0.5                    # one rotate step (~30-40Â° at calibrated turn rate)
   dwell_s: 1.2                         # observe pause after each step (frames must arrive + pipeline must process)
   steps_per_sweep: 12                  # rotate steps per full sweep before relocating
   walk_speed: 0.3                      # forward relocation speed between sweeps
   walk_s: 1.2                          # forward relocation duration
   query_top_k: 5
-  gate_fetch_k: 50                     # fetch depth for gated polls — top-5 over ALL memory would let stale objects crowd out a visible target
+  gate_fetch_k: 50                     # fetch depth for gated polls â€” top-5 over ALL memory would let stale objects crowd out a visible target
   clock_skew_tol_s: 0.5                # stamps ahead of our clock beyond this are rejected (backward wall-clock step guard)
 
 calibration:
-  # Written by calibrate.py — do not hand-edit. Units: rad / m / dimensionless.
-  yaw_offset_rad: 0.0                  # camera forward → car forward, about world up
-  lever_arm_right_m: 0.0               # camera → drive center, car body frame (right)
-  lever_arm_forward_m: 0.0             # camera → drive center, car body frame (forward)
+  # Written by calibrate.py â€” do not hand-edit. Units: rad / m / dimensionless.
+  yaw_offset_rad: 0.0                  # camera forward â†’ car forward, about world up
+  lever_arm_right_m: 0.0               # camera â†’ drive center, car body frame (right)
+  lever_arm_forward_m: 0.0             # camera â†’ drive center, car body frame (forward)
   speed_scale_mps: 0.0                 # measured velocity at /drive magnitude 1.0
   turn_scale_rps: 0.0                  # measured yaw rate at full differential
   provenance:

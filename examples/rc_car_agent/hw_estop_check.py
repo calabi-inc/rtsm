@@ -59,6 +59,10 @@ def main() -> int:
     last = None
     try:
         while True:
+            # MAIN-THREAD SDL pump (thread-affinity, 2026-08-07): without
+            # this, DirectInput input never flows in this process and the
+            # check would false-fail on a healthy pad.
+            mon.pump_once()
             s = mon.status()
             key = (s["gamepad_available"], s["binding_verified"],
                    s["triggered"])
