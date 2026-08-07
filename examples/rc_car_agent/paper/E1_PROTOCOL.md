@@ -76,15 +76,35 @@ specific scan.
 ## 2. Pre-session checklist (every trial evening)
 
 1. Calabi Lens deployed within the last 7 days — else redeploy the night
-   before.
+   before. **iPhone Auto-Lock set to NEVER** (Settings → Display &
+   Brightness) for the whole session — an auto-lock kills the ARKit
+   session, shifts the world origin, and forces a full re-scan (cost us
+   one live: 2026-08-07).
 2. Car battery fully charged; spare charged if available. Read voltage
    with `.venv/Scripts/python.exe preflight_check.py` (read-only, prints
    battery mV, sends no motion commands). **`/status` does NOT report
    voltage.** Swap/stop rule: below 7000 mV, finish the current PAIR of
    trials, then swap or end the session. (The server only refuses below
    6800 mV and only at preflight — the 7000 rule is operator-enforced.)
-3. PS4 controller paired BEFORE starting the agent server; verify
-   `/status` shows `gamepad_available: true`.
+3. PS4 controller paired and AWAKE (solid light) BEFORE starting the
+   agent server; verify `/status` shows `gamepad_available: true`.
+   **LIVE-FIRE CHECK (mandatory, before the first trial): press X with
+   the car idle → `/status` must show ESTOPPED with source
+   gamepad-button0 AND `estop.binding_verified: true` → `/reset_estop` →
+   READY.** `gamepad_available: true` alone is NOT proof the button
+   works: a controller that slept and reconnected mid-run can bind as
+   detected-but-deaf (a real mid-drive kill press was silently lost to
+   this, 2026-08-07). `binding_verified` flips true only when a real
+   press is seen on the CURRENT binding and resets on every reconnect —
+   it is the honest signal; `last_button_press_mono` gives the age of the
+   newest observed press. **If the controller ever sleeps or reconnects
+   during a session: wait for `gamepad_available: true`, repeat the
+   live-fire check, and confirm `binding_verified: true` before the next
+   trial.** estop.py now rebinds via SDL hotplug events instead of the
+   subsystem-restart rescan that produced the deaf binding — but until
+   that path is live-fire validated on this rig (`hw_estop_check.py`,
+   full sleep→wake→press sequence), restart the agent server as the
+   conservative fallback whenever `binding_verified` will not flip true.
 4. Boot order: **FRESH RTSM process** (`python -m rtsm`, wait for models)
    → phone streams (`ws://<desktop-ip>:8765/stream`) → **scan** → agent
    server (with ANTHROPIC_API_KEY injected) → `READY`.

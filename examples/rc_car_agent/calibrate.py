@@ -365,6 +365,12 @@ def main() -> int:
         return 2
     if not estop.gamepad_available:
         print("WARNING: no gamepad — e-stop is Ctrl-C + firmware watchdog only.")
+    else:
+        # Detection is NOT proof the button reads (2026-08-07: a bound pad
+        # was deaf). Live-fire before trusting it: hw_estop_check.py.
+        print("Gamepad detected — NOT yet live-fire verified. If you have "
+              "not pressed X on this binding (hw_estop_check.py or E1 "
+              "protocol check), do not trust it as the kill switch.")
     print("Car on OPEN FLOOR (>= 1.5 m clear), wheels down, Lens streaming.")
     if input("Type 'go' to start the calibration drives: ").strip() != "go":
         return 1
