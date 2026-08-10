@@ -64,6 +64,14 @@ class ServerCfg:
     host: str
     port: int
     default_condition: str  # rtsm | baseline
+    # Refuse ALL motion goals (bench included) until the kill switch is
+    # bound AND live-fire verified (a real button press on the CURRENT
+    # binding). Software enforcement of the E1 protocol rule; disable only
+    # in mock-hardware tests.
+    require_verified_estop: bool = True
+    # Shared secret for POST endpoints when serving the LAN (--host
+    # 0.0.0.0): clients send X-Auth-Token. None = no auth (localhost use).
+    api_token: Optional[str] = None
 
 
 @dataclass(frozen=True)

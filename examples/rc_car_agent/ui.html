@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>rc-car console</title>
+<!--
+  Operator console — served by server.py at /ui (and /).
+
+  Design constraints (locked):
+    * Single file, ZERO external resources: the venue LAN may have no
+      internet. No CDN, no fonts, no build step.
+    * SOFT controls only. The hard e-stop is the wired gamepad X — never
+      HTTP. This page can cancel/soft-stop, and must show loudly when the
+      kill switch is NOT live-fire verified.
+    * All numbers rendered from server truth: budgets/threshold come from
+      /status.limits, elapsed uses the SERVER clock (status.now), never
+      this laptop's.
+-->
+<style>
+  :root {
+    --bg: #0f1115; --card: #171a21; --edge: #262b36; --ink: #d6dae3;
+    --mut: #8a93a5; --green: #34c07c; --red: #e5484d; --amber: #f5a524;
+    --blue: #4f8ff7; --orange: #ff8c42; --mono: ui-monospace, Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 14px/1.45 -apple-system, "Segoe UI", system-ui, sans-serif; }
+  header { display: flex; align-items: center; gap: 12px; padding: 10px 16px;
+           border-bottom: 1px solid var(--edge); position: sticky; top: 0;
+           background: var(--bg); z-index: 5; flex-wrap: wrap; }
+  header h1 { font-size: 15px; margin: 0; font-weight: 600; letter-spacing: .02em; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+  .badge { padding: 2px 10px; border-radius: 999px; font-size: 12px;
+           font-weight: 700; letter-spacing: .04em; }
+  .b-ready    { background: #123a28; color: var(--green); }
+  .b-running  { background: #14263f; color: var(--blue); }
+  .b-estopped { background: #43181a; color: var(--red); }
+  .b-notready { background: #3d2d10; color: var(--amber); }
+  .b-offline  { background: #43181a; color: var(--red); }
+  .spacer { flex: 1; }
+  .mut { color: var(--mut); }
+  .mono { font-family: var(--mono); }
+  main { max-width: 1180px; margin: 0 auto; padding: 14px 16px 60px;
+         display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+  .card { background: var(--card); border: 1px solid var(--edge);
+          border-radius: 10px; padding: 14px 16px; }
+  .card h2 { margin: 0 0 10px; font-size: 12px; font-weight: 700;
+             letter-spacing: .08em; text-transform: uppercase; color: var(--mut); }
+  .wide { grid-column: 1 / -1; }
+  .banner { grid-column: 1 / -1; border-radius: 10px; padding: 12px 16px;
+            font-weight: 600; display: none; }
+  .banner.show { display: block; }
+  #banner-estop   { background: #43181a; color: #ffb4b6; border: 1px solid #7e2a2e; }
+  #banner-unverif { background: #3d2d10; color: #ffd48a; border: 1px solid #7a5a1d; }
+  #banner-offline { background: #43181a; color: #ffb4b6; border: 1px solid #7e2a2e; }
+  input[type=text], select {
+    background: #0d0f13; color: var(--ink); border: 1px solid var(--edge);
+    border-radius: 8px; padding: 9px 12px; font-size: 14px; outline: none; }
+  input[type=text]:focus { border-color: var(--blue); }
+  button { background: #222835; color: var(--ink); border: 1px solid var(--edge);
+           border-radius: 8px; padding: 9px 14px; font-size: 13px; font-weight: 600;
+           cursor: pointer; }
+  button:hover { border-color: #3a4356; }
+  button:disabled { opacity: .45; cursor: default; }
+  button.primary { background: #1d3a6b; border-color: #2c5393; }
+  button.danger  { background: #4a1b1e; border-color: #7e2a2e; }
+  button.chip { padding: 5px 10px; font-size: 12px; font-weight: 500;
+                border-radius: 999px; background: #1b2028; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .kv { display: grid; grid-template-columns: auto 1fr; gap: 3px 14px; font-size: 13px; }
+  .kv dt { color: var(--mut); } .kv dd { margin: 0; }
+  .bignum { font-size: 40px; font-weight: 700; font-family: var(--mono);
+            line-height: 1.1; }
+  .verdict { font-size: 22px; font-weight: 800; letter-spacing: .03em; }
+  .bar { height: 8px; background: #0d0f13; border-radius: 5px; overflow: hidden;
+         border: 1px solid var(--edge); }
+  .bar > i { display: block; height: 100%; background: var(--blue);
+             transition: width .4s linear; }
+  table { width: 100%; border-collapse: collapse; font-family: var(--mono);
+          font-size: 12px; }
+  th { text-align: left; color: var(--mut); font-weight: 500; padding: 2px 8px 4px 0; }
+  td { padding: 2px 8px 2px 0; border-top: 1px solid #1d222c; white-space: nowrap; }
+  #milestones { font-size: 12.5px; display: flex; flex-direction: column; gap: 5px; }
+  #milestones .m { padding: 6px 10px; background: #12151b; border-radius: 7px;
+                   border-left: 3px solid var(--edge); font-family: var(--mono); }
+  #milestones .m.plan { border-left-color: var(--blue); }
+  #milestones .m.event { border-left-color: var(--amber); }
+  #milestones .m.end-good { border-left-color: var(--green); }
+  #milestones .m.end-bad { border-left-color: var(--red); }
+  #spark { width: 100%; height: 130px; display: block; }
+  #msg { min-height: 20px; font-size: 13px; }
+  #msg.err { color: #ff9a9d; } #msg.ok { color: var(--green); }
+  ul { margin: 6px 0; padding-left: 20px; }
+  .phase-running { color: var(--blue); font-weight: 700; }
+</style>
+</head>
+<body>
+
+<header>
+  <span id="conn" class="dot" style="background:var(--mut)"></span>
+  <h1>rc-car console</h1>
+  <span id="state" class="badge b-notready">…</span>
+  <span id="bench" class="badge b-notready" style="display:none">BENCH</span>
+  <span class="spacer"></span>
+  <span class="mut mono" id="host"></span>
+</header>
+
+<main>
+  <div id="banner-offline" class="banner">SERVER UNREACHABLE — check the PC, its console window, and that both machines share the WiFi.</div>
+  <div id="banner-estop" class="banner">E-STOPPED — mission abandoned. Clear the venue, then re-arm.
+    <button class="danger" style="margin-left:12px" onclick="resetEstop()">Re-arm e-stop</button>
+  </div>
+  <div id="banner-unverif" class="banner">KILL SWITCH NOT LIVE-FIRE VERIFIED — press X once on the wired pad (watch this turn green) before any motion.</div>
+
+  <section class="card">
+    <h2>Command</h2>
+    <div class="row" style="margin-bottom:8px">
+      <input type="text" id="goal" placeholder='go to the teddy bear' style="flex:1" onkeydown="if(event.key==='Enter'&&!event.repeat)sendCommand()">
+      <select id="condition">
+        <option value="rtsm">rtsm (memory)</option>
+        <option value="baseline">baseline (memoryless)</option>
+      </select>
+      <button class="primary" id="go" onclick="sendCommand()">Go</button>
+    </div>
+    <div class="row" style="margin-bottom:10px" id="chips"></div>
+    <div class="row">
+      <button onclick="post('/cancel','cancelled')">Cancel</button>
+      <button class="danger" onclick="post('/stop','soft-stopped')"
+              title="Cancels the mission and stops the car over HTTP. NOT the hard e-stop — that is the gamepad X.">Stop (soft)</button>
+      <span class="spacer"></span>
+      <span id="msg"></span>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Kill switch &amp; readiness</h2>
+    <dl class="kv">
+      <dt>gamepad</dt><dd id="es-pad" class="mono">—</dd>
+      <dt>live-fire verified</dt><dd id="es-verified">—</dd>
+      <dt>last button press</dt><dd id="es-age" class="mono">—</dd>
+      <dt>triggered</dt><dd id="es-trig" class="mono">—</dd>
+    </dl>
+    <div id="preflight" style="display:none; margin-top:10px">
+      <div class="mut" style="font-size:12px; font-weight:700">NOT READY:</div>
+      <ul id="pf-reasons"></ul>
+      <button onclick="recheck()">Re-check preflight</button>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Mission</h2>
+    <div class="row" style="justify-content:space-between; align-items:flex-start">
+      <dl class="kv" style="flex:1">
+        <dt>trial</dt><dd id="m-id" class="mono">—</dd>
+        <dt>goal</dt><dd id="m-goal">—</dd>
+        <dt>condition</dt><dd id="m-cond" class="mono">—</dd>
+        <dt>phase</dt><dd id="m-phase" class="mono">—</dd>
+        <dt>planner</dt><dd id="m-path" class="mono">—</dd>
+        <dt>target</dt><dd id="m-target">—</dd>
+        <dt>Haiku says</dt><dd id="m-reason" class="mut">—</dd>
+        <dt>ticks</dt><dd id="m-ticks" class="mono">—</dd>
+      </dl>
+      <div style="text-align:right">
+        <div class="mut" style="font-size:11px">distance to target</div>
+        <div class="bignum" id="m-dist">—</div>
+        <div class="mut mono" id="m-elapsed" style="font-size:12px">—</div>
+      </div>
+    </div>
+    <div class="bar" style="margin-top:10px"><i id="m-budget" style="width:0%"></i></div>
+  </section>
+
+  <section class="card">
+    <h2>Last verdict</h2>
+    <div class="verdict" id="v-result">—</div>
+    <dl class="kv" style="margin-top:8px">
+      <dt>trial</dt><dd id="v-id" class="mono">—</dd>
+      <dt>detail</dt><dd id="v-detail">—</dd>
+      <dt>log file</dt><dd id="v-log" class="mono mut">—</dd>
+    </dl>
+  </section>
+
+  <section class="card wide">
+    <h2>Feedback loop <span class="mut" id="log-file" style="text-transform:none; letter-spacing:0"></span></h2>
+    <svg id="spark" viewBox="0 0 1000 130" preserveAspectRatio="none"></svg>
+    <div style="display:grid; grid-template-columns: 1fr 1fr; gap:14px; margin-top:10px">
+      <div>
+        <div class="mut" style="font-size:11px; font-weight:700; margin-bottom:4px">MILESTONES</div>
+        <div id="milestones"><span class="mut">no trial yet</span></div>
+      </div>
+      <div style="overflow-x:auto">
+        <div class="mut" style="font-size:11px; font-weight:700; margin-bottom:4px">RECENT TICKS</div>
+        <table>
+          <thead><tr><th>t</th><th>dist</th><th>hdg°</th><th>cmd L/R</th><th>pose</th><th>status</th></tr></thead>
+          <tbody id="ticks"><tr><td colspan="6" class="mut">—</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const ROSTER = ["teddy bear", "soda can", "scrub sponge", "garden sprayer", "water bottle"];
+const VERDICT_COLOR = {
+  arrived: "var(--green)", timeout: "var(--orange)", estopped: "var(--red)",
+  stale_stop: "var(--orange)", frame_reset: "var(--orange)", drift: "var(--orange)",
+  not_found: "var(--mut)", cancelled: "var(--mut)", preempted: "var(--mut)",
+  plan_error: "var(--red)", nav_error: "var(--red)", search_error: "var(--red)",
+  worker_error: "var(--red)", bench_timeout: "var(--mut)", shutdown: "var(--mut)",
+};
+let offlineCount = 0, lastLogKey = null, running = false, lastVerdictId = null;
+
+ROSTER.forEach(name => {
+  const b = document.createElement("button");
+  b.className = "chip"; b.textContent = name;
+  b.onclick = () => { $("goal").value = "go to the " + name; };
+  $("chips").appendChild(b);
+});
+$("host").textContent = location.host;
+
+function fmt(x, d = 2) { return (x === null || x === undefined) ? "—" : Number(x).toFixed(d); }
+
+let token = sessionStorage.getItem("rcTok") || "";
+
+async function api(method, path, body, retried) {
+  const headers = {};
+  if (body) headers["Content-Type"] = "application/json";
+  if (token && method !== "GET") headers["X-Auth-Token"] = token;
+  const r = await fetch(path, {
+    method, headers, body: body ? JSON.stringify(body) : undefined,
+  });
+  if (r.status === 401 && !retried) {
+    // server.api_token is set — ask once, keep for the session.
+    const t = prompt("API token (server.api_token in config.yaml on the rig PC):");
+    if (t) { token = t; sessionStorage.setItem("rcTok", t); return api(method, path, body, true); }
+  }
+  let data = null;
+  try { data = await r.json(); } catch (e) { /* non-JSON error body */ }
+  if (!r.ok) {
+    const detail = data && data.detail !== undefined ? data.detail : r.status;
+    // Server error details are strings or {key: message-or-list} — render
+    // the messages, not raw JSON.
+    const text = typeof detail === "string" ? detail
+      : (detail && typeof detail === "object")
+        ? Object.values(detail).flat().join(" · ") : String(detail);
+    throw new Error(text);
+  }
+  return data;
+}
+
+function say(text, cls) {
+  $("msg").textContent = text; $("msg").className = cls || "";
+  if (cls === "ok") setTimeout(() => { if ($("msg").textContent === text) $("msg").textContent = ""; }, 4000);
+}
+
+let sending = false;
+async function sendCommand() {
+  if (sending) return;                    // Enter auto-repeat / double-tap guard
+  const goal = $("goal").value.trim();
+  if (!goal) { say("type a goal first", "err"); return; }
+  if (running && !confirm("A mission is LIVE — this will safe-stop and preempt it. Continue?"))
+    return;
+  sending = true; $("go").disabled = true;
+  try {
+    const r = await api("POST", "/command", {goal, condition: $("condition").value});
+    say(`accepted ${r.task_id} (${r.condition})`, "ok");
+  } catch (e) { say(e.message, "err"); }
+  finally { sending = false; $("go").disabled = false; }
+}
+
+async function post(path, okText) {
+  try { await api("POST", path); say(okText, "ok"); }
+  catch (e) { say(e.message, "err"); }
+}
+
+async function resetEstop() {
+  if (!confirm("Re-arm the e-stop? Only when the venue is safe and the mission has finalized (state ESTOPPED)."))
+    return;
+  try { const r = await api("POST", "/reset_estop"); say("re-armed → " + r.state, "ok"); }
+  catch (e) { say(e.message, "err"); }
+}
+
+async function recheck() {
+  try {
+    const r = await api("POST", "/preflight");
+    say(r.reasons.length ? r.reasons.length + " blocker(s) remain" : "preflight clean", r.reasons.length ? "err" : "ok");
+  } catch (e) { say(e.message, "err"); }
+}
+
+function setState(state) {
+  const el = $("state");
+  el.textContent = state;
+  el.className = "badge " + ({READY: "b-ready", RUNNING: "b-running",
+    ESTOPPED: "b-estopped"}[state] || "b-notready");
+}
+
+function renderStatus(s) {
+  setState(s.state);
+  $("bench").style.display = s.bench ? "" : "none";
+  $("banner-estop").classList.toggle("show", s.state === "ESTOPPED");
+
+  const es = s.estop || {};
+  $("es-pad").textContent = es.gamepad_available
+    ? (es.gamepad_name || "connected") : "NOT CONNECTED";
+  $("es-pad").style.color = es.gamepad_available ? "" : "var(--red)";
+  $("es-verified").textContent = es.binding_verified ? "YES" : "NO — press X on the pad";
+  $("es-verified").style.color = es.binding_verified ? "var(--green)" : "var(--amber)";
+  $("es-age").textContent = es.last_button_press_age_s === null || es.last_button_press_age_s === undefined
+    ? "never" : es.last_button_press_age_s + " s ago";
+  $("es-trig").textContent = es.triggered ? ("YES — " + (es.trigger_source || "?")) : "no";
+  $("es-trig").style.color = es.triggered ? "var(--red)" : "";
+  // No pad at all is the WORST case, not an exemption — the banner must
+  // show unless the switch is bound AND press-proven on this binding.
+  const killLive = !!es.gamepad_available && !!es.binding_verified;
+  $("banner-unverif").textContent = es.gamepad_available
+    ? "KILL SWITCH NOT LIVE-FIRE VERIFIED — press X once on the wired pad (watch this turn green) before any motion."
+    : "KILL SWITCH NOT BOUND — no gamepad detected at the PC. Plug in the wired pad, then press X once.";
+  $("banner-unverif").classList.toggle("show", s.state !== "ESTOPPED" && !killLive);
+
+  const notReady = s.state === "NOT_READY" && s.not_ready_reasons.length > 0;
+  $("preflight").style.display = notReady ? "" : "none";
+  if (notReady)
+    $("pf-reasons").innerHTML = s.not_ready_reasons
+      .map(r => "<li>" + escapeHtml(r) + "</li>").join("");
+
+  // Mission card: live task wins; else show the last finished one.
+  const t = s.task || s.last_result;
+  running = !!s.task;
+  if (t) {
+    $("m-id").textContent = t.task_id;
+    $("m-goal").textContent = t.goal;
+    $("m-cond").textContent = t.condition;
+    $("m-phase").textContent = t.phase;
+    $("m-phase").className = running ? "mono phase-running" : "mono";
+    $("m-path").textContent = t.planner_path || "—";
+    $("m-target").textContent = t.target_label
+      ? `${t.target_label} (${t.target_id}, score ${fmt(t.target_score, 3)})`
+      : (t.target_id || "—");
+    $("m-reason").textContent = t.planner_reason || "—";
+    $("m-ticks").textContent = t.ticks ?? "—";
+    $("m-dist").textContent = fmt(t.ground_dist_m) + (t.ground_dist_m != null ? " m" : "");
+    const budget = t.condition === "baseline"
+      ? s.limits.timeout_baseline_s : s.limits.timeout_rtsm_s;
+    if (running) {
+      const elapsed = Math.max(0, s.now - t.accepted_at);
+      $("m-elapsed").textContent = `${elapsed.toFixed(1)} s / ${budget} s budget`;
+      $("m-budget").style.width = Math.min(100, elapsed / budget * 100) + "%";
+      $("m-budget").style.background = elapsed / budget > 0.8 ? "var(--orange)" : "var(--blue)";
+    } else {
+      $("m-elapsed").textContent = "finished";
+      $("m-budget").style.width = "0%";
+    }
+  } else {
+    // Server restarted (in-memory state gone): a mission card frozen on
+    // "driving" while the badge says READY would lie about a live drive.
+    for (const id of ["m-id", "m-goal", "m-cond", "m-phase", "m-path",
+                      "m-target", "m-reason", "m-ticks"])
+      $(id).textContent = "—";
+    $("m-phase").className = "mono";
+    $("m-dist").textContent = "—";
+    $("m-elapsed").textContent = "—";
+    $("m-budget").style.width = "0%";
+  }
+
+  const v = s.last_result;
+  if (v) {
+    $("v-result").textContent = (v.result || "—").toUpperCase();
+    $("v-result").style.color = VERDICT_COLOR[v.result] || "var(--ink)";
+    $("v-id").textContent = v.task_id;
+    $("v-detail").textContent = v.detail || "—";
+    $("v-log").textContent = v.trial_log ? v.trial_log.split(/[\\/]/).pop() : "—";
+    if (v.task_id !== lastVerdictId) { lastVerdictId = v.task_id; fetchLog(true); }
+  } else {
+    $("v-result").textContent = "—"; $("v-result").style.color = "";
+    $("v-id").textContent = "—"; $("v-detail").textContent = "—";
+    $("v-log").textContent = "—";
+  }
+
+  document.title = s.state === "RUNNING"
+    ? `● ${(s.task || {}).phase || "running"} — rc-car`
+    : (v ? `${v.result} — rc-car` : "rc-car console");
+}
+
+function escapeHtml(x) {
+  return String(x).replace(/[&<>"']/g,
+    c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+}
+
+// ── feedback-loop view (trial JSONL tail) ───────────────────────────────
+
+function renderLog(data, thresholdM) {
+  $("log-file").textContent = "— " + data.file;
+  const recs = data.records || [];
+  const ticks = recs.filter(r => r.type === "tick");
+
+  const ms = [];
+  for (const r of recs) {
+    if (r.type === "trial_start") {
+      const p = r.planner || {};
+      ms.push({cls: "plan", text: `plan[${p.planner_path}] → ${p.label || p.target_id || "none"}`
+        + (p.score ? ` score=${Number(p.score).toFixed(3)}` : "")
+        + (p.reason ? ` — “${p.reason}”` : "")});
+    } else if (r.type === "event") {
+      const extra = r.name === "baseline_acquired"
+        ? ` ${r.label || r.target_id} after ${r.sweeps} sweep(s), ${fmt(r.search_time_s, 1)}s`
+        : "";
+      ms.push({cls: "event", text: `t=${fmt(r.t, 1)}s ${r.name}${extra}`});
+    } else if (r.type === "trial_end") {
+      ms.push({cls: r.result === "arrived" ? "end-good" : "end-bad",
+        text: `END ${r.result} — ${r.detail || ""} (${fmt(r.elapsed_s, 1)}s, `
+        + `final ${fmt(r.final_dist_m)}m${r.tta_s != null ? `, TTA ${fmt(r.tta_s, 1)}s` : ""})`});
+    }
+  }
+  $("milestones").innerHTML = ms.length
+    ? ms.map(m => `<div class="m ${m.cls}">${escapeHtml(m.text)}</div>`).join("")
+    : '<span class="mut">no milestones yet</span>';
+
+  const rows = ticks.slice(-10).map(r => `<tr>
+    <td>${fmt(r.t, 1)}</td><td>${fmt(r.ground_dist_m)}</td>
+    <td>${r.heading_err_rad != null ? (r.heading_err_rad * 57.2958).toFixed(0) : "—"}</td>
+    <td>${r.cmd ? r.cmd.map(c => c.toFixed(2)).join(" / ") : "—"}</td>
+    <td style="color:${r.fresh ? "var(--green)" : "var(--red)"}">${r.fresh ? "fresh" : "STALE"}</td>
+    <td>${escapeHtml(r.status || "")}</td></tr>`);
+  $("ticks").innerHTML = rows.length ? rows.join("")
+    : '<tr><td colspan="6" class="mut">no ticks yet</td></tr>';
+
+  drawSpark(ticks, thresholdM);
+}
+
+function drawSpark(ticks, thresholdM) {
+  const svg = $("spark");
+  const pts = ticks.filter(r => r.ground_dist_m != null);
+  if (pts.length < 2) { svg.innerHTML = ""; return; }
+  const W = 1000, H = 130, PAD = 6;
+  const t0 = pts[0].t, t1 = pts[pts.length - 1].t || t0 + 1;
+  const dMax = Math.max(1, ...pts.map(p => p.ground_dist_m));
+  const X = t => PAD + (t - t0) / Math.max(0.001, t1 - t0) * (W - 2 * PAD);
+  const Y = d => H - PAD - (d / dMax) * (H - 2 * PAD);
+  const line = pts.map(p => `${X(p.t).toFixed(1)},${Y(p.ground_dist_m).toFixed(1)}`).join(" ");
+  const stale = ticks.filter(r => !r.fresh && r.ground_dist_m != null)
+    .map(p => `<circle cx="${X(p.t).toFixed(1)}" cy="${Y(p.ground_dist_m).toFixed(1)}" r="3" fill="var(--red)"/>`)
+    .join("");
+  const yThr = Y(Math.min(thresholdM || 0.4, dMax));
+  svg.innerHTML =
+    `<line x1="0" y1="${yThr}" x2="${W}" y2="${yThr}" stroke="var(--green)" stroke-dasharray="6 5" stroke-width="1" opacity=".6"/>` +
+    `<text x="${W - 8}" y="${yThr - 4}" fill="var(--green)" font-size="11" text-anchor="end" opacity=".8">arrival ${thresholdM} m</text>` +
+    `<polyline points="${line}" fill="none" stroke="var(--blue)" stroke-width="2"/>` + stale +
+    `<text x="8" y="14" fill="var(--mut)" font-size="11">dist (max ${dMax.toFixed(1)} m)</text>`;
+}
+
+let limitsCache = {arrival_threshold_m: 0.4};
+let logSeq = 0;
+async function fetchLog(force) {
+  const seq = ++logSeq;
+  try {
+    const data = await api("GET", "/trial_log?tail=400");
+    if (seq !== logSeq) return;   // a newer fetch superseded this response:
+    // rendering it would clobber the final (trial_end) view with a
+    // truncated mid-flight tail, permanently until the next mission.
+    const key = data.file + ":" + data.total_lines;
+    if (!force && key === lastLogKey) return;
+    lastLogKey = key;
+    renderLog(data, limitsCache.arrival_threshold_m);
+  } catch (e) { /* 404 before first trial — leave placeholders */ }
+}
+
+async function pollStatus() {
+  try {
+    const s = await api("GET", "/status");
+    offlineCount = 0;
+    $("conn").style.background = "var(--green)";
+    $("banner-offline").classList.remove("show");
+    limitsCache = s.limits || limitsCache;
+    renderStatus(s);
+  } catch (e) {
+    if (++offlineCount >= 3) {
+      $("conn").style.background = "var(--red)";
+      $("banner-offline").classList.add("show");
+      setState("OFFLINE");
+    }
+  }
+}
+
+setInterval(pollStatus, 500);
+setInterval(() => { if (running) fetchLog(false); }, 1000);
+pollStatus();
+</script>
+</body>
+</html>

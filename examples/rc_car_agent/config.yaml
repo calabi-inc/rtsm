@@ -23,6 +23,8 @@ server:
   host: "127.0.0.1"
   port: 8010
   default_condition: "rtsm"            # rtsm | baseline (per-command override in POST /command)
+  require_verified_estop: true         # /command 503s until the pad is bound AND a button was pressed on the CURRENT binding (protocol live-fire rule, enforced)
+  api_token: null                      # set a secret when binding --host 0.0.0.0: POST endpoints then require X-Auth-Token (the console prompts once)
 
 nav:
   arrival_threshold_m: 0.40            # E1 success radius (judged by TAPE, this is the controller stop radius)

@@ -13,11 +13,24 @@ Boot once; command over HTTP; no rerun between goals:
     POST /stop     -> convenience soft stop (bridge.stop) — NOT the hard e-stop
     POST /reset_estop -> operator re-arm after an e-stop (explicit two-step:
                    clears monitor AND bridge latch)
+    POST /preflight -> force a preflight re-probe (console "Re-check" button)
+    GET  /trial_log?tail=N -> parsed tail of the current/last trial's JSONL
+    GET  /ui (also /) -> operator console: single-file web page (ui.html)
+                   for a laptop on the same WiFi. Requires --host 0.0.0.0
+                   (config default stays 127.0.0.1). The console gets the
+                   SOFT stop only — the hard e-stop is never HTTP.
 
 Safety model (locked):
   * The HARD e-stop is the EstopMonitor thread (gamepad-X) + Ctrl-C path +
     the ESP32 300 ms firmware watchdog — never an HTTP endpoint.
   * E-stop ABANDONS the mission; /command returns 503 until /reset_estop.
+  * server.require_verified_estop (default true): EVERY motion goal —
+    bench included — 503s until the pad is bound AND live-fire verified
+    on the CURRENT binding. Remote-console gate: nobody is at the PC to
+    notice a dead pad.
+  * server.api_token (optional): POST endpoints require X-Auth-Token when
+    set — mandatory hygiene for --host 0.0.0.0 (any device on the LAN can
+    otherwise command motion).
   * NOT_READY (preflight failed) -> /command 503 with the reasons; the
     server stays up and re-probes preflight on each /command attempt.
 
@@ -39,6 +52,7 @@ agent restarts) unless --kill-rtsm-on-exit.
 from __future__ import annotations
 
 import argparse
+import json
 import subprocess
 import threading
 import time
@@ -47,7 +61,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from baseline_search import BaselineSearcher, derive_seed
@@ -106,8 +121,11 @@ class AgentServer:
 
     def startup(self) -> None:
         self._rtsm_lifecycle()
-        self.run_preflight()
+        # Monitor BEFORE preflight: preflight reports the kill-switch
+        # binding, which only exists once the monitor has run its
+        # main-thread SDL init.
         self.monitor.start()
+        self.run_preflight()
         self._worker = threading.Thread(
             target=self._worker_loop, name="agent-worker", daemon=True
         )
@@ -147,6 +165,10 @@ class AgentServer:
 
     def run_preflight(self) -> list:
         reasons = []
+        if self.cfg.server.require_verified_estop and not self._estop_live():
+            reasons.append(
+                "kill switch not live-fire verified — plug in the wired pad "
+                "and press a button (the protocol's X check) before missions")
         if self.bridge.ping() is None:
             reasons.append("ESP32 unreachable — car powered? same WiFi?")
         else:
@@ -175,12 +197,29 @@ class AgentServer:
 
     # ── command intake ───────────────────────────────────────────────────
 
+    def _estop_live(self) -> bool:
+        """Kill switch bound AND live-fire verified on the CURRENT binding.
+        Read fresh from the monitor every time — never cached, so a pad
+        that slept mid-session (binding_verified reset) blocks the next
+        command even though preflight's _ready is still True."""
+        return bool(self.monitor.gamepad_available
+                    and self.monitor.binding_verified)
+
     def submit(self, goal: str, condition: Optional[str]) -> Dict[str, Any]:
         cond = condition or self.cfg.server.default_condition
         if cond not in ("rtsm", "baseline"):
             raise HTTPException(400, f"condition must be rtsm|baseline, got {cond!r}")
         if self.monitor.triggered or self.bridge.estopped:
             raise HTTPException(503, "ESTOPPED — POST /reset_estop to re-arm (operator action)")
+        # EVERY motion goal — bench included, its whole purpose is e-stop
+        # testing — requires a working, press-proven kill switch. This is
+        # the remote-operator gate: with the console on another laptop,
+        # nobody is at the PC to notice a dead pad.
+        if self.cfg.server.require_verified_estop and not self._estop_live():
+            raise HTTPException(503, {
+                "kill_switch": "not live-fire verified — plug in the wired "
+                               "pad and press a button (protocol X check); "
+                               "required again after any pad sleep/reconnect"})
 
         is_bench_goal = goal == BENCH_DUMMY_GOAL
         if is_bench_goal and not self.bench:
@@ -214,6 +253,8 @@ class AgentServer:
                 "planner_path": None,
                 "target_id": None,
                 "target_label": None,
+                "target_score": None,
+                "planner_reason": None,
                 "trial_log": None,
                 "result": None,
                 "detail": None,
@@ -276,7 +317,68 @@ class AgentServer:
                 "last_result": dict(self.last_result) if self.last_result else None,
                 "estop": self.monitor.status(),
                 "bench": self.bench,
+                # Server wall clock: clients compute elapsed = now -
+                # task.accepted_at without trusting their OWN clock (the
+                # console laptop may be skewed vs this PC).
+                "now": time.time(),
+                # Config truths the console renders (budget bar, arrival
+                # line) — served, never hardcoded client-side.
+                "limits": {
+                    "timeout_rtsm_s": self.cfg.nav.timeout_rtsm_s,
+                    "timeout_baseline_s": self.cfg.nav.timeout_baseline_s,
+                    "arrival_threshold_m": self.cfg.nav.arrival_threshold_m,
+                },
             }
+
+    def preflight_recheck(self) -> Dict[str, Any]:
+        """Console "Re-check" — refused while a mission is live/queued:
+        the ESP32 probes (2 s-budget GETs to a single-connection Arduino
+        WebServer) contend with the drive heartbeat that feeds the 300 ms
+        firmware watchdog, and a probe hiccup mid-drive would strand the
+        server NOT_READY after a successful trial. Same pattern as
+        reset_estop's idle-only guard."""
+        with self._lock:
+            if self.current is not None or self._pending is not None:
+                raise HTTPException(
+                    409, "mission live/queued — preflight probes contend "
+                         "with the drive heartbeat; retry when idle")
+        reasons = self.run_preflight()
+        # Derived state, not raw: an IDLE e-stop latch never passes
+        # through a mission finalize, so raw state would read READY here
+        # while /command 503s ESTOPPED.
+        return {"reasons": reasons, "state": self.status()["state"]}
+
+    def trial_log_tail(self, tail: int = 200) -> Dict[str, Any]:
+        """Parsed tail of the current (else last) trial's JSONL — the
+        console's feedback-loop view (plan record, per-tick pose/dist/
+        freshness/commands, verdict). Read-only; only ever serves the path
+        the worker itself recorded, never a client-supplied one."""
+        with self._lock:
+            # First of current/last that HAS a log: a fresh task whose
+            # logger isn't up yet (or failed on OSError, or a bench run)
+            # must not 404 away the previous trial's perfectly good file.
+            task = next((t for t in (self.current, self.last_result)
+                         if t and t.get("trial_log")), None)
+            path = task.get("trial_log") if task else None
+            task_id = task.get("task_id") if task else None
+        if not path:
+            raise HTTPException(404, "no trial log yet — run a mission first")
+        p = Path(path)
+        if not p.exists():
+            raise HTTPException(404, f"trial log missing on disk: {p.name}")
+        tail = max(1, min(int(tail), 2000))
+        try:
+            lines = p.read_text(encoding="utf-8", errors="replace").splitlines()
+        except OSError as e:
+            raise HTTPException(500, f"trial log unreadable: {e}")
+        records = []
+        for line in lines[-tail:]:
+            try:
+                records.append(json.loads(line))
+            except ValueError:
+                continue                 # in-flight partial line — skip, not fail
+        return {"task_id": task_id, "file": p.name,
+                "total_lines": len(lines), "records": records}
 
     # ── single-slot worker ───────────────────────────────────────────────
 
@@ -301,6 +403,18 @@ class AgentServer:
                     self._preempt.clear()
                     self._cancel.clear()
             if task is not None:
+                # E-stop latched between submit-time check and claim (X
+                # during the previous task's preempt window keeps _pending):
+                # finalize as estopped IMMEDIATELY — no logger, no planner.
+                # Otherwise status() shows RUNNING mid-e-stop (hiding the
+                # console's ESTOPPED banner) and a phantom trial JSONL for
+                # a mission that never ran lands in the paper data.
+                if (self.stop_event.is_set() or self.monitor.triggered
+                        or self.bridge.estopped):
+                    self._finalize_task(task, "estopped",
+                                        "e-stop latched before mission start",
+                                        prev_state)
+                    continue
                 # Exception barrier: the single worker thread must survive
                 # ANYTHING a task throws — a dead worker would wedge the
                 # server in RUNNING while still accepting commands.
@@ -392,7 +506,9 @@ class AgentServer:
         task["planner_path"] = pr.planner_path
         task["target_id"] = pr.target_id
         task["target_label"] = pr.label
-        if logger is not None:
+        task["target_score"] = pr.score
+        task["planner_reason"] = pr.reason           # Haiku's one-liner (or
+        if logger is not None:                       # the not_found detail)
             logger.log_plan(pr, rtsm_stats=self._safe_stats())
 
         if pr.status != "ok":
@@ -494,6 +610,8 @@ class AgentServer:
             task["planner_path"] = planner_path
             task["target_id"] = picked.id
             task["target_label"] = picked.label
+            task["target_score"] = picked.score
+            task["planner_reason"] = sel_reason
             if logger is not None:
                 logger.log_event(
                     "baseline_acquired", time.monotonic() - t0,
@@ -598,8 +716,17 @@ def create_app(cfg: Optional[Config] = None,
     app = FastAPI(title="rc_car_agent", lifespan=lifespan)
     app.state.srv = srv                              # test access
 
+    def _auth(request: Request) -> None:
+        """Shared-secret gate for every POST when serving the LAN. GETs
+        stay open (read-only telemetry); anything that commands, stops,
+        re-arms, or probes hardware needs the token."""
+        token = cfg.server.api_token
+        if token and request.headers.get("x-auth-token") != token:
+            raise HTTPException(401, "missing/invalid X-Auth-Token")
+
     @app.post("/command")
-    def command(body: CommandBody):
+    def command(body: CommandBody, request: Request):
+        _auth(request)
         return srv.submit(body.goal, body.condition)
 
     @app.get("/status")
@@ -607,16 +734,37 @@ def create_app(cfg: Optional[Config] = None,
         return srv.status()
 
     @app.post("/cancel")
-    def cancel():
+    def cancel(request: Request):
+        _auth(request)
         return srv.cancel()
 
     @app.post("/stop")
-    def stop():
+    def stop(request: Request):
+        _auth(request)
         return srv.soft_stop()
 
     @app.post("/reset_estop")
-    def reset_estop():
+    def reset_estop(request: Request):
+        _auth(request)
         return srv.reset_estop()
+
+    @app.post("/preflight")
+    def preflight(request: Request):
+        _auth(request)
+        return srv.preflight_recheck()
+
+    @app.get("/trial_log")
+    def trial_log(tail: int = 200):
+        return srv.trial_log_tail(tail)
+
+    ui_path = Path(__file__).resolve().parent / "ui.html"
+
+    @app.get("/", include_in_schema=False)
+    @app.get("/ui")
+    def ui():
+        if not ui_path.exists():
+            raise HTTPException(404, "ui.html missing next to server.py")
+        return FileResponse(ui_path, media_type="text/html")
 
     return app
 

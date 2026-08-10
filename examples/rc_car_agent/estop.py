@@ -245,11 +245,16 @@ class EstopMonitor:
         self._stop_event.clear()
 
     def status(self) -> dict:
+        press = self.last_button_press_mono
         return {
             "gamepad_available": self.gamepad_available,
             "gamepad_name": self.gamepad_name,
             "binding_verified": self.binding_verified,
-            "last_button_press_mono": self.last_button_press_mono,
+            "last_button_press_mono": press,
+            # Age is derived HERE because the raw value is monotonic-clock
+            # time — meaningless to any client on another machine.
+            "last_button_press_age_s": (round(time.monotonic() - press, 1)
+                                        if press is not None else None),
             "triggered": self.triggered,
             "trigger_source": self.trigger_source,
         }

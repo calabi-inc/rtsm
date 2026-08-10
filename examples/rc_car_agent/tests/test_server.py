@@ -66,7 +66,11 @@ def env(monkeypatch, tmp_path):
     esp_srv.recorded = []
     threading.Thread(target=esp_srv.serve_forever, daemon=True).start()
 
-    cfg = replace(load_config(), trials_output_dir=str(tmp_path))
+    base = load_config()
+    # No physical pad in mock envs — the live-fire gate is tested on its
+    # own (test_kill_switch_gate_*), everything else runs with it off.
+    cfg = replace(base, trials_output_dir=str(tmp_path),
+                  server=replace(base.server, require_verified_estop=False))
     rtsm = RtsmClient(f"http://127.0.0.1:{rtsm_srv.server_address[1]}", timeout_s=1.0)
     bridge = Esp32Bridge(f"http://127.0.0.1:{esp_srv.server_address[1]}",
                          http_timeout_s=0.4)
@@ -99,6 +103,7 @@ def env_car(monkeypatch, tmp_path):
     cfg = replace(
         base,
         trials_output_dir=str(tmp_path),
+        server=replace(base.server, require_verified_estop=False),
         nav=replace(base.nav, tick_s=0.02, poll_hz=20.0, stale_abort_s=1.0),
         baseline=replace(base.baseline, sweep_step_s=0.25, dwell_s=0.3,
                          steps_per_sweep=8, walk_s=0.3, walk_speed=0.2),
@@ -471,3 +476,200 @@ def test_preempt_during_real_nav(env_car):
         assert s["last_result"]["result"] == "preempted"
         # Safe stop hit the wire between the two drives.
         assert any(rec["path"] == "/stop" for rec in esp_srv.recorded)
+
+
+# ── operator console: /ui, /trial_log, /preflight, status extensions ─────
+
+
+def test_ui_served_at_root_and_ui(env):
+    cfg, rtsm, bridge, *_ = env
+    with TestClient(create_app(cfg, rtsm, bridge)) as c:
+        for path in ("/", "/ui"):
+            r = c.get(path)
+            assert r.status_code == 200
+            assert "text/html" in r.headers["content-type"]
+            assert "rc-car console" in r.text
+            # Locked safety model: the page must not carry a hard-e-stop
+            # HTTP control — soft stop only.
+            assert "reset_estop" in r.text            # re-arm is allowed
+            assert "Stop (soft)" in r.text
+
+
+def test_status_carries_clock_and_limits(env):
+    """The console renders elapsed/budget from SERVER truth — wall clock
+    and config limits must ride every /status payload."""
+    cfg, rtsm, bridge, *_ = env
+    with TestClient(create_app(cfg, rtsm, bridge)) as c:
+        s = c.get("/status").json()
+        assert abs(s["now"] - time.time()) < 5.0
+        assert s["limits"]["timeout_rtsm_s"] == cfg.nav.timeout_rtsm_s
+        assert s["limits"]["timeout_baseline_s"] == cfg.nav.timeout_baseline_s
+        assert s["limits"]["arrival_threshold_m"] == cfg.nav.arrival_threshold_m
+
+
+def test_trial_log_404_before_first_trial(env):
+    cfg, rtsm, bridge, *_ = env
+    with TestClient(create_app(cfg, rtsm, bridge)) as c:
+        assert c.get("/trial_log").status_code == 404
+
+
+def test_trial_log_tails_current_then_finished_trial(env):
+    cfg, rtsm, bridge, *_ = env
+    with TestClient(create_app(cfg, rtsm, bridge)) as c:
+        c.post("/command", json={"goal": "go to the red mug"})
+        assert _wait(lambda: _result(c) == "stale_stop",
+                     timeout=cfg.nav.stale_abort_s + 3.0)
+        full = c.get("/trial_log").json()
+        assert full["records"][0]["type"] == "trial_start"
+        assert full["records"][-1]["type"] == "trial_end"
+        assert full["records"][0]["planner"]["target_id"] == "mug-1"
+        # tail=N returns the LAST N records (the live view wants the newest).
+        tail = c.get("/trial_log", params={"tail": 2}).json()
+        assert len(tail["records"]) == 2
+        assert tail["records"][-1]["type"] == "trial_end"
+        assert tail["total_lines"] == full["total_lines"]
+
+
+def test_status_surfaces_planner_score_and_reason_keys(env):
+    """The console shows the Haiku pick without reading the log — score
+    and reason must ride the task dict (pre-seeded, updated at plan)."""
+    cfg, rtsm, bridge, *_ = env
+    with TestClient(create_app(cfg, rtsm, bridge)) as c:
+        c.post("/command", json={"goal": "go to the red mug"})
+        assert _wait(lambda: _result(c) is not None,
+                     timeout=cfg.nav.stale_abort_s + 3.0)
+        last = c.get("/status").json()["last_result"]
+        assert last["target_score"] == pytest.approx(0.81)
+        assert "planner_reason" in last               # None on the top1 path
+
+
+def test_preflight_endpoint_reprobes(env):
+    cfg, rtsm, bridge, rtsm_srv, _ = env
+    rtsm_srv.routes["/stats"] = dict(COLD_STATS)
+    with TestClient(create_app(cfg, rtsm, bridge)) as c:
+        r = c.post("/preflight").json()
+        assert r["state"] == "NOT_READY" and r["reasons"]
+        rtsm_srv.routes["/stats"] = dict(GOOD_STATS)  # phone reconnected
+        r = c.post("/preflight").json()
+        assert r["state"] == "READY" and r["reasons"] == []
+
+
+# ── adversarial-review fixes (2026-08-09 console review) ─────────────────
+
+
+def test_kill_switch_gate_blocks_all_motion_until_verified(env):
+    """require_verified_estop: EVERY motion goal — bench included — 503s
+    until the pad is bound AND press-proven. The remote-console gate."""
+    cfg, rtsm, bridge, *_ = env
+    from dataclasses import replace as _r
+    gated = _r(cfg, server=_r(cfg.server, require_verified_estop=True))
+    app = create_app(gated, rtsm, bridge, bench=True)
+    with TestClient(app) as c:
+        s = c.get("/status").json()
+        assert any("kill switch" in r for r in s["not_ready_reasons"])
+        for goal in ("go to the red mug", BENCH_DUMMY_GOAL):
+            r = c.post("/command", json={"goal": goal})
+            assert r.status_code == 503
+            assert "kill_switch" in r.json()["detail"]
+        # Operator plugs in the pad and presses a button (live-fire).
+        mon = app.state.srv.monitor
+        mon.gamepad_available = True
+        mon.binding_verified = True
+        r = c.post("/command", json={"goal": "go to the red mug"})
+        assert r.status_code == 200
+        # Pad sleeps mid-session: binding_verified resets — the NEXT
+        # command must block again even though preflight's _ready is
+        # still cached True (the gate reads the monitor fresh).
+        assert _wait(lambda: _result(c) is not None,
+                     timeout=cfg.nav.stale_abort_s + 3.0)
+        mon.binding_verified = False
+        r = c.post("/command", json={"goal": "go to the red mug"})
+        assert r.status_code == 503
+        assert "kill_switch" in r.json()["detail"]
+
+
+def test_worker_never_claims_task_after_estop_latch(env, tmp_path):
+    """X pressed in the submit->claim window (e.g. during the previous
+    task's preempt safe-stop): the worker must finalize the queued task as
+    estopped IMMEDIATELY — no RUNNING state hiding the ESTOPPED banner,
+    no phantom trial JSONL in the paper data."""
+    cfg, rtsm, bridge, *_ = env
+    from server import AgentServer
+    srv = AgentServer(cfg, rtsm, bridge)
+    srv.run_preflight()
+    srv.submit("go to the red mug", None)            # queued; worker not running
+    srv.monitor.trigger("test-x")                    # latch lands before claim
+    worker = threading.Thread(target=srv._worker_loop, daemon=True)
+    worker.start()
+    assert _wait(lambda: srv.last_result is not None)
+    srv._shutdown.set()
+    assert srv.last_result["result"] == "estopped"
+    assert "before mission start" in srv.last_result["detail"]
+    assert srv.status()["state"] == "ESTOPPED"
+    assert srv.last_result["trial_log"] is None      # no logger was opened
+    assert list(tmp_path.glob("*.jsonl")) == []      # no phantom trial file
+
+
+def test_preflight_409_while_mission_live(env):
+    """Preflight probes (2 s-budget ESP32 GETs) must never contend with a
+    live drive's heartbeat — idle-only, like reset_estop."""
+    cfg, rtsm, bridge, *_ = env
+    with TestClient(create_app(cfg, rtsm, bridge)) as c:
+        c.post("/command", json={"goal": "go to the red mug"})
+        assert _wait(lambda: c.get("/status").json()["state"] == "RUNNING")
+        assert c.post("/preflight").status_code == 409
+        assert _wait(lambda: _result(c) is not None,
+                     timeout=cfg.nav.stale_abort_s + 3.0)
+        assert c.post("/preflight").status_code == 200
+
+
+def test_preflight_reports_derived_state_when_idle_latched(env):
+    """Idle e-stop never passes through a mission finalize, so raw state
+    stays READY — /preflight must report the derived ESTOPPED, matching
+    /status and /command's 503."""
+    cfg, rtsm, bridge, *_ = env
+    app = create_app(cfg, rtsm, bridge)
+    with TestClient(app) as c:
+        app.state.srv.monitor.trigger("test-estop")  # idle latch
+        r = c.post("/preflight").json()
+        assert r["state"] == "ESTOPPED"
+
+
+def test_trial_log_falls_back_past_logless_current_task(env):
+    """A current task whose logger isn't up (or failed on OSError, or a
+    bench run) must not 404 away the previous trial's existing file."""
+    cfg, rtsm, bridge, *_ = env
+    app = create_app(cfg, rtsm, bridge)
+    with TestClient(app) as c:
+        c.post("/command", json={"goal": "go to the red mug"})
+        assert _wait(lambda: _result(c) is not None,
+                     timeout=cfg.nav.stale_abort_s + 3.0)
+        done_id = c.get("/status").json()["last_result"]["task_id"]
+        srv = app.state.srv
+        with srv._lock:                              # simulate the logless window
+            srv.current = {"task_id": "t-logless", "trial_log": None}
+        try:
+            r = c.get("/trial_log")
+            assert r.status_code == 200
+            assert r.json()["task_id"] == done_id    # previous trial served
+        finally:
+            with srv._lock:
+                srv.current = None
+
+
+def test_api_token_guards_posts_but_not_reads(env):
+    cfg, rtsm, bridge, *_ = env
+    from dataclasses import replace as _r
+    secured = _r(cfg, server=_r(cfg.server, api_token="s3cret"))
+    with TestClient(create_app(secured, rtsm, bridge)) as c:
+        assert c.get("/status").status_code == 200   # telemetry stays open
+        assert c.get("/ui").status_code == 200
+        for path in ("/cancel", "/stop", "/preflight", "/reset_estop"):
+            assert c.post(path).status_code == 401
+        assert c.post("/command",
+                      json={"goal": "go to the red mug"}).status_code == 401
+        assert c.post("/cancel",
+                      headers={"X-Auth-Token": "s3cret"}).status_code == 200
+        r = c.post("/command", json={"goal": "go to the red mug"},
+                   headers={"X-Auth-Token": "s3cret"})
+        assert r.status_code == 200

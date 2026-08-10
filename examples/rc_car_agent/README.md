@@ -180,6 +180,42 @@ rc_car_agent/
 
 Run the tests: `python -m pytest examples/rc_car_agent/tests/ -v`
 
+---
+
+## Operator console (laptop on the same WiFi)
+
+`server.py` serves a single-file web console at `/ui` (also `/`): send
+go-to commands, watch the Haiku target pick (path/score/reason), the live
+feedback loop (distance sparkline, per-tick pose freshness + wheel
+commands), and the mission verdict — from any browser on the LAN.
+
+```powershell
+# On the rig PC — bind the LAN (config default stays 127.0.0.1):
+.venv/Scripts/python.exe server.py --host 0.0.0.0
+
+# One-time (admin) firewall rule so the laptop can reach it:
+netsh advfirewall firewall add rule name="rc-car-agent 8010" dir=in action=allow protocol=TCP localport=8010
+
+# Find the PC's LAN IP:
+ipconfig
+```
+
+Then open `http://<PC-LAN-IP>:8010/ui` on the laptop.
+
+Safety model unchanged: the console has **soft** stop/cancel only — the
+hard e-stop is the wired gamepad X (plus Ctrl-C and the ESP32 300 ms
+watchdog), never HTTP. Two enforced guards for remote operation:
+
+* `server.require_verified_estop` (default **true**): every motion goal
+  503s until the pad is bound AND a button was pressed on the current
+  binding — the protocol's live-fire rule, now enforced in software.
+  The console shows a standing banner until then, and again after any
+  pad sleep/reconnect.
+* `server.api_token`: set a secret before binding `0.0.0.0` — all POST
+  endpoints then require `X-Auth-Token` (the console prompts once and
+  remembers for the tab session). Without it, anyone on the WiFi can
+  command motion; GET telemetry stays open either way.
+
 **Geometry conventions (pinned — see `geometry.py` docstring):** ARKit world is **Y-up**
 → ground plane is **X–Z**; RTSM serves the camera quaternion in **OpenCV convention**
 (forward = `R(q)·[0,0,1]`); yaw = `atan2(x, z)`, **positive = CCW from above = left**,
