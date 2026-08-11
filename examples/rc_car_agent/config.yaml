@@ -39,12 +39,12 @@ nav:
   drift_margin_m: 0.8                  # ground-dist exceeds best-so-far by this â†’ drift verdict â†’ safe stop
   discontinuity_base_m: 0.5            # pose jump beyond base + rate*dt between fresh poses â†’ frame_reset
   discontinuity_rate_mps: 1.0          # generous upper bound on real car speed for the jump threshold
-  timeout_rtsm_s: 60                   # trial timeout, condition (a)
-  timeout_baseline_s: 180              # trial timeout, condition (b) â€” long so it can't cap the speedup
+  timeout_rtsm_s: 900                  # trial timeout, condition (a) — 15 min (2026-08-10: calibrated speed 0.04 m/s effective made 60 s impossible; symmetric with (b))
+  timeout_baseline_s: 900              # trial timeout, condition (b) — same budget both conditions (cleaner comparison; timeout only binds on failures)
 
 planner:
   model: "claude-haiku-4-5"            # single forced-tool target-pick call (E1 condition a)
-  api_timeout_s: 10
+  api_timeout_s: 30                    # 2026-08-10: 10 s caused timeout->retry loops (~48 s planning); slow first call now succeeds in one attempt
   fallback: "top1"                     # deterministic fallback if the API is down (logged per trial)
 
 baseline:
@@ -62,14 +62,14 @@ baseline:
 
 calibration:
   # Written by calibrate.py â€” do not hand-edit. Units: rad / m / dimensionless.
-  yaw_offset_rad: 0.0                  # camera forward â†’ car forward, about world up
-  lever_arm_right_m: 0.0               # camera â†’ drive center, car body frame (right)
-  lever_arm_forward_m: 0.0             # camera â†’ drive center, car body frame (forward)
-  speed_scale_mps: 0.0                 # measured velocity at /drive magnitude 1.0
-  turn_scale_rps: 0.0                  # measured yaw rate at full differential
+  yaw_offset_rad: -0.003085                  # camera forward â†’ car forward, about world up
+  lever_arm_right_m: 0.012272               # camera â†’ drive center, car body frame (right)
+  lever_arm_forward_m: -0.258536             # camera â†’ drive center, car body frame (forward)
+  speed_scale_mps: 0.081654                 # measured velocity at /drive magnitude 1.0
+  turn_scale_rps: 0.327006                  # measured yaw rate at full differential
   provenance:
-    calibrated_at: null                # ISO timestamp, written by calibrate.py
-    rig_id: null                       # e.g. "hiwonder4wd-iphone13-tray-v1"
+    calibrated_at: "2026-08-10T23:18:44"                # ISO timestamp, written by calibrate.py
+    rig_id: "hiwonder4wd-iphone-tray-v1"                       # e.g. "hiwonder4wd-iphone13-tray-v1"
 
 trials:
   output_dir: "paper/demo2_data"       # trial JSONLs + videos + stop photos + event logs

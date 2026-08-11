@@ -7,7 +7,7 @@ from dataclasses import replace
 
 import pytest
 
-from config import load_config
+from config import CalibrationCfg, load_config
 from monitor import MissionMonitor
 from rtsm_client import PoseSample
 
@@ -22,7 +22,12 @@ NAV = replace(
     discontinuity_rate_mps=1.0,
     timeout_rtsm_s=60.0,
 )
-CAL = CFG.calibration          # identity (yaw_offset 0, lever arm 0)
+# Explicit IDENTITY calibration: these tests pin the geometry MATH, so they
+# must not inherit the shipped config's real rig values (nonzero lever arm
+# since Phase G would shift every distance by ~0.26 m).
+CAL = CalibrationCfg(yaw_offset_rad=0.0, lever_arm_right_m=0.0,
+                     lever_arm_forward_m=0.0, speed_scale_mps=1.0,
+                     turn_scale_rps=1.0, calibrated_at=None, rig_id=None)
 
 
 def mk_pose(x, z, yaw=0.0, ts=100.0, epoch=None):

@@ -58,7 +58,7 @@ def test_trial_start_schema(tmp_path):
     assert start["frame_epoch"] == 7
     assert start["plan_pose"]["frame_epoch"] == 7
     assert start["config"]["arrival_threshold_m"] == CFG.nav.arrival_threshold_m
-    assert start["config"]["is_calibrated"] is False   # pre-Phase-G
+    assert start["config"]["is_calibrated"] is CFG.calibration.is_calibrated
     assert "git_commit" in start["provenance"]         # best-effort, may be null
     assert start["rng_seed"] is None                   # baseline-only (Phase H)
     # Protocol-era fields: present-but-null, operator-filled post-trial.

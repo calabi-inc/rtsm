@@ -15,8 +15,15 @@ def test_shipped_config_loads():
     assert 0 < cfg.nav.max_speed <= 1.0
     assert cfg.nav.timeout_baseline_s >= cfg.nav.timeout_rtsm_s
     assert cfg.esp32.heartbeat_s < 0.3  # inside the firmware watchdog window
-    assert cfg.calibration.lever_arm_rf == (0.0, 0.0)
-    assert cfg.calibration.is_calibrated is False  # provenance empty until calibrate.py runs
+    # Shipped config carries the REAL rig calibration (Phase G, 2026-08-10:
+    # hiwonder4wd-iphone-tray-v1). Assert sanity, not absence — a wild value
+    # here means a botched calibrate.py --write, not a design change.
+    assert cfg.calibration.is_calibrated is True
+    assert abs(cfg.calibration.yaw_offset_rad) < 0.09        # < ~5°
+    assert abs(cfg.calibration.lever_arm_right_m) < 0.5
+    assert abs(cfg.calibration.lever_arm_forward_m) < 0.5    # phone ~26 cm aft
+    assert 0.01 < cfg.calibration.speed_scale_mps < 1.0
+    assert 0.05 < cfg.calibration.turn_scale_rps < 2.0
     assert cfg.server.default_condition == "rtsm"
 
 

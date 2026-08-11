@@ -13,7 +13,16 @@ data to be valid.
 controller, same target-selection rule; the ONLY masked capability is
 persistence. **Budgets are hard TOTAL clocks from command receipt** —
 planning/selection time counts in (a) exactly as search time counts in
-(b): 60 s (a) / 180 s (b).
+(b): **900 s (a) / 900 s (b)**.
+
+> **AMENDMENT 2026-08-10 (pre-campaign, no trial data collected under the
+> old budgets):** originally 60 s (a) / 180 s (b), set before Phase G
+> measured the real rig. Calibration showed 0.08 m/s at full command
+> (~0.04 m/s at the 0.5 nav cap) — a 2 m approach alone needs ~50 s, so
+> 60 s censored trials mid-drive (observed live: t20260810-232334-001).
+> Now SYMMETRIC 900 s for both conditions, which also removes the
+> asymmetric-budget critique; the MW comparison horizon becomes 900 s.
+> The timeout only binds on failures — arrivals end trials early.
 
 **Ground truth & success (pre-registered, fixed before any data):**
 tape-measured distance, drive center → object floor cross. HEADLINE
@@ -111,6 +120,20 @@ specific scan.
    **Never build a campaign map on top of `POST /reset`** — reset clears
    working memory but leaves ghost entries in the vector index that crowd
    retrieval (found live 2026-08-07). Fresh process = fresh index.
+4b. **Pose-feed health gate (added 2026-08-10, after the RTSM wedge):**
+   with the phone streaming and the car idle, poll `/stats` and confirm
+   **≥ 3 fresh poses/s over 10 s** before the first trial and again
+   between layouts. Session 4 saw RTSM degrade progressively (pose rate
+   fell from ~4.5/s to ~1/s, then the process wedged at ~3 GB RSS and
+   stopped answering HTTP entirely — the phone "disconnecting" was the
+   symptom, and the car's motion turned stepwise long before that).
+   A slow feed = jerky control and eventual `stale_stop` aborts; do not
+   burn trials on it. If the rate is low: check iPhone Low Power Mode
+   (throttles ARKit), phone thermals, then restart the RTSM process
+   (fresh scan — session rules apply). Launch RTSM with stdout/stderr
+   redirected to a log file so a wedge/crash leaves a trace. Also check
+   iOS Low Power Mode is OFF at session start — charging from a dead
+   battery tends to switch it on.
 5. **Scan procedure (reproducibility):** walk the SAME loop each session —
    perimeter of the drivable area, one slow lap, then a direct look at
    each layout object from ~1–1.5 m, two angles each. Target ~2–4 min.
@@ -248,7 +271,8 @@ specific scan.
   battery/scan/thermal state to whichever condition resumes — an
   uncontrolled, one-sided nuisance.
 - Statistics (pre-registered here): pooled one-sided Mann-Whitney on TTA
-  with ALL failures of BOTH arms at the common 180 s horizon; arrivals-
+  with ALL failures of BOTH arms at the common 900 s horizon (was 180 s —
+  see the 2026-08-10 budget amendment in the header); arrivals-
   only sensitivity; **clustering acknowledged** — trials share layout
   geometry, so the pooled p is reported alongside the per-layout win
   table and exact one-sided sign test across the 5 layouts (all printed
