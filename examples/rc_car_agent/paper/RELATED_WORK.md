@@ -16,8 +16,15 @@ pre-empted**, but the space is populated — framing rules below.
    pre-registered protocol · identical-agent persistence ablation on
    physical hardware · wall-clock TTA distributions with censoring at a
    fixed budget · tape-measured ground-truth success · explicit
-   one-time-scan amortization ("at what cost") · commodity hardware
-   (RC car + phone, ~$200).
+   one-time-scan amortization ("at what cost") · consumer-grade
+   hardware. **Cost claim discipline (2026-08-12): NEVER say "$200
+   robot."** Honest BOM: RC car ~$150 + used ARKit iPhone ~$300 +
+   consumer GPU workstation (perception, off-board) ≈ $3–4k total —
+   still ~20× under GOAT's Spot ($75k+) / DynaMem's Stretch (~$25k).
+   Defuse the GPU objection with the measured Jetson datapoint: the
+   perception stack runs on a $250 Orin Nano at ~710 ms/frame (4.4×
+   the 5090, same object quality) — cite as "also runs on a $250 edge
+   module at reduced rate."
 3. **The "at what cost" framing is confirmed open**: even OK-Robot
    (iPhone-scan → robot, 10 real homes) treats the scan as free sunk
    infrastructure; Memory Over Maps (2026) prices index CONSTRUCTION
