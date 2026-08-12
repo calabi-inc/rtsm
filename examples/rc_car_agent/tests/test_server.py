@@ -461,6 +461,53 @@ def test_baseline_e2e_sweeps_acquires_arrives(env_car):
         assert ticks and ticks[0]["t"] >= ev["t"]
 
 
+def test_baseline_no_match_resumes_search_e2e(env_car, monkeypatch):
+    """The settle-bug regression (2026-08-11, t20260811-195409-002: the
+    baseline 'acquired' a smartphone 2.5 s in and drove at it for 160 s on
+    goal 'teddy bear'). A fresh WRONG object must not end or hijack the
+    trial: the shared selection rule declares no-match, the rejected ids
+    are masked from further polls, and the sweep RESUMES until the true
+    target is actually seen."""
+    import server as server_mod
+    cfg, rtsm, bridge, rtsm_srv, esp_srv, car, tmp_path = env_car
+    rtsm_srv.visibility = {"fov_deg": 70, "range_m": 8.0}
+    mug = {"id": "mug-1", "score": 0.81, "confirmed": True, "stability": 0.9,
+           "xyz_world": [0.0, 0.3, -1.5]}                    # behind the car
+    junk = {"id": "phone-1", "score": 0.30, "confirmed": True,
+            "stability": 1.0, "xyz_world": [0.0, 0.3, 1.5]}  # in view at start
+    rtsm_srv.semantic_results = [mug, junk]
+    rtsm_srv.objects = {"mug-1": {"label_primary": "red mug"},
+                        "phone-1": {"label_primary": "smartphone"}}
+
+    real = server_mod.select_target_from_hits
+
+    def judging(hits, goal, rtsm_c, cfg_c, **kw):
+        # Stand-in for the LLM's judgment: the true target present -> real
+        # selection rule; only junk visible -> explicit no-match.
+        if any(h.id == "mug-1" for h in hits):
+            return real(hits, goal, rtsm_c, cfg_c, **kw)
+        return None, "haiku_no_match", "only junk visible"
+
+    monkeypatch.setattr(server_mod, "select_target_from_hits", judging)
+
+    with TestClient(create_app(cfg, rtsm, bridge)) as c:
+        r = c.post("/command", json={"goal": "go to the red mug",
+                                     "condition": "baseline"}).json()
+        assert _wait(lambda: _result(c) == "arrived", timeout=30.0)
+
+        records = [json.loads(l) for l in
+                   (tmp_path / f"{r['task_id']}.jsonl").read_text().splitlines()]
+        nm = [rec for rec in records if rec["type"] == "event"
+              and rec["name"] == "baseline_no_match"]
+        assert nm and "phone-1" in nm[0]["rejected_ids"]
+        acq = [rec for rec in records if rec["type"] == "event"
+               and rec["name"] == "baseline_acquired"]
+        assert len(acq) == 1
+        assert acq[0]["target_id"] == "mug-1"                # never the junk
+        assert acq[0]["t"] > nm[0]["t"]                      # rejected, THEN found
+        assert records[-1]["result"] == "arrived"
+
+
 def test_preempt_during_real_nav(env_car):
     cfg, rtsm, bridge, rtsm_srv, esp_srv, car, tmp_path = env_car
     rtsm_srv.semantic_results[0]["xyz_world"] = [0.0, 0.3, 8.0]   # far target

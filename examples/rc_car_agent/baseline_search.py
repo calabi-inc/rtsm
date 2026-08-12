@@ -122,8 +122,14 @@ class BaselineSearcher:
 
     # ── the acquisition loop ─────────────────────────────────────────────
 
-    def acquire(self, query: str, trial_id: str, budget_s: float) -> AcquireResult:
+    def acquire(self, query: str, trial_id: str, budget_s: float,
+                exclude_ids: frozenset = frozenset()) -> AcquireResult:
+        """`exclude_ids`: objects the shared selection rule already judged
+        no-match THIS trial — invisible to further polls, so the search
+        resumes instead of re-acquiring the same wrong object every dwell
+        (and burning an LLM call each time)."""
         b = self._cfg.baseline
+        self._exclude = exclude_ids
         rng = random.Random(derive_seed(b.rng_seed, trial_id))
         sweep_sign = rng.choice((-1.0, 1.0))          # CCW or CW sweep
         t0 = time.monotonic()
@@ -221,6 +227,8 @@ class BaselineSearcher:
         now = self._now_wall()
         fresh = fresh_hits(res.results, now, b.freshness_gate_s,
                            b.clock_skew_tol_s)
+        fresh = [h for h in fresh
+                 if h.id not in getattr(self, "_exclude", frozenset())]
         if not fresh:
             return None
         age = now - fresh[0].last_seen_wall_utc

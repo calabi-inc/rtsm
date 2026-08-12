@@ -38,21 +38,39 @@ _SYSTEM_PROMPT = (
     "Given the user's goal and candidate objects from the robot's spatial "
     "memory (id, label, similarity score, confirmed flag, stability), pick "
     "the single best target. Prefer confirmed, high-stability, high-score "
-    "candidates whose label matches the goal. Respond ONLY via the tool."
+    "candidates whose label matches the goal. Labels come from an automatic "
+    "captioner and are often wrong for the right object (a teddy bear may "
+    "be labeled 'bichon' or 'stuffed toy'), so a plausibly-related label "
+    "with a relatively high score IS a match. But if NO candidate could "
+    "plausibly be the goal object (e.g. goal 'teddy bear' and every "
+    "candidate is clearly furniture/electronics), set no_match=true instead "
+    "of settling for the best-scoring wrong object — driving to a wrong "
+    "object is worse than admitting the target is not visible. Respond "
+    "ONLY via the tool."
 )
 
 _SELECT_TOOL = {
     "name": "select_target",
-    "description": "Select the single best target object for the goal.",
+    "description": ("Select the single best target object for the goal, or "
+                    "declare that no candidate plausibly matches it."),
     "input_schema": {
         "type": "object",
         "properties": {
-            "target_id": {"type": "string", "description": "id of the chosen candidate"},
+            "target_id": {"type": "string",
+                          "description": "id of the chosen candidate; omit "
+                                         "when no_match is true"},
+            "no_match": {"type": "boolean",
+                         "description": "true when NO candidate could "
+                                        "plausibly be the goal object"},
             "reason": {"type": "string", "description": "one short sentence"},
         },
-        "required": ["target_id"],
+        "required": [],
     },
 }
+
+# Sentinel returned by _pick_with_haiku when the model declares no_match —
+# distinct from None (call failed), which falls back to ranked top-1.
+NO_MATCH = "__no_match__"
 
 
 @dataclass(frozen=True)
@@ -108,8 +126,9 @@ def _eligible(hits: List[SemanticHit]) -> List[SemanticHit]:
 
 def _pick_with_haiku(candidates: List[Candidate], goal: str, cfg: Config,
                      anthropic_client) -> Optional[tuple]:
-    """Forced-tool Haiku pick. Returns (target_id, reason) or None on any
-    failure — caller falls back deterministically. Never raises."""
+    """Forced-tool Haiku pick. Returns (target_id, reason), (NO_MATCH,
+    reason) when the model declares nothing plausibly matches, or None on
+    any failure — caller falls back deterministically. Never raises."""
     try:
         lines = [
             f"- id={c.id} label={c.label or 'unknown'} score={c.score:.4f} "
@@ -134,9 +153,12 @@ def _pick_with_haiku(candidates: List[Candidate], goal: str, cfg: Config,
         )
         for block in resp.content:
             if getattr(block, "type", None) == "tool_use":
-                tid = str(block.input.get("target_id", ""))
                 reason = block.input.get("reason")
-                return tid, (str(reason) if reason else None)
+                reason = str(reason) if reason else None
+                if block.input.get("no_match"):
+                    return NO_MATCH, reason
+                tid = str(block.input.get("target_id", ""))
+                return tid, reason
         return None
     except Exception:  # noqa: BLE001 — LLM path must never break planning
         return None
@@ -161,10 +183,15 @@ def select_target_from_hits(hits, goal: str, rtsm: RtsmClient, cfg: Config,
     forced-tool Haiku pick over the given candidates, deterministic
     ranked-top-1 fallback.
 
-    Returns (picked: Candidate, planner_path, reason) or None if no
-    candidate is eligible. `hits` is whatever candidate set the caller is
-    ALLOWED to see — all of memory for condition (a), the freshness-gated
-    currently-visible set for condition (b)."""
+    Returns (picked: Candidate, planner_path, reason); picked is None with
+    planner_path "haiku_no_match" when the LLM explicitly declared that no
+    candidate plausibly matches the goal (respected, NOT overridden by the
+    top-1 fallback — settling on a wrong object is the failure mode this
+    exists to prevent, observed live 2026-08-11: baseline drove at a
+    smartphone for 160 s on goal 'teddy bear'). Returns None only when no
+    candidate is even eligible. `hits` is whatever candidate set the
+    caller is ALLOWED to see — all of memory for condition (a), the
+    freshness-gated currently-visible set for condition (b)."""
     eligible = _eligible(hits)
     if not eligible:
         return None
@@ -191,6 +218,8 @@ def select_target_from_hits(hits, goal: str, rtsm: RtsmClient, cfg: Config,
     )
     if client is not None:
         out = _pick_with_haiku(candidates, goal, cfg, client)
+        if out is not None and out[0] == NO_MATCH:
+            return None, "haiku_no_match", out[1]   # respected, no fallback
         if out is not None and out[0] in by_id:
             picked = by_id[out[0]]
             planner_path = "haiku"
@@ -219,6 +248,11 @@ def plan(goal: str, rtsm: RtsmClient, cfg: Config,
                           plan_pose=res.robot_pose, frame_epoch=plan_epoch,
                           reason=detail)
     picked, planner_path, reason = sel
+    if picked is None:                       # LLM declared no plausible match
+        return PlanResult(status="not_found", goal=goal, query=query,
+                          planner_path=planner_path, plan_pose=res.robot_pose,
+                          frame_epoch=plan_epoch,
+                          reason=reason or "no candidate plausibly matches")
 
     return PlanResult(
         status="ok", goal=goal, query=query,

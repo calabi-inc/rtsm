@@ -68,7 +68,8 @@ def rtsm_env():
 class FakeLLM:
     """Duck-typed anthropic client: .messages.create -> canned tool_use."""
 
-    def __init__(self, target_id, reason="matches goal", raise_exc=False):
+    def __init__(self, target_id, reason="matches goal", raise_exc=False,
+                 no_match=False):
         self.calls = []
         outer = self
 
@@ -77,10 +78,9 @@ class FakeLLM:
                 outer.calls.append(kw)
                 if raise_exc:
                     raise RuntimeError("api down")
-                block = SimpleNamespace(
-                    type="tool_use",
-                    input={"target_id": target_id, "reason": reason},
-                )
+                inp = ({"no_match": True, "reason": reason} if no_match
+                       else {"target_id": target_id, "reason": reason})
+                block = SimpleNamespace(type="tool_use", input=inp)
                 return SimpleNamespace(content=[block])
 
         self.messages = _Messages()
@@ -125,6 +125,20 @@ def test_llm_exception_falls_back(rtsm_env):
     r = plan("go to the red mug", client, cfg,
              anthropic_client=FakeLLM("obj_7", raise_exc=True))
     assert (r.planner_path, r.target_id) == ("top1_fallback", "obj_7")
+
+
+def test_haiku_no_match_is_respected_not_overridden(rtsm_env):
+    """The LLM declaring 'nothing plausibly matches' must produce a clean
+    not_found — NEVER the ranked-top-1 fallback. The fallback overriding
+    an explicit no-match is exactly the settle bug that drove the baseline
+    at a smartphone for 160 s on 'teddy bear' (2026-08-11)."""
+    _, client, cfg = rtsm_env
+    llm = FakeLLM(None, reason="all candidates are furniture", no_match=True)
+    r = plan("go to the teddy bear", client, cfg, anthropic_client=llm)
+    assert r.status == "not_found"
+    assert r.planner_path == "haiku_no_match"
+    assert r.target_id is None
+    assert r.reason == "all candidates are furniture"
 
 
 def test_no_llm_path(rtsm_env, monkeypatch):

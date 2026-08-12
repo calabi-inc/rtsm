@@ -576,22 +576,33 @@ class AgentServer:
             cancel_event=self._cancel, shutdown_event=self._shutdown,
             logger=logger, progress=task,
         )
-        try:
-            # The searcher's deadline must coincide with the mission clock:
-            # logger/plan overhead before this point already spent budget.
-            acq = searcher.acquire(query, task["task_id"],
-                                   max(0.0, budget - (time.monotonic() - t0)))
-        except Exception as e:  # noqa: BLE001 — a search crash must stop the car
-            self.bridge.stop()
-            result, detail = "search_error", f"{type(e).__name__}: {e}"
-            if logger is not None:
-                logger.log_end(result, detail, elapsed_s=time.monotonic() - t0)
-            return result, detail
+        # Acquire -> select LOOP: when the shared selection rule declares
+        # the fresh set contains no plausible match, the search RESUMES
+        # (rejected ids masked) instead of settling or ending the trial —
+        # a memoryless agent that sees only wrong objects must keep
+        # looking. Observed live 2026-08-11 (t20260811-195409-002): the
+        # forced pick drove at a smartphone for 160 s on 'teddy bear'.
+        rejected: set = set()
+        picked = None
+        while True:
+            try:
+                # The searcher's deadline must coincide with the mission
+                # clock: logger/plan/selection overhead already spent budget.
+                acq = searcher.acquire(query, task["task_id"],
+                                       max(0.0, budget - (time.monotonic() - t0)),
+                                       exclude_ids=frozenset(rejected))
+            except Exception as e:  # noqa: BLE001 — a search crash must stop the car
+                self.bridge.stop()
+                result, detail = "search_error", f"{type(e).__name__}: {e}"
+                if logger is not None:
+                    logger.log_end(result, detail,
+                                   elapsed_s=time.monotonic() - t0)
+                return result, detail
 
-        if acq.status != "acquired":
-            result = acq.status
-            detail = acq.detail or f"search ended after {acq.sweeps} sweeps"
-        else:
+            if acq.status != "acquired":
+                result = acq.status
+                detail = acq.detail or f"search ended after {acq.sweeps} sweeps"
+                break
             # SAME selection rule as condition (a), applied over the
             # freshness-gated (currently visible) set — the comparison
             # masks persistence, never target-selection intelligence.
@@ -605,6 +616,22 @@ class AgentServer:
                                    elapsed_s=time.monotonic() - t0)
                 return result, detail
             picked, sel_path, sel_reason = sel
+            if picked is None:                       # LLM: nothing plausible
+                ids = [h.id for h in acq.hits]
+                rejected.update(ids)
+                if logger is not None:
+                    logger.log_event(
+                        "baseline_no_match", time.monotonic() - t0,
+                        rejected_ids=ids, reason=sel_reason,
+                        sweeps=acq.sweeps,
+                        search_time_s=round(acq.elapsed_s, 3))
+                if time.monotonic() - t0 >= budget:
+                    result, detail = "timeout", "budget exhausted in search"
+                    break
+                continue                             # resume the sweep
+            break                                    # real pick -> drive
+
+        if picked is not None:
             planner_path = ("baseline_fresh_haiku" if sel_path == "haiku"
                             else "baseline_fresh_top1")
             task["planner_path"] = planner_path
