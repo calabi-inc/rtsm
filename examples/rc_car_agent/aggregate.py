@@ -25,10 +25,10 @@ Definitions (locked E1 protocol; censoring + exclusion semantics audited
         counts taped trials PLUS untaped failures; untaped ARRIVALS are
         loudly reported as a coverage hole.
   TTA   EVERY non-arrived trial is a failure-before-arrival at a cap.
-        Per-condition medians: failures at the CONDITION's cap (60/180 s)
-        — descriptive. Mann-Whitney: failures of BOTH arms at the COMMON
-        horizon (180 s) — asymmetric caps are anti-conservative for the
-        one-sided rank test. Arrivals-only sensitivity variant reported.
+        Per-condition medians: failures at the CONDITION's cap (900 s
+        both, symmetric — amended 2026-08-10, see TIMEOUT_CAP_S) —
+        descriptive. Mann-Whitney: failures of BOTH arms at the COMMON
+        horizon (900 s). Arrivals-only sensitivity variant reported.
         Budgets are hard TOTAL clocks in both conditions (planning and
         search both count).
   Clustering  Trials share layout geometry (6/condition/layout); the
@@ -55,7 +55,11 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
-TIMEOUT_CAP_S = {"rtsm": 60.0, "baseline": 180.0}
+# 2026-08-10 budget amendment (E1_PROTOCOL.md header): symmetric 900 s for
+# both conditions — the calibrated 0.04 m/s effective speed made the
+# original 60/180 caps censor mid-drive. Pre-campaign; no data under the
+# old budgets.
+TIMEOUT_CAP_S = {"rtsm": 900.0, "baseline": 900.0}
 COMMON_HORIZON_S = max(TIMEOUT_CAP_S.values())
 BUDGET_TOLERANCE_S = 2.0
 TCR_SWEEP_CM = (40.0, 50.0, 60.0)
@@ -126,7 +130,11 @@ def parse_trial(path: Path) -> Optional[dict]:
         "budget_s": budget,
         "is_calibrated": cfg.get("is_calibrated"),
         "rig_id": cfg.get("rig_id"),
-        "search_time_s": search.get("search_time_s") if search else None,
+        # Acquisition time on the MISSION clock (event t), not the event's
+        # search_time_s: the no-match resume loop (2026-08-11) re-invokes
+        # the searcher, so search_time_s only covers the FINAL segment —
+        # t spans command receipt -> acquisition, the honest search cost.
+        "search_time_s": search.get("t") if search else None,
         "planner_path": (start.get("planner") or {}).get("planner_path"),
     }
 

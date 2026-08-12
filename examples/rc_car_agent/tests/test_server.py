@@ -455,7 +455,10 @@ def test_baseline_e2e_sweeps_acquires_arrives(env_car):
         parsed = parse_trial(log_path)
         assert parsed["optimal_m"] is not None and parsed["optimal_m"] > 0.5
         assert parsed["path_len_m"] is not None
-        assert parsed["search_time_s"] == ev["search_time_s"]
+        # Search cost = mission-clock time of acquisition (event t), NOT
+        # the event's search_time_s: the no-match resume loop makes that
+        # field per-segment only (2026-08-11).
+        assert parsed["search_time_s"] == ev["t"]
         # Drive ticks share the MISSION clock: they come after acquisition.
         ticks = [rec for rec in records if rec["type"] == "tick"]
         assert ticks and ticks[0]["t"] >= ev["t"]

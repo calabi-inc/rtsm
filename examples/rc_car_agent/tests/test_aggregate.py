@@ -9,8 +9,8 @@ import math
 
 import pytest
 
-from aggregate import (COMMON_HORIZON_S, mann_whitney_u, parse_trial,
-                       summarize)
+from aggregate import (COMMON_HORIZON_S, TIMEOUT_CAP_S, mann_whitney_u,
+                       parse_trial, summarize)
 
 
 def _write_trial(dirp, trial_id, condition, result, tta=None, elapsed=None,
@@ -21,7 +21,7 @@ def _write_trial(dirp, trial_id, condition, result, tta=None, elapsed=None,
     trial_start; baseline trials carry them ONLY on the acquired event."""
     is_baseline = condition == "baseline"
     if budget is None:
-        budget = 180.0 if is_baseline else 60.0
+        budget = TIMEOUT_CAP_S[condition]    # track the protocol's locked cap
     lines = [{
         "type": "trial_start", "schema_version": 1, "trial_id": trial_id,
         "condition": condition, "goal": "go to the red mug",
@@ -33,9 +33,10 @@ def _write_trial(dirp, trial_id, condition, result, tta=None, elapsed=None,
         "plan_pose": (None if is_baseline
                       else {"xyz": list(start_xyz), "timestamp": 1.0,
                             "frame_epoch": 7}),
-        "config": {"timeout_rtsm_s": 60.0 if not is_baseline else 60.0,
-                   "timeout_baseline_s": budget if is_baseline else 180.0,
-                   **({"timeout_rtsm_s": budget} if not is_baseline else {}),
+        "config": {"timeout_rtsm_s": (budget if not is_baseline
+                                      else TIMEOUT_CAP_S["rtsm"]),
+                   "timeout_baseline_s": (budget if is_baseline
+                                          else TIMEOUT_CAP_S["baseline"]),
                    "is_calibrated": calibrated, "rig_id": rig},
         "provenance": {"git_commit": "abc"}, "rng_seed": 7 if is_baseline else None,
         "layout_id": layout, "start_pose_id": None, "session_id": None,
@@ -77,7 +78,7 @@ def test_parse_trial_fields(tmp_path):
     assert t["tta_s"] == 12.5 and t["tape_cm"] == 30
     assert t["path_len_m"] == pytest.approx(2.0)
     assert t["optimal_m"] == pytest.approx(3.0)
-    assert t["budget_s"] == 60.0
+    assert t["budget_s"] == TIMEOUT_CAP_S["rtsm"]
 
 
 def test_baseline_pe_denominator_from_event(tmp_path):
@@ -219,8 +220,11 @@ def test_censored_enter_per_condition_cap_for_medians(tmp_path):
                  search_time=70.0)
     _write_trial(tmp_path, "t-b2", "baseline", "timeout", elapsed=180.0)
     s = summarize(tmp_path)
-    assert s["conditions"]["rtsm"]["tta_median_s"] == pytest.approx(35.0)
-    assert s["conditions"]["baseline"]["tta_median_s"] == pytest.approx(140.0)
+    r_cap, b_cap = TIMEOUT_CAP_S["rtsm"], TIMEOUT_CAP_S["baseline"]
+    assert s["conditions"]["rtsm"]["tta_median_s"] == pytest.approx(
+        (10.0 + r_cap) / 2)
+    assert s["conditions"]["baseline"]["tta_median_s"] == pytest.approx(
+        (100.0 + b_cap) / 2)
 
 
 def test_aborted_trials_enter_at_cap_not_excluded(tmp_path):
@@ -232,7 +236,8 @@ def test_aborted_trials_enter_at_cap_not_excluded(tmp_path):
     r = s["conditions"]["rtsm"]
     assert r["aborted"] == 1
     assert r["tta_n"] == 2                          # abort included at cap
-    assert r["tta_median_s"] == pytest.approx((10.0 + 60.0) / 2)
+    assert r["tta_median_s"] == pytest.approx(
+        (10.0 + TIMEOUT_CAP_S["rtsm"]) / 2)
 
 
 # ── TCR (the review's denominator inversion) ─────────────────────────────
@@ -334,4 +339,8 @@ def test_mw_empty_side_is_none():
 
 
 def test_common_horizon_constant():
-    assert COMMON_HORIZON_S == 180.0
+    # Pins the 2026-08-10 pre-campaign budget amendment: 900 s symmetric
+    # (E1_PROTOCOL.md header). If this fails, someone changed the caps —
+    # which invalidates any already-collected campaign data.
+    assert COMMON_HORIZON_S == 900.0
+    assert TIMEOUT_CAP_S == {"rtsm": 900.0, "baseline": 900.0}

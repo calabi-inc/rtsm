@@ -48,14 +48,14 @@ planner:
   fallback: "top1"                     # deterministic fallback if the API is down (logged per trial)
 
 baseline:
-  freshness_gate_s: 2.0                # only objects seen within this window count as "currently visible"
+  freshness_gate_s: 4.0                # only objects seen within this window count as "currently visible". 2026-08-11: 2.0 was inside the real upsert lag under ingest load (bear invisible while the camera stared at it, t20260811-233410-001); 4.0 ~ one sweep-step cycle, so each poll covers the whole previous step — still unambiguously "now" vs 900 s trials
   rng_seed: 0                          # per-trial seed is logged; 0 â†’ derive from trial_id (v1 policy uses it only for sweep direction)
-  sweep_step_turn: 0.4                 # differential magnitude of one rotate step
-  sweep_step_s: 0.5                    # one rotate step (~30-40Â° at calibrated turn rate)
+  sweep_step_turn: 0.65                # rotate-step differential — 0.4 was AT the measured motor stall floor (car hummed, 0 sweeps in 310 s, t20260811-233410-001); 0.65 is the calibration-proven rotation command (~12 deg/s)
+  sweep_step_s: 2.5                    # one rotate step ~30 deg at the CALIBRATED turn rate (0.65 x 0.327 rad/s); the old 0.5 s gave 3.7 deg/step
   dwell_s: 1.2                         # observe pause after each step (frames must arrive + pipeline must process)
-  steps_per_sweep: 12                  # rotate steps per full sweep before relocating
-  walk_speed: 0.3                      # forward relocation speed between sweeps
-  walk_s: 1.2                          # forward relocation duration
+  steps_per_sweep: 12                  # 12 x ~30 deg = a true 360 deg sweep before relocating
+  walk_speed: 0.5                      # forward relocation — 0.3 was below the ~0.4 stall floor; 0.5 is the calibrated straight-drive command
+  walk_s: 3.0                          # ~12 cm relocation at the calibrated 0.04 m/s effective speed
   query_top_k: 5
   gate_fetch_k: 50                     # fetch depth for gated polls â€” top-5 over ALL memory would let stale objects crowd out a visible target
   clock_skew_tol_s: 0.5                # stamps ahead of our clock beyond this are rejected (backward wall-clock step guard)
