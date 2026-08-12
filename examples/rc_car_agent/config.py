@@ -97,6 +97,13 @@ class PlannerCfg:
     model: str
     api_timeout_s: float
     fallback: str
+    # Attach each candidate's latest camera crop to the selection call so
+    # the LLM judges by the IMAGE, not the captioner's label (labels lie:
+    # the teddy bear was captioned 'audio' and rejected mid-search,
+    # t20260811-200758-001). Best-effort — a missing crop degrades that
+    # candidate to text-only, never blocks.
+    include_snapshots: bool = True
+    snapshot_max_candidates: int = 8     # bounds tokens/latency per pick
 
 
 @dataclass(frozen=True)

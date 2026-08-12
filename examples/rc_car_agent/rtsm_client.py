@@ -142,6 +142,24 @@ class RtsmClient:
         except (requests.RequestException, ValueError):
             return None
 
+    def get_object_snapshot_b64(self, object_id: str) -> Optional[str]:
+        """Base64 JPEG of the object's most recent observation crop via
+        GET /objects/{id}/snapshots/0/image, or None on any failure —
+        snapshots are best-effort evidence, never a blocker. Added after
+        t20260811-200758-001: the captioner labeled the teddy bear 'audio'
+        and the label-only selector rejected the RIGHT object mid-search;
+        the crop is the ground truth the labels approximate."""
+        try:
+            r = requests.get(
+                f"{self.base_url}/objects/{object_id}/snapshots/0/image",
+                timeout=self.timeout_s,
+            )
+            r.raise_for_status()
+            import base64
+            return base64.standard_b64encode(r.content).decode("ascii")
+        except (requests.RequestException, ValueError):
+            return None
+
     def semantic_query(self, query: str, top_k: int = 5) -> SemanticResult:
         """One /search/semantic call — carries BOTH results and robot_pose,
         which is the client-side MemorySlice assembly (one atomic snapshot)."""

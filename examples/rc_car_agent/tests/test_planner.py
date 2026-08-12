@@ -38,6 +38,14 @@ OBJECTS = {
 class _Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         path = self.path.split("?")[0]
+        raw = getattr(self.server, "raw_routes", {}).get(path)
+        if raw is not None:                    # bytes route (snapshot JPEGs)
+            self.send_response(200)
+            self.send_header("Content-Type", "image/jpeg")
+            self.send_header("Content-Length", str(len(raw)))
+            self.end_headers()
+            self.wfile.write(raw)
+            return
         payload = self.server.routes.get(path)
         if payload is None:
             self.send_response(404)
@@ -110,7 +118,9 @@ def test_haiku_pick_valid_id(rtsm_env):
     # the forced-tool contract actually went out
     kw = llm.calls[0]
     assert kw["tool_choice"] == {"type": "tool", "name": "select_target"}
-    assert "obj_7" in kw["messages"][0]["content"]
+    texts = " ".join(b["text"] for b in kw["messages"][0]["content"]
+                     if b.get("type") == "text")
+    assert "obj_7" in texts
 
 
 def test_hallucinated_id_falls_back(rtsm_env):
@@ -125,6 +135,39 @@ def test_llm_exception_falls_back(rtsm_env):
     r = plan("go to the red mug", client, cfg,
              anthropic_client=FakeLLM("obj_7", raise_exc=True))
     assert (r.planner_path, r.target_id) == ("top1_fallback", "obj_7")
+
+
+def test_snapshots_attached_as_image_blocks(rtsm_env):
+    """Candidates' camera crops ride along as base64 image blocks so the
+    LLM judges by the image, not the captioner's label (which called the
+    real teddy bear 'audio' and got it rejected, t20260811-200758-001)."""
+    import base64
+    srv, client, cfg = rtsm_env
+    srv.raw_routes = {
+        "/objects/obj_7/snapshots/0/image": b"\xff\xd8mugjpeg",
+        "/objects/obj_2/snapshots/0/image": b"\xff\xd8cupjpeg",
+    }
+    llm = FakeLLM("obj_7")
+    r = plan("go to the red mug", client, cfg, anthropic_client=llm)
+    assert r.status == "ok"
+    content = llm.calls[0]["messages"][0]["content"]
+    imgs = [b for b in content if b.get("type") == "image"]
+    assert len(imgs) == 2                      # obj_9 has no xyz -> not eligible
+    # confirmed-first ordering: obj_7's crop is the first image block
+    assert imgs[0]["source"]["data"] == base64.standard_b64encode(
+        b"\xff\xd8mugjpeg").decode("ascii")
+    assert imgs[0]["source"]["media_type"] == "image/jpeg"
+
+
+def test_missing_snapshots_degrade_to_text_only(rtsm_env):
+    """Snapshot endpoint 404s (or RTSM hiccups) -> the pick still goes out
+    with text-only candidates. Crops are evidence, never a dependency."""
+    _, client, cfg = rtsm_env                  # no raw_routes -> all 404
+    llm = FakeLLM("obj_7")
+    r = plan("go to the red mug", client, cfg, anthropic_client=llm)
+    assert (r.status, r.target_id) == ("ok", "obj_7")
+    content = llm.calls[0]["messages"][0]["content"]
+    assert not [b for b in content if b.get("type") == "image"]
 
 
 def test_haiku_no_match_is_respected_not_overridden(rtsm_env):

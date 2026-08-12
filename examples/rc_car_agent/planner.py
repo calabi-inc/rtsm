@@ -36,17 +36,17 @@ from rtsm_client import PoseSample, RtsmClient, SemanticHit
 _SYSTEM_PROMPT = (
     "You are the target-selection step of a robot navigation planner. "
     "Given the user's goal and candidate objects from the robot's spatial "
-    "memory (id, label, similarity score, confirmed flag, stability), pick "
-    "the single best target. Prefer confirmed, high-stability, high-score "
-    "candidates whose label matches the goal. Labels come from an automatic "
-    "captioner and are often wrong for the right object (a teddy bear may "
-    "be labeled 'bichon' or 'stuffed toy'), so a plausibly-related label "
-    "with a relatively high score IS a match. But if NO candidate could "
-    "plausibly be the goal object (e.g. goal 'teddy bear' and every "
-    "candidate is clearly furniture/electronics), set no_match=true instead "
-    "of settling for the best-scoring wrong object — driving to a wrong "
-    "object is worse than admitting the target is not visible. Respond "
-    "ONLY via the tool."
+    "memory (id, label, similarity score, confirmed flag, stability, and "
+    "usually the candidate's latest camera crop), pick the single best "
+    "target. When a candidate has an image, the IMAGE is the primary "
+    "evidence — labels come from an automatic captioner and are often "
+    "wrong for the right object (a real teddy bear has been labeled "
+    "'audio' and 'bichon'), so decide from what the crop actually shows "
+    "and treat the label as a hint only. Prefer confirmed, high-stability "
+    "candidates. If NO candidate could plausibly be the goal object "
+    "(check every image first), set no_match=true instead of settling for "
+    "the best-scoring wrong object — driving to a wrong object is worse "
+    "than admitting the target is not visible. Respond ONLY via the tool."
 )
 
 _SELECT_TOOL = {
@@ -125,16 +125,30 @@ def _eligible(hits: List[SemanticHit]) -> List[SemanticHit]:
 
 
 def _pick_with_haiku(candidates: List[Candidate], goal: str, cfg: Config,
-                     anthropic_client) -> Optional[tuple]:
+                     anthropic_client,
+                     snapshots: Optional[dict] = None) -> Optional[tuple]:
     """Forced-tool Haiku pick. Returns (target_id, reason), (NO_MATCH,
     reason) when the model declares nothing plausibly matches, or None on
-    any failure — caller falls back deterministically. Never raises."""
+    any failure — caller falls back deterministically. Never raises.
+    `snapshots`: optional {id: base64 JPEG} — candidates with a crop are
+    judged visually (labels lie; see _SYSTEM_PROMPT)."""
     try:
-        lines = [
-            f"- id={c.id} label={c.label or 'unknown'} score={c.score:.4f} "
-            f"confirmed={c.confirmed} stability={c.stability:.2f}"
-            for c in candidates
-        ]
+        snapshots = snapshots or {}
+        content: list = [{"type": "text", "text": f"Goal: {goal}\nCandidates:"}]
+        for c in candidates:
+            content.append({
+                "type": "text",
+                "text": f"- id={c.id} label={c.label or 'unknown'} "
+                        f"score={c.score:.4f} confirmed={c.confirmed} "
+                        f"stability={c.stability:.2f}",
+            })
+            b64 = snapshots.get(c.id)
+            if b64:
+                content.append({
+                    "type": "image",
+                    "source": {"type": "base64", "media_type": "image/jpeg",
+                               "data": b64},
+                })
         resp = anthropic_client.messages.create(
             model=cfg.planner.model,
             max_tokens=200,
@@ -145,10 +159,7 @@ def _pick_with_haiku(candidates: List[Candidate], goal: str, cfg: Config,
             }],
             tools=[_SELECT_TOOL],
             tool_choice={"type": "tool", "name": "select_target"},
-            messages=[{
-                "role": "user",
-                "content": f"Goal: {goal}\nCandidates:\n" + "\n".join(lines),
-            }],
+            messages=[{"role": "user", "content": content}],
             timeout=cfg.planner.api_timeout_s,
         )
         for block in resp.content:
@@ -217,7 +228,14 @@ def select_target_from_hits(hits, goal: str, rtsm: RtsmClient, cfg: Config,
         _default_anthropic_client(cfg) if use_llm else None
     )
     if client is not None:
-        out = _pick_with_haiku(candidates, goal, cfg, client)
+        snapshots = None
+        if cfg.planner.include_snapshots:
+            snapshots = {
+                c.id: rtsm.get_object_snapshot_b64(c.id)
+                for c in candidates[:cfg.planner.snapshot_max_candidates]
+            }
+        out = _pick_with_haiku(candidates, goal, cfg, client,
+                               snapshots=snapshots)
         if out is not None and out[0] == NO_MATCH:
             return None, "haiku_no_match", out[1]   # respected, no fallback
         if out is not None and out[0] in by_id:
