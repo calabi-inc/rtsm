@@ -11,6 +11,16 @@ The "isn't memory obvious?" answer, with receipts:
    2608.06729, Aug 2026: voxel-hashed persistent world state) and
    Spatial Memory for Out-of-Vision Manipulation (arXiv 2605.22283) —
    i.e., the gap was just admitted IN the VLA literature itself.
+   **SCALE DISTINCTION (bind the prose — user catch 2026-08-12): those
+   retrofits are WITHIN-EPISODE perception memory (seconds, voxel/
+   feature-level, inside the policy loop, for manipulation). RTSM is
+   the COMPLEMENTARY layer: cross-task/cross-session, object-level,
+   external to any policy, queried by the planner. E1 tests ONLY this
+   layer — our rig contains no VLA. Never imply RTSM fixes VLA
+   internals; frame the retrofits as evidence the topic went urgent,
+   and the two layers as composable (they remember the mug from ten
+   seconds ago mid-grasp; we remember the mug from yesterday in the
+   kitchen).**
 2. **Why the field skipped it:** (a) episodic benchmarks reset the
    world every trial, so persistence cannot score; (b) bitter-lesson
    culture treats maps/memory as hand-engineered structure ("Is
