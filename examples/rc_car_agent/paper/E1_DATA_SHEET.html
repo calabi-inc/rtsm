@@ -1,0 +1,203 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>E1 Data Sheets</title>
+<style>
+  body { font-family: Arial, Helvetica, sans-serif; color: #000; background: #fff;
+         margin: 0; padding: 24px; font-size: 13px; }
+  .sheet { page-break-after: always; }
+  .sheet:last-child { page-break-after: auto; }
+  h1 { font-size: 18px; margin: 0 0 2px 0; }
+  .sub { color: #444; margin: 0 0 14px 0; font-size: 12px; }
+  .meta { display: flex; flex-wrap: wrap; gap: 10px 28px; margin-bottom: 14px; }
+  .meta span { display: inline-block; min-width: 150px; }
+  .blank { display: inline-block; border-bottom: 1px solid #000; min-width: 90px; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { border: 1px solid #000; padding: 6px 8px; text-align: left; }
+  th { background: #eee; font-size: 12px; }
+  td.num { text-align: center; width: 26px; }
+  td.cond { width: 76px; font-weight: bold; }
+  td.goal { width: 130px; }
+  td.tape { width: 90px; }
+  td.chk { width: 52px; text-align: center; font-size: 16px; }
+  tr { height: 34px; }
+  .rules { margin-top: 12px; font-size: 11.5px; color: #222; line-height: 1.5; }
+  .rules b { font-size: 12px; }
+  @media print { body { padding: 8mm; } }
+</style>
+</head>
+<body>
+
+<div class="sheet">
+  <h1>E1 Data Sheet — Layout L1</h1>
+  <p class="sub">memory = plans from the scan | search = must find it live | L1 starts with <b>memory</b></p>
+  <div class="meta">
+    <span>Date: <span class="blank"></span></span>
+    <span>Session id: <span class="blank"></span></span>
+    <span>Battery at boot (mV): <span class="blank"></span></span>
+    <span>Scan time (min): <span class="blank"></span></span>
+    <span>Wide photo taken: &#9744;</span>
+    <span>All 5 objects verified findable: &#9744;</span>
+  </div>
+  <table>
+    <tr><th>#</th><th>condition</th><th>goal</th><th>tape (cm)</th><th>photo</th><th>redo?</th><th>notes (INVALID reason, anything odd)</th></tr>
+    <tr><td class="num">1</td><td class="cond">memory</td><td class="goal">bear</td><td class="tape"></td><td class="chk">&#9744;</td><td class="chk">&#9744;</td><td></td></tr>
+    <tr><td class="num">2</td><td class="cond">search</td><td class="goal">bear</td><td class="tape"></td><td class="chk">&#9744;</td><td class="chk">&#9744;</td><td></td></tr>
+    <tr><td class="num">3</td><td class="cond">memory</td><td class="goal">soda can</td><td class="tape"></td><td class="chk">&#9744;</td><td class="chk">&#9744;</td><td></td></tr>
+    <tr><td class="num">4</td><td class="cond">search</td><td class="goal">soda can</td><td class="tape"></td><td class="chk">&#9744;</td><td class="chk">&#9744;</td><td></td></tr>
+    <tr><td class="num">5</td><td class="cond">memory</td><td class="goal">sponge</td><td class="tape"></td><td class="chk">&#9744;</td><td class="chk">&#9744;</td><td></td></tr>
+    <tr><td class="num">6</td><td class="cond">search</td><td class="goal">sponge</td><td class="tape"></td><td class="chk">&#9744;</td><td class="chk">&#9744;</td><td></td></tr>
+    <tr><td class="num">7</td><td class="cond">memory</td><td class="goal">sprayer</td><td class="tape"></td><td class="chk">&#9744;</td><td class="chk">&#9744;</td><td></td></tr>
+    <tr><td class="num">8</td><td class="cond">search</td><td class="goal">sprayer</td><td class="tape"></td><td class="chk">&#9744;</td><td class="chk">&#9744;</td><td></td></tr>
+    <tr><td class="num">9</td><td class="cond">memory</td><td class="goal">water bottle</td><td class="tape"></td><td class="chk">&#9744;</td><td class="chk">&#9744;</td><td></td></tr>
+    <tr><td class="num">10</td><td class="cond">search</td><td class="goal">water bottle</td><td class="tape"></td><td class="chk">&#9744;</td><td class="chk">&#9744;</td><td></td></tr>
+    <tr><td class="num">11</td><td class="cond">memory</td><td class="goal">bear (repeat)</td><td class="tape"></td><td class="chk">&#9744;</td><td class="chk">&#9744;</td><td></td></tr>
+    <tr><td class="num">12</td><td class="cond">search</td><td class="goal">bear (repeat)</td><td class="tape"></td><td class="chk">&#9744;</td><td class="chk">&#9744;</td><td></td></tr>
+  </table>
+  <p class="rules">
+    <b>Every trial:</b> car on the X (nose on the arrow) &rarr; hands off &rarr; car stops &rarr; tape from wheel-center to object base &rarr; photo &rarr; gentle carry back to X (camera uncovered).<br>
+    <b>Phone died / Lens crashed mid-trial:</b> write INVALID in notes, tick redo, run the same row again.<br>
+    <b>Battery below 7.0 V:</b> finish the current pair, then stop and charge. Stop only between pairs.<br>
+    <b>Never move any object tonight.</b> Objects move only between layouts.
+  </p>
+</div>
+
+<div class="sheet">
+  <h1>E1 Data Sheet — Layout L2</h1>
+  <p class="sub">memory = plans from the scan | search = must find it live | L2 starts with <b>search</b></p>
+  <div class="meta">
+    <span>Date: <span class="blank"></span></span>
+    <span>Session id: <span class="blank"></span></span>
+    <span>Battery at boot (mV): <span class="blank"></span></span>
+    <span>Scan time (min): <span class="blank"></span></span>
+    <span>Wide photo taken: &#9744;</span>
+    <span>All 5 objects verified findable: &#9744;</span>
+  </div>
+  <table>
+    <tr><th>#</th><th>condition</th><th>goal</th><th>tape (cm)</th><th>photo</th><th>redo?</th><th>notes (INVALID reason, anything odd)</th></tr>
+    <tr><td class="num">1</td><td class="cond">search</td><td class="goal">soda can</td><td class="tape"></td><td class="chk">&#9744;</td><td class="chk">&#9744;</td><td></td></tr>
+    <tr><td class="num">2</td><td class="cond">memory</td><td class="goal">soda can</td><td class="tape"></td><td class="chk">&#9744;</td><td class="chk">&#9744;</td><td></td></tr>
+    <tr><td class="num">3</td><td class="cond">search</td><td class="goal">sponge</td><td class="tape"></td><td class="chk">&#9744;</td><td class="chk">&#9744;</td><td></td></tr>
+    <tr><td class="num">4</td><td class="cond">memory</td><td class="goal">sponge</td><td class="tape"></td><td class="chk">&#9744;</td><td class="chk">&#9744;</td><td></td></tr>
+    <tr><td class="num">5</td><td class="cond">search</td><td class="goal">sprayer</td><td class="tape"></td><td class="chk">&#9744;</td><td class="chk">&#9744;</td><td></td></tr>
+    <tr><td class="num">6</td><td class="cond">memory</td><td class="goal">sprayer</td><td class="tape"></td><td class="chk">&#9744;</td><td class="chk">&#9744;</td><td></td></tr>
+    <tr><td class="num">7</td><td class="cond">search</td><td class="goal">water bottle</td><td class="tape"></td><td class="chk">&#9744;</td><td class="chk">&#9744;</td><td></td></tr>
+    <tr><td class="num">8</td><td class="cond">memory</td><td class="goal">water bottle</td><td class="tape"></td><td class="chk">&#9744;</td><td class="chk">&#9744;</td><td></td></tr>
+    <tr><td class="num">9</td><td class="cond">search</td><td class="goal">bear</td><td class="tape"></td><td class="chk">&#9744;</td><td class="chk">&#9744;</td><td></td></tr>
+    <tr><td class="num">10</td><td class="cond">memory</td><td class="goal">bear</td><td class="tape"></td><td class="chk">&#9744;</td><td class="chk">&#9744;</td><td></td></tr>
+    <tr><td class="num">11</td><td class="cond">search</td><td class="goal">soda can (repeat)</td><td class="tape"></td><td class="chk">&#9744;</td><td class="chk">&#9744;</td><td></td></tr>
+    <tr><td class="num">12</td><td class="cond">memory</td><td class="goal">soda can (repeat)</td><td class="tape"></td><td class="chk">&#9744;</td><td class="chk">&#9744;</td><td></td></tr>
+  </table>
+  <p class="rules">
+    <b>Every trial:</b> car on the X (nose on the arrow) &rarr; hands off &rarr; car stops &rarr; tape from wheel-center to object base &rarr; photo &rarr; gentle carry back to X (camera uncovered).<br>
+    <b>Phone died / Lens crashed mid-trial:</b> write INVALID in notes, tick redo, run the same row again.<br>
+    <b>Battery below 7.0 V:</b> finish the current pair, then stop and charge. Stop only between pairs.<br>
+    <b>Never move any object tonight.</b> Objects move only between layouts.
+  </p>
+</div>
+
+<div class="sheet">
+  <h1>E1 Data Sheet — Layout L3</h1>
+  <p class="sub">memory = plans from the scan | search = must find it live | L3 starts with <b>memory</b></p>
+  <div class="meta">
+    <span>Date: <span class="blank"></span></span>
+    <span>Session id: <span class="blank"></span></span>
+    <span>Battery at boot (mV): <span class="blank"></span></span>
+    <span>Scan time (min): <span class="blank"></span></span>
+    <span>Wide photo taken: &#9744;</span>
+    <span>All 5 objects verified findable: &#9744;</span>
+  </div>
+  <table>
+    <tr><th>#</th><th>condition</th><th>goal</th><th>tape (cm)</th><th>photo</th><th>redo?</th><th>notes (INVALID reason, anything odd)</th></tr>
+    <tr><td class="num">1</td><td class="cond">memory</td><td class="goal">sponge</td><td class="tape"></td><td class="chk">&#9744;</td><td class="chk">&#9744;</td><td></td></tr>
+    <tr><td class="num">2</td><td class="cond">search</td><td class="goal">sponge</td><td class="tape"></td><td class="chk">&#9744;</td><td class="chk">&#9744;</td><td></td></tr>
+    <tr><td class="num">3</td><td class="cond">memory</td><td class="goal">sprayer</td><td class="tape"></td><td class="chk">&#9744;</td><td class="chk">&#9744;</td><td></td></tr>
+    <tr><td class="num">4</td><td class="cond">search</td><td class="goal">sprayer</td><td class="tape"></td><td class="chk">&#9744;</td><td class="chk">&#9744;</td><td></td></tr>
+    <tr><td class="num">5</td><td class="cond">memory</td><td class="goal">water bottle</td><td class="tape"></td><td class="chk">&#9744;</td><td class="chk">&#9744;</td><td></td></tr>
+    <tr><td class="num">6</td><td class="cond">search</td><td class="goal">water bottle</td><td class="tape"></td><td class="chk">&#9744;</td><td class="chk">&#9744;</td><td></td></tr>
+    <tr><td class="num">7</td><td class="cond">memory</td><td class="goal">bear</td><td class="tape"></td><td class="chk">&#9744;</td><td class="chk">&#9744;</td><td></td></tr>
+    <tr><td class="num">8</td><td class="cond">search</td><td class="goal">bear</td><td class="tape"></td><td class="chk">&#9744;</td><td class="chk">&#9744;</td><td></td></tr>
+    <tr><td class="num">9</td><td class="cond">memory</td><td class="goal">soda can</td><td class="tape"></td><td class="chk">&#9744;</td><td class="chk">&#9744;</td><td></td></tr>
+    <tr><td class="num">10</td><td class="cond">search</td><td class="goal">soda can</td><td class="tape"></td><td class="chk">&#9744;</td><td class="chk">&#9744;</td><td></td></tr>
+    <tr><td class="num">11</td><td class="cond">memory</td><td class="goal">sponge (repeat)</td><td class="tape"></td><td class="chk">&#9744;</td><td class="chk">&#9744;</td><td></td></tr>
+    <tr><td class="num">12</td><td class="cond">search</td><td class="goal">sponge (repeat)</td><td class="tape"></td><td class="chk">&#9744;</td><td class="chk">&#9744;</td><td></td></tr>
+  </table>
+  <p class="rules">
+    <b>Every trial:</b> car on the X (nose on the arrow) &rarr; hands off &rarr; car stops &rarr; tape from wheel-center to object base &rarr; photo &rarr; gentle carry back to X (camera uncovered).<br>
+    <b>Phone died / Lens crashed mid-trial:</b> write INVALID in notes, tick redo, run the same row again.<br>
+    <b>Battery below 7.0 V:</b> finish the current pair, then stop and charge. Stop only between pairs.<br>
+    <b>Never move any object tonight.</b> Objects move only between layouts.
+  </p>
+</div>
+
+<div class="sheet">
+  <h1>E1 Data Sheet — Layout L4</h1>
+  <p class="sub">memory = plans from the scan | search = must find it live | L4 starts with <b>search</b></p>
+  <div class="meta">
+    <span>Date: <span class="blank"></span></span>
+    <span>Session id: <span class="blank"></span></span>
+    <span>Battery at boot (mV): <span class="blank"></span></span>
+    <span>Scan time (min): <span class="blank"></span></span>
+    <span>Wide photo taken: &#9744;</span>
+    <span>All 5 objects verified findable: &#9744;</span>
+  </div>
+  <table>
+    <tr><th>#</th><th>condition</th><th>goal</th><th>tape (cm)</th><th>photo</th><th>redo?</th><th>notes (INVALID reason, anything odd)</th></tr>
+    <tr><td class="num">1</td><td class="cond">search</td><td class="goal">sprayer</td><td class="tape"></td><td class="chk">&#9744;</td><td class="chk">&#9744;</td><td></td></tr>
+    <tr><td class="num">2</td><td class="cond">memory</td><td class="goal">sprayer</td><td class="tape"></td><td class="chk">&#9744;</td><td class="chk">&#9744;</td><td></td></tr>
+    <tr><td class="num">3</td><td class="cond">search</td><td class="goal">water bottle</td><td class="tape"></td><td class="chk">&#9744;</td><td class="chk">&#9744;</td><td></td></tr>
+    <tr><td class="num">4</td><td class="cond">memory</td><td class="goal">water bottle</td><td class="tape"></td><td class="chk">&#9744;</td><td class="chk">&#9744;</td><td></td></tr>
+    <tr><td class="num">5</td><td class="cond">search</td><td class="goal">bear</td><td class="tape"></td><td class="chk">&#9744;</td><td class="chk">&#9744;</td><td></td></tr>
+    <tr><td class="num">6</td><td class="cond">memory</td><td class="goal">bear</td><td class="tape"></td><td class="chk">&#9744;</td><td class="chk">&#9744;</td><td></td></tr>
+    <tr><td class="num">7</td><td class="cond">search</td><td class="goal">soda can</td><td class="tape"></td><td class="chk">&#9744;</td><td class="chk">&#9744;</td><td></td></tr>
+    <tr><td class="num">8</td><td class="cond">memory</td><td class="goal">soda can</td><td class="tape"></td><td class="chk">&#9744;</td><td class="chk">&#9744;</td><td></td></tr>
+    <tr><td class="num">9</td><td class="cond">search</td><td class="goal">sponge</td><td class="tape"></td><td class="chk">&#9744;</td><td class="chk">&#9744;</td><td></td></tr>
+    <tr><td class="num">10</td><td class="cond">memory</td><td class="goal">sponge</td><td class="tape"></td><td class="chk">&#9744;</td><td class="chk">&#9744;</td><td></td></tr>
+    <tr><td class="num">11</td><td class="cond">search</td><td class="goal">sprayer (repeat)</td><td class="tape"></td><td class="chk">&#9744;</td><td class="chk">&#9744;</td><td></td></tr>
+    <tr><td class="num">12</td><td class="cond">memory</td><td class="goal">sprayer (repeat)</td><td class="tape"></td><td class="chk">&#9744;</td><td class="chk">&#9744;</td><td></td></tr>
+  </table>
+  <p class="rules">
+    <b>Every trial:</b> car on the X (nose on the arrow) &rarr; hands off &rarr; car stops &rarr; tape from wheel-center to object base &rarr; photo &rarr; gentle carry back to X (camera uncovered).<br>
+    <b>Phone died / Lens crashed mid-trial:</b> write INVALID in notes, tick redo, run the same row again.<br>
+    <b>Battery below 7.0 V:</b> finish the current pair, then stop and charge. Stop only between pairs.<br>
+    <b>Never move any object tonight.</b> Objects move only between layouts.
+  </p>
+</div>
+
+<div class="sheet">
+  <h1>E1 Data Sheet — Layout L5</h1>
+  <p class="sub">memory = plans from the scan | search = must find it live | L5 starts with <b>memory</b></p>
+  <div class="meta">
+    <span>Date: <span class="blank"></span></span>
+    <span>Session id: <span class="blank"></span></span>
+    <span>Battery at boot (mV): <span class="blank"></span></span>
+    <span>Scan time (min): <span class="blank"></span></span>
+    <span>Wide photo taken: &#9744;</span>
+    <span>All 5 objects verified findable: &#9744;</span>
+  </div>
+  <table>
+    <tr><th>#</th><th>condition</th><th>goal</th><th>tape (cm)</th><th>photo</th><th>redo?</th><th>notes (INVALID reason, anything odd)</th></tr>
+    <tr><td class="num">1</td><td class="cond">memory</td><td class="goal">water bottle</td><td class="tape"></td><td class="chk">&#9744;</td><td class="chk">&#9744;</td><td></td></tr>
+    <tr><td class="num">2</td><td class="cond">search</td><td class="goal">water bottle</td><td class="tape"></td><td class="chk">&#9744;</td><td class="chk">&#9744;</td><td></td></tr>
+    <tr><td class="num">3</td><td class="cond">memory</td><td class="goal">bear</td><td class="tape"></td><td class="chk">&#9744;</td><td class="chk">&#9744;</td><td></td></tr>
+    <tr><td class="num">4</td><td class="cond">search</td><td class="goal">bear</td><td class="tape"></td><td class="chk">&#9744;</td><td class="chk">&#9744;</td><td></td></tr>
+    <tr><td class="num">5</td><td class="cond">memory</td><td class="goal">soda can</td><td class="tape"></td><td class="chk">&#9744;</td><td class="chk">&#9744;</td><td></td></tr>
+    <tr><td class="num">6</td><td class="cond">search</td><td class="goal">soda can</td><td class="tape"></td><td class="chk">&#9744;</td><td class="chk">&#9744;</td><td></td></tr>
+    <tr><td class="num">7</td><td class="cond">memory</td><td class="goal">sponge</td><td class="tape"></td><td class="chk">&#9744;</td><td class="chk">&#9744;</td><td></td></tr>
+    <tr><td class="num">8</td><td class="cond">search</td><td class="goal">sponge</td><td class="tape"></td><td class="chk">&#9744;</td><td class="chk">&#9744;</td><td></td></tr>
+    <tr><td class="num">9</td><td class="cond">memory</td><td class="goal">sprayer</td><td class="tape"></td><td class="chk">&#9744;</td><td class="chk">&#9744;</td><td></td></tr>
+    <tr><td class="num">10</td><td class="cond">search</td><td class="goal">sprayer</td><td class="tape"></td><td class="chk">&#9744;</td><td class="chk">&#9744;</td><td></td></tr>
+    <tr><td class="num">11</td><td class="cond">memory</td><td class="goal">water bottle (repeat)</td><td class="tape"></td><td class="chk">&#9744;</td><td class="chk">&#9744;</td><td></td></tr>
+    <tr><td class="num">12</td><td class="cond">search</td><td class="goal">water bottle (repeat)</td><td class="tape"></td><td class="chk">&#9744;</td><td class="chk">&#9744;</td><td></td></tr>
+  </table>
+  <p class="rules">
+    <b>Every trial:</b> car on the X (nose on the arrow) &rarr; hands off &rarr; car stops &rarr; tape from wheel-center to object base &rarr; photo &rarr; gentle carry back to X (camera uncovered).<br>
+    <b>Phone died / Lens crashed mid-trial:</b> write INVALID in notes, tick redo, run the same row again.<br>
+    <b>Battery below 7.0 V:</b> finish the current pair, then stop and charge. Stop only between pairs.<br>
+    <b>Never move any object tonight.</b> Objects move only between layouts.
+  </p>
+</div>
+
+</body>
+</html>
