@@ -1,5 +1,32 @@
 # E1 Related Work — prior-art sweep (2026-08-12)
 
+## Why this study exists (intro §1 material, added 2026-08-12)
+
+The "isn't memory obvious?" answer, with receipts:
+
+1. **The dominant paradigm is stateless.** VLA models (π0, OpenVLA,
+   GR00T, Gemini Robotics) are reactive: no persistent spatial state;
+   objects leaving the camera's view stop existing. As of mid-2026 the
+   field is actively retrofitting memory onto VLAs — AtlasVLA (arXiv
+   2608.06729, Aug 2026: voxel-hashed persistent world state) and
+   Spatial Memory for Out-of-Vision Manipulation (arXiv 2605.22283) —
+   i.e., the gap was just admitted IN the VLA literature itself.
+2. **Why the field skipped it:** (a) episodic benchmarks reset the
+   world every trial, so persistence cannot score; (b) bitter-lesson
+   culture treats maps/memory as hand-engineered structure ("Is
+   Mapping Necessary?" CVPR 2022 is the explicit null); (c) memory is
+   a systems problem (staleness, re-localization, drift) that produces
+   no loss curve.
+3. **Why quantify the obvious:** engineers deploy on trade-offs, not
+   vibes. Analogy for the intro: RAG — "external memory obviously
+   helps LLMs" was folklore until retrieval was quantified, and the
+   quantification created the category. E1 is that measurement for
+   robot spatial memory: N× for a one-time scan, on consumer hardware,
+   with the failure modes priced in.
+4. **Timing:** the internal-vs-external memory fork is forming NOW
+   (AtlasVLA = internal camp). A cost-accounted external-layer
+   datapoint enters the citation graph as the debate forms.
+
 Four-angle literature search (sim ObjectNav map ablations; real-robot
 LLM/VLM memory systems; 2024–26 workshop papers; direct phrasings of our
 claim), synthesized 2026-08-12. Verdict: **the exact claim is NOT
