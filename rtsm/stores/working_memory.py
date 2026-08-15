@@ -47,7 +47,11 @@ def _compress_crop_jpeg(crop: np.ndarray, quality: int = 75) -> bytes:
     """Compress 224x224x3 uint8 crop to JPEG bytes.
 
     Args:
-        crop: RGB image array (H, W, 3) uint8
+        crop: BGR image array (H, W, 3) uint8 — crops come straight from
+            the BGR ingest frame (io/websocket.decode_rgb contract), which
+            is exactly what cv2.imencode expects. The old code assumed RGB
+            and flipped, storing every snapshot with red/blue swapped
+            (found 2026-08-15: a red Coca-Cola can served as blue).
         quality: JPEG quality (1-100)
 
     Returns:
@@ -57,12 +61,7 @@ def _compress_crop_jpeg(crop: np.ndarray, quality: int = 75) -> bytes:
     if crop is None or crop.size == 0:
         return b''
     try:
-        # RGB -> BGR for cv2
-        if len(crop.shape) == 3 and crop.shape[-1] == 3:
-            crop_bgr = crop[..., ::-1].copy()
-        else:
-            crop_bgr = crop
-        ok, buf = cv2.imencode('.jpg', crop_bgr, [cv2.IMWRITE_JPEG_QUALITY, quality])
+        ok, buf = cv2.imencode('.jpg', crop, [cv2.IMWRITE_JPEG_QUALITY, quality])
         if ok:
             return bytes(buf)
     except Exception:

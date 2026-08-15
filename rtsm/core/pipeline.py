@@ -214,7 +214,13 @@ class Pipeline:
         t_step_start = time.perf_counter()
 
         # 1) segmentation -> masks
-        pil_img = Image.fromarray(snap.rgb) if isinstance(snap.rgb, np.ndarray) else snap.rgb
+        # Ingest frames are BGR by contract (io/websocket.decode_rgb); PIL
+        # convention is RGB, and every PIL-consuming backend (GDINO, YOLOE,
+        # SAM2 preprocessors) assumes it. Flip ONCE at this boundary —
+        # feeding BGR-as-RGB silently degraded detection for months
+        # (found 2026-08-15: a red Coca-Cola can stored as blue).
+        pil_img = (Image.fromarray(snap.rgb[..., ::-1])
+                   if isinstance(snap.rgb, np.ndarray) else snap.rgb)
 
         # Get segmentation vocab from config (for open-vocab models)
         seg_cfg = self.cfg.get("segmentation", {})
@@ -895,9 +901,11 @@ class Pipeline:
         for i, c in enumerate(cands):
             if c.crop is None:
                 continue
-            # ensure RGB PIL for preprocess; if your crop is BGR, swap channels here once:
-            # crop = c.crop[..., ::-1]
-            crop = c.crop
+            # Crops are cut from the BGR ingest frame; CLIP/SigLIP was
+            # trained on RGB — swap ONCE here (this line sat commented out
+            # while every embedding in the store was computed on swapped
+            # channels; found 2026-08-15).
+            crop = c.crop[..., ::-1]
             imgs.append(Image.fromarray(crop))  # already 224x224 uint8
             idxs.append(i)
         if not imgs:
