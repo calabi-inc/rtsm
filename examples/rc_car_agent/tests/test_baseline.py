@@ -207,3 +207,58 @@ def test_dead_pose_feed_during_search_aborts():
     rtsm.freeze_at = 3                               # feed dies mid-search
     acq = mk_searcher(FAST, bridge, rtsm).acquire("m", "t-7", budget_s=10.0)
     assert acq.status == "stale_stop"
+
+
+# ── geofence walk guard (2026-08-15: no obstacle sensors, pose is the
+#    only wall protection) ────────────────────────────────────────────────
+
+
+def _fenced(x_min, x_max, z_min, z_max, margin=0.30):
+    return replace(FAST, baseline=replace(
+        FAST.baseline, geofence_x_min=x_min, geofence_x_max=x_max,
+        geofence_z_min=z_min, geofence_z_max=z_max,
+        geofence_margin_m=margin))
+
+
+def test_walk_safe_when_fence_unset():
+    s = mk_searcher(FAST, FakeBridge(), StubRtsm(lambda n: []))
+    assert s._walk_is_safe() is True                 # guard off by default
+
+
+def test_walk_safe_inside_generous_fence():
+    # StubRtsm pose: camera at origin facing +Z; walk endpoint lands well
+    # inside a 4x4 m box centered on the origin.
+    s = mk_searcher(_fenced(-2.0, 2.0, -2.0, 2.0), FakeBridge(),
+                    StubRtsm(lambda n: []))
+    assert s._walk_is_safe() is True
+
+
+def test_walk_blocked_when_endpoint_would_exit():
+    # Fence entirely elsewhere -> projected endpoint is outside -> no walk.
+    s = mk_searcher(_fenced(5.0, 6.0, 5.0, 6.0), FakeBridge(),
+                    StubRtsm(lambda n: []))
+    assert s._walk_is_safe() is False
+
+
+def test_walk_blocked_when_pose_unavailable():
+    class DeadRtsm:
+        def get_robot_pose(self):
+            return None
+
+    s = mk_searcher(_fenced(-2.0, 2.0, -2.0, 2.0), FakeBridge(), DeadRtsm())
+    assert s._walk_is_safe() is False                # can't verify -> no motion
+
+
+def test_blocked_walk_skips_and_counts_but_search_continues():
+    bridge = FakeBridge()
+    rtsm = StubRtsm(lambda n: [])                    # never a fresh hit
+    progress = {}
+    s = BaselineSearcher(
+        _fenced(5.0, 6.0, 5.0, 6.0), bridge, rtsm,
+        stop_event=threading.Event(), preempt_event=threading.Event(),
+        cancel_event=threading.Event(), shutdown_event=threading.Event(),
+        progress=progress,
+    )
+    acq = s.acquire("m", "t-8", budget_s=2.5)
+    assert acq.status == "timeout"                   # search kept running
+    assert progress.get("geofence_skips", 0) >= 1    # walk was refused

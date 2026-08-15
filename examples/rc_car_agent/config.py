@@ -119,6 +119,18 @@ class BaselineCfg:
     query_top_k: int
     gate_fetch_k: int
     clock_skew_tol_s: float
+    # Geofence for the search's relocate walk (the car has no obstacle
+    # sensors; its pose is the only guardrail). All four set -> the walk
+    # is SKIPPED whenever its projected endpoint (+ margin) would leave
+    # the box; sweeping in place continues. Any None -> guard off.
+    # Values are ARKit-world meters and are PER-SESSION (origin changes
+    # every Lens session) — captured at setup by placing the car in two
+    # opposite corners of the drivable area, then written here.
+    geofence_x_min: Optional[float] = None
+    geofence_x_max: Optional[float] = None
+    geofence_z_min: Optional[float] = None
+    geofence_z_max: Optional[float] = None
+    geofence_margin_m: float = 0.30
 
 
 @dataclass(frozen=True)

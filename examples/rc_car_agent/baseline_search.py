@@ -53,7 +53,11 @@ import time
 from dataclasses import dataclass
 from typing import Callable, Optional
 
+import math
+
 from config import Config
+from geometry import (DegenerateHeadingError, camera_to_car,
+                      yaw_from_quat_xyzw)
 from rtsm_client import PoseSample, RtsmClient, SemanticHit
 from trial_logger import TrialLogger
 
@@ -180,11 +184,55 @@ class BaselineSearcher:
 
             sweeps += 1
             # Full sweep, nothing fresh — relocate forward and sweep again.
-            r = self._move(b.walk_speed, b.walk_speed, b.walk_s, deadline)
-            if r is not None:
-                return self._interrupted(r, t0, sweeps)
+            # Geofence guard (2026-08-15): the car has no obstacle sensors,
+            # so the pose is the only wall protection. If the walk's
+            # projected endpoint would leave the drivable box, skip the
+            # relocation and keep sweeping in place.
+            if self._walk_is_safe():
+                r = self._move(b.walk_speed, b.walk_speed, b.walk_s, deadline)
+                if r is not None:
+                    return self._interrupted(r, t0, sweeps)
+            else:
+                self._progress["geofence_skips"] = (
+                    self._progress.get("geofence_skips", 0) + 1)
+                if self._logger is not None:
+                    self._logger.log_event(
+                        "geofence_walk_skipped", time.monotonic() - t0,
+                        sweeps=sweeps)
 
     # ── helpers ──────────────────────────────────────────────────────────
+
+    def _walk_is_safe(self) -> bool:
+        """True when the relocate walk's projected endpoint (+ margin)
+        stays inside the configured geofence. Fence unset -> always True.
+        Pose unavailable/degenerate -> False (can't verify, don't move).
+        A car that somehow ends up OUTSIDE the fence facing inward gets
+        True (endpoint inside) — the guard is self-recovering."""
+        b = self._cfg.baseline
+        fence = (b.geofence_x_min, b.geofence_x_max,
+                 b.geofence_z_min, b.geofence_z_max)
+        if any(v is None for v in fence):
+            return True
+        try:
+            pose = self._rtsm.get_robot_pose()
+        except Exception:  # noqa: BLE001
+            return False
+        if pose is None:
+            return False
+        try:
+            cam_yaw = yaw_from_quat_xyzw(pose.quaternion_xyzw)
+        except DegenerateHeadingError:
+            return False
+        cal = self._cfg.calibration
+        x, z, car_yaw = camera_to_car(pose.xyz, cam_yaw,
+                                      cal.yaw_offset_rad, cal.lever_arm_rf)
+        # Walk distance at the calibrated speed, plus safety margin.
+        walk_m = (b.walk_speed * cal.speed_scale_mps * b.walk_s
+                  + b.geofence_margin_m)
+        ex = x + walk_m * math.sin(car_yaw)
+        ez = z + walk_m * math.cos(car_yaw)
+        x0, x1, z0, z1 = fence
+        return (x0 <= ex <= x1) and (z0 <= ez <= z1)
 
     def _seed_epoch(self) -> None:
         try:
