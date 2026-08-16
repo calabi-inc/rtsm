@@ -1,10 +1,12 @@
 """forward_clearance_from_depth — the wall-guard signal for blind agent
-motion (2026-08-16). Pure-numpy contract tests: robust nearest-surface
-estimate from the central band, fail-closed on missing/invalid depth."""
+motion (2026-08-16). Lives in the io layer (receive-time, frame-packet
+level — before the ingest queue/gate and any GPU work). Pure-numpy
+contract tests: robust nearest-surface estimate from the central band,
+fail-closed on missing/invalid depth."""
 
 import numpy as np
 
-from rtsm.core.pipeline import forward_clearance_from_depth
+from rtsm.io.websocket import forward_clearance_from_depth
 
 
 def _depth(fill=3.0, h=192, w=256):

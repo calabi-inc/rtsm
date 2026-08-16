@@ -96,6 +96,33 @@ def decode_rgb(raw: bytes, fmt: str, width: int, height: int) -> np.ndarray:
         raise ValueError(f"Unsupported rgb_format: {fmt!r}")
 
 
+def forward_clearance_from_depth(depth_m: Optional[np.ndarray],
+                                 min_valid_frac: float = 0.2) -> Tuple[float, float]:
+    """Meters of open space ahead of the camera, from one decoded depth
+    frame. RECEIVE-TIME wall-guard sensing (2026-08-16): lives here in the
+    io layer — frame-packet level, before the ingest queue/gate and any
+    GPU work — so it updates at stream rate regardless of pipeline load,
+    and keeps updating for stationary frames the keyframe gate drops.
+
+    Returns (clearance_m, valid_frac). Central band of the image (rows
+    30-55%, cols 33-66% — above the floor line for a roughly level
+    camera, so the floor doesn't read as an obstacle); clearance is the
+    10th percentile of valid depths (robust nearest-surface estimate).
+    Fail-closed: a mostly-invalid band (LiDAR too close / no return)
+    returns 0.0 — blind agents must not walk on a blind sensor."""
+    if depth_m is None or depth_m.size == 0:
+        return 0.0, 0.0
+    h, w = depth_m.shape[:2]
+    band = depth_m[int(h * 0.30):int(h * 0.55), int(w * 0.33):int(w * 0.66)]
+    if band.size == 0:
+        return 0.0, 0.0
+    valid = band[np.isfinite(band) & (band > 0.05)]
+    frac = float(valid.size) / float(band.size)
+    if frac < min_valid_frac:
+        return 0.0, frac
+    return float(np.percentile(valid, 10)), frac
+
+
 def decode_depth(
     raw: bytes,
     fmt: Optional[str],
@@ -647,7 +674,6 @@ class WebSocketReceiver:
         # tracks the stream rate, not the GPU's mood.
         if self._clearance_sink is not None:
             try:
-                from rtsm.core.pipeline import forward_clearance_from_depth
                 c_m, c_frac = forward_clearance_from_depth(depth_m)
                 self._clearance_sink(c_m, c_frac, unix_ts)
             except Exception as e:  # noqa: BLE001 — guard telemetry never breaks ingest

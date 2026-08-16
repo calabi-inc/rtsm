@@ -26,31 +26,6 @@ from rtsm.evaluation.event_log import EventLogWriter, FrameEvent, summarize_sour
 logger = logging.getLogger(__name__)
 
 
-def forward_clearance_from_depth(depth_m: Optional[np.ndarray],
-                                 min_valid_frac: float = 0.2) -> Tuple[float, float]:
-    """Meters of open space ahead of the camera, from one depth frame.
-
-    Returns (clearance_m, valid_frac). Uses the central band of the image
-    (rows 30-55%, cols 33-66%) — above the floor line for a roughly level
-    camera, so the floor doesn't read as an obstacle. clearance_m is the
-    10th percentile of valid depths (robust "nearest surface" estimate).
-    Fail-closed: a mostly-invalid band (LiDAR too close / no return)
-    returns 0.0 — blind agents must not walk on a blind sensor.
-    Added 2026-08-16 as the wall guard for blind search motion (replaces
-    the manual per-session geofence corner capture)."""
-    if depth_m is None or depth_m.size == 0:
-        return 0.0, 0.0
-    h, w = depth_m.shape[:2]
-    band = depth_m[int(h * 0.30):int(h * 0.55), int(w * 0.33):int(w * 0.66)]
-    if band.size == 0:
-        return 0.0, 0.0
-    valid = band[np.isfinite(band) & (band > 0.05)]
-    frac = float(valid.size) / float(band.size)
-    if frac < min_valid_frac:
-        return 0.0, frac
-    return float(np.percentile(valid, 10)), frac
-
-
 @dataclass
 class Snapshot:
     rgb: np.ndarray               # HxWx3 uint8
