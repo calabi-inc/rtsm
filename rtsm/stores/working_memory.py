@@ -171,6 +171,10 @@ class WorkingMemory:
         self._latest_pose: Optional[Dict[str, Any]] = None
         # Process-monotonic arrival time of the stored pose (guard window).
         self._latest_pose_arrival_mono: float = 0.0
+        # Latest forward-clearance summary from the depth stream (meters of
+        # open space ahead of the camera). Written per dequeued frame by the
+        # pipeline; consumed by agents as a wall guard before blind motion.
+        self._latest_clearance: Optional[Dict[str, Any]] = None
         # Reverse index: frame_id -> set of object IDs last updated on that frame
         self._frame_to_objects: Dict[str, set] = {}
         # Min-heap of (deadline_mono, oid) for proto expiry (lazy re-schedule on matches)
@@ -204,7 +208,18 @@ class WorkingMemory:
         ltm_cfg = cfg.get("ltm", {})
         self.reupsert_cos_max: float = float(ltm_cfg.get("reupsert_cos_max", 0.995))
         self.reupsert_pos_m: float = float(ltm_cfg.get("reupsert_pos_m", 0.05))
-        self.ltm_min_view_bins: int = int(ltm_cfg.get("ltm_min_view_bins", 2))
+        # LTM view-diversity gate. Defaults to object.require_view_bins: an
+        # object that confirms with N view bins must also reach the vector
+        # store with N, otherwise it is confirmed-but-unsearchable forever
+        # (with a stationary camera most objects only ever occupy one bin).
+        self.ltm_min_view_bins: int = int(ltm_cfg.get("ltm_min_view_bins", self.require_view_bins))
+        if self.ltm_min_view_bins > self.require_view_bins:
+            logger.warning(
+                f"[WM] ltm.ltm_min_view_bins={self.ltm_min_view_bins} > "
+                f"object.require_view_bins={self.require_view_bins}: confirmed objects "
+                f"with fewer view bins will never be upserted to the vector store "
+                f"and stay invisible to /search/semantic"
+            )
         self.ltm_min_period_s: float = float(ltm_cfg.get("min_period_s", 1.0))
         self.ltm_force_period_s: float = float(ltm_cfg.get("force_period_s", 10.0))
 
@@ -586,6 +601,7 @@ class WorkingMemory:
                     "updated_at": wall_now,
                 }
                 out.append(payload)
+                is_first = o.last_upsert_emb is None
                 # mark last upsert snapshot
                 o.last_upsert_wall_utc = wall_now
                 o.last_upsert_mono = m_now
@@ -594,7 +610,7 @@ class WorkingMemory:
                 # telemetry & logging
                 self._upsert_count_total += 1
 
-                reason = "first_upsert" if o.last_upsert_emb is None else (
+                reason = "first_upsert" if is_first else (
                     "force_period" if elapsed_m >= self.ltm_force_period_s else (
                         "emb_changed" if cos_same <= self.reupsert_cos_max else "pos_changed"
                     )
@@ -607,6 +623,32 @@ class WorkingMemory:
                 # schedule next routine check
                 _schedule_next_due(o, m_now)
         return out
+
+    def mark_upsert_failed(self, object_ids: Iterable[str]) -> int:
+        """Roll back upsert bookkeeping for payloads the caller failed to
+        write to the vector store, and re-queue them for the next flush.
+
+        collect_ready_for_upsert() snapshots last_upsert_* optimistically at
+        collection time; without this rollback a failed store write leaves the
+        objects looking freshly upserted, so they would not retry until the
+        force period — or never, if their heap entries were consumed.
+
+        Returns the number of objects re-queued.
+        """
+        now_m = _now_mono()
+        requeued = 0
+        with self._lock:
+            for oid in object_ids:
+                o = self._map.get(oid)
+                if o is None:
+                    continue
+                o.last_upsert_mono = 0.0
+                o.last_upsert_wall_utc = 0.0
+                o.last_upsert_emb = None
+                o.last_upsert_xyz = None
+                heapq.heappush(self._ltm_heap, (now_m, oid))
+                requeued += 1
+        return requeued
 
     # ---------- expiry / pruning ----------
 
@@ -825,17 +867,41 @@ class WorkingMemory:
         *processed* frame)."""
         return self._latest_pose
 
+    def set_forward_clearance(self, clearance_m: float, valid_frac: float,
+                              timestamp: float) -> None:
+        """Store the latest depth-derived forward clearance (meters of open
+        space ahead of the camera). clearance_m = 0.0 means blocked or
+        unmeasurable (fail-closed)."""
+        with self._lock:
+            self._latest_clearance = {
+                "clearance_m": float(clearance_m),
+                "valid_frac": float(valid_frac),
+                "timestamp": float(timestamp),
+            }
+
+    def get_forward_clearance(self) -> Optional[Dict[str, Any]]:
+        return self._latest_clearance
+
     def stats(self) -> Dict[str, Any]:
         with self._lock:
             n = len(self._map)
             c = sum(1 for o in self._map.values() if o.confirmed)
             avg_hits = (sum(o.hits for o in self._map.values()) / n) if n else 0.0
+            # Confirmed objects that have never reached the vector store —
+            # should hover near 0 (flush latency only); a large steady value
+            # means semantic retrieval is starving.
+            never_upserted = sum(
+                1 for o in self._map.values()
+                if o.confirmed and float(o.last_upsert_mono or 0.0) == 0.0
+            )
             return {
                 "objects": n,
                 "confirmed": c,
                 "avg_hits": avg_hits,
                 "upserts_total": int(self._upsert_count_total),
+                "ltm_never_upserted": never_upserted,
                 "robot_pose": self._latest_pose,
+                "forward_clearance": self._latest_clearance,
             }
 
     def clear(self) -> Dict[str, int]:

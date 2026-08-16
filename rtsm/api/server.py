@@ -107,8 +107,55 @@ def create_app(
 
     # ---------------- Routes ----------------
     @app.get("/healthz")
-    def healthz() -> Dict[str, str]:
-        return {"status": "ok"}
+    def healthz() -> Dict[str, Any]:
+        """Liveness plus semantic-retrieval degradation.
+
+        status "ok"      — process alive, vector store (if any) healthy.
+        status "degraded"— process alive but semantic search is impaired:
+          - vector upserts failing (reasons carry the last error), or
+          - index persistence failing, or
+          - confirmed objects far outnumber indexed vectors (the 2026-08-15
+            failure shape: WM full, /search/semantic returning <=1 hit).
+        """
+        reasons: List[str] = []
+        out: Dict[str, Any] = {}
+
+        if vectors is not None:
+            vstats: Dict[str, Any] = {}
+            if hasattr(vectors, "stats"):
+                try:
+                    vstats = vectors.stats() or {}
+                except Exception as e:
+                    reasons.append(f"vector_store_stats_failed: {e}")
+            if vstats:
+                if int(vstats.get("consecutive_failures", 0) or 0) > 0:
+                    reasons.append(
+                        f"vector_upserts_failing: {vstats.get('last_error')}"
+                    )
+                if vstats.get("persist_error"):
+                    reasons.append(
+                        f"vector_index_persist_failing: {vstats.get('persist_error')}"
+                    )
+                try:
+                    confirmed = int(working_memory.stats().get("confirmed", 0))
+                    indexed = int(vstats.get("count", 0))
+                    out["semantic_index"] = {
+                        "confirmed": confirmed,
+                        "indexed": indexed,
+                        "lag": max(0, confirmed - indexed),
+                    }
+                    if confirmed >= 10 and indexed < confirmed // 2:
+                        reasons.append(
+                            f"semantic_index_lag: only {indexed}/{confirmed} "
+                            f"confirmed objects are searchable"
+                        )
+                except Exception:
+                    pass
+
+        out["status"] = "degraded" if reasons else "ok"
+        if reasons:
+            out["reasons"] = reasons
+        return out
 
     @app.get("/readyz")
     def readyz() -> Dict[str, str]:
@@ -466,6 +513,13 @@ def create_app(
             result["working_memory"] = dict(working_memory.stats())
         except Exception:
             result["working_memory"] = {}
+
+        # Vector store stats (index size, upsert failures, persistence health)
+        if vectors is not None and hasattr(vectors, "stats"):
+            try:
+                result["vectors"] = dict(vectors.stats())
+            except Exception:
+                result["vectors"] = {}
 
         # SweepCache stats
         if reset_components and reset_components.sweep_cache:

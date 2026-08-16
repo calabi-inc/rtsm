@@ -178,7 +178,11 @@ def main():
         else:
             from rtsm.stores.vectors.faiss_client import FaissClient
             vectors = FaissClient(cfg)
-            logger.info(f"Faiss vectors successfully initialized")
+            vs = vectors.stats()
+            logger.info(
+                f"Faiss vectors initialized (dim={vs['dim']}, "
+                f"loaded={vs['count']}, persist={vs['persist_path']})"
+            )
 
     # Prepare ingest plumbing
     # Note: Intrinsics are now dynamic per-frame from camera.rgbd topic
@@ -269,6 +273,9 @@ def main():
             # get input-rate freshness (~5 Hz) instead of the pipeline's
             # sweep-gated processing rate (~1 Hz).
             pose_sink=wm.update_robot_pose,
+            # Receive-time depth clearance (wall guard for blind agent
+            # motion) — same freshness rationale as pose_sink.
+            clearance_sink=wm.set_forward_clearance,
             latency_analytics=latency_analytics,
         )
         ws_receiver.start()

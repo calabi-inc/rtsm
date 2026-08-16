@@ -221,6 +221,7 @@ class WebSocketReceiver:
         on_raw_message: Optional[callable] = None,
         on_handshake_done: Optional[callable] = None,
         pose_sink: Optional[callable] = None,
+        clearance_sink: Optional[callable] = None,
         latency_analytics: Optional[Any] = None,
     ) -> None:
         self.ingest_q = ingest_queue
@@ -243,6 +244,12 @@ class WebSocketReceiver:
         # WorkingMemory.update_robot_pose) see pose at the full input rate,
         # not the pipeline processing rate.
         self._pose_sink = pose_sink
+        # Called as clearance_sink(clearance_m, valid_frac, wall_ts) for
+        # every ENQUEUED frame, right after depth decode — receive-time
+        # like the pose sink, so the wall-guard signal updates at stream
+        # rate and never stalls behind GPU processing (agent-level safety
+        # consumers read it before blind motion). Added 2026-08-16.
+        self._clearance_sink = clearance_sink
         self._latency_analytics = latency_analytics
 
         # Per-session state (reset on each new client connection)
@@ -634,6 +641,17 @@ class WebSocketReceiver:
             depth_bytes, fmt=depth_fmt, width=depth_w, height=depth_h,
             depth_scale=depth_scale,
         )
+
+        # 8b. Forward-clearance wall guard: computed here at RECEIVE time
+        # (frame-packet level, before any heavy processing) so the signal
+        # tracks the stream rate, not the GPU's mood.
+        if self._clearance_sink is not None:
+            try:
+                from rtsm.core.pipeline import forward_clearance_from_depth
+                c_m, c_frac = forward_clearance_from_depth(depth_m)
+                self._clearance_sink(c_m, c_frac, unix_ts)
+            except Exception as e:  # noqa: BLE001 — guard telemetry never breaks ingest
+                logger.error(f"[websocket] clearance_sink error: {e}")
 
         # 9. Pose already parsed (+ convention flip) in step 5b above; the
         # same t_wc / q_xyzw feed both the pose sink and the FramePacket.

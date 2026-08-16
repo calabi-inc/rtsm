@@ -262,6 +262,19 @@ vectors:
   #   collection: rtsm_objects
   flush_period_s: 3.0
 
+# Long-term memory (vector store) upsert scheduling
+ltm:
+  ltm_min_view_bins: 1            # MUST be <= object.require_view_bins. With a
+                                  # stationary camera most objects only ever land
+                                  # in one 45° view bin; requiring 2 here silently
+                                  # starved the FAISS index while objects confirmed
+                                  # normally (2026-08-15: /search/semantic returned
+                                  # <=1 hit while WM held 49 confirmed objects).
+  min_period_s: 1.0               # min seconds between re-upserts of one object
+  force_period_s: 10.0            # re-upsert at least this often even if unchanged
+  reupsert_cos_max: 0.995         # re-upsert when embedding cosine drifts below this
+  reupsert_pos_m: 0.05            # re-upsert when position moves >= this (meters)
+
 # -------------------- Visualization --------------------
 visualization:
   enable: true                    # Enable embedded visualization server
