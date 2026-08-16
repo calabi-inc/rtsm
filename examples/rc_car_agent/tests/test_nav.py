@@ -103,13 +103,20 @@ class FakeBridge:
 
 class ScriptedRtsm:
     """get_robot_pose() delegates to a callable — scripts freshness,
-    freezes, side effects, or a live FakeCar."""
+    freezes, side effects, or a live FakeCar. `clearance` (dict, callable,
+    or None) scripts the depth wall-guard signal; None = no data, which
+    leaves the drive guard inert."""
 
-    def __init__(self, fn):
+    def __init__(self, fn, clearance=None):
         self._fn = fn
+        self.clearance = clearance
 
     def get_robot_pose(self):
         return self._fn()
+
+    def get_pose_and_clearance(self):
+        c = self.clearance() if callable(self.clearance) else self.clearance
+        return self._fn(), c
 
 
 def mk_plan(target=(0.0, 0.3, 3.0), plan_pose=None, epoch=None):
@@ -158,6 +165,75 @@ def test_no_motion_before_first_fresh_pose():
     result, _ = run_nav(FAST_CFG, bridge, rtsm, mk_plan())
     assert result == "stale_stop"
     assert bridge.drive_calls == []               # car never energized
+
+
+# ── drive-phase obstacle guard (2026-08-16: live wall hit during a drive;
+#    clearance low + target far = blocked route, symmetric both conditions) ─
+
+
+def _advancing_pose_at(z, start_ts=100.0):
+    """Fresh pose every call (timestamp advances) at fixed position."""
+    state = {"ts": start_ts}
+
+    def fn():
+        state["ts"] += 0.05
+        return RtsmClient._parse_pose({
+            "xyz": [0.0, 0.3, z], "quaternion_xyzw": [0, 0, 0, 1],
+            "timestamp": state["ts"], "frame_epoch": 7})
+    return fn
+
+
+def _fresh_clearance(meters):
+    return lambda: {"clearance_m": meters, "valid_frac": 0.9,
+                    "timestamp": time.time()}
+
+
+def test_blocked_when_obstacle_near_and_target_far():
+    bridge = FakeBridge()
+    # Target 3 m away, something 0.15 m in front of the camera.
+    rtsm = ScriptedRtsm(_advancing_pose_at(0.0),
+                        clearance=_fresh_clearance(0.15))
+    result, detail = run_nav(FAST_CFG, bridge, rtsm, mk_plan())
+    assert result == "blocked"
+    assert "obstacle" in detail
+    assert bridge.stop_calls, "blocked verdict must safe-stop the car"
+
+
+def test_low_clearance_near_target_never_trips():
+    # 0.45 m from the target (inside blocked_min_target_dist_m): the
+    # target itself fills the camera — low clearance is EXPECTED and the
+    # guard must stay quiet. The drive runs on (here to hold-timeout).
+    bridge = FakeBridge()
+    rtsm = ScriptedRtsm(_advancing_pose_at(2.55),
+                        clearance=_fresh_clearance(0.15))
+    result, _ = run_nav(
+        replace(FAST_CFG, nav=replace(FAST_CFG.nav, timeout_rtsm_s=1.0)),
+        bridge, rtsm, mk_plan())
+    assert result == "timeout"                     # NOT blocked
+
+
+def test_stale_clearance_sample_is_ignored():
+    bridge = FakeBridge()
+    rtsm = ScriptedRtsm(
+        _advancing_pose_at(0.0),
+        clearance=lambda: {"clearance_m": 0.15, "valid_frac": 0.9,
+                           "timestamp": time.time() - 30.0})  # ancient
+    result, _ = run_nav(
+        replace(FAST_CFG, nav=replace(FAST_CFG.nav, timeout_rtsm_s=1.0)),
+        bridge, rtsm, mk_plan())
+    assert result == "timeout"                     # guard inert on stale data
+
+
+def test_blind_hold_becomes_stop_near_obstacle():
+    # Feed freezes with a known-near obstacle: the hold must command
+    # ZERO (never push blind toward it) while still heartbeating drive().
+    bridge = FakeBridge()
+    rtsm = ScriptedRtsm(_fresh_pose_then_frozen(),
+                        clearance=_fresh_clearance(0.35))
+    result, detail = run_nav(FAST_CFG, bridge, rtsm, mk_plan())
+    assert result == "stale_stop"
+    zeros = [c for c in bridge.drive_calls if c[1] == 0.0 and c[2] == 0.0]
+    assert zeros, "hold near obstacle must command (0,0), not the last drive"
 
 
 # ── e-stop: exit without re-commanding motors (audit pin 6) ──────────────

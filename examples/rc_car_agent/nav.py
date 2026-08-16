@@ -84,7 +84,8 @@ class NavRunner:
     """Runs one mission to completion. Returns (result, detail).
 
     result ∈ arrived | timeout | stale_stop | frame_reset | drift |
-             degenerate_heading | estopped | preempted | cancelled | shutdown
+             degenerate_heading | blocked | estopped | preempted |
+             cancelled | shutdown
     """
 
     def __init__(
@@ -141,6 +142,8 @@ class NavRunner:
         next_poll = 0.0                          # poll immediately
         left = right = 0.0
         have_cmd = False                         # no motion before first fresh pose
+        blocked_polls = 0                        # drive-phase obstacle debounce
+        last_clearance_m = None                  # freshest valid depth clearance
 
         while True:
             # ── interrupts, highest priority, every tick ────────────────
@@ -161,17 +164,29 @@ class NavRunner:
                 return "cancelled", "operator cancel"
 
             if time.monotonic() >= next_poll:
-                pose = self._safe_pose()
+                pose, clearance = self._safe_pose_clearance()
                 # Clock AFTER the fetch: if RTSM blocked us for seconds,
                 # the staleness/timeout verdicts must see that time.
                 now = time.monotonic()
                 next_poll = now + poll_interval
+                c_m = self._valid_clearance_m(clearance)
+                if c_m is not None:
+                    last_clearance_m = c_m
                 tick = self._monitor.assess(pose, now)
                 self._note_progress(tick)
                 if (tick.status == "ongoing" and tick.pose_fresh
                         and tick.heading_err is not None):
                     left, right, _mode = drive_command(tick.heading_err, nav)
                     have_cmd = True
+                elif tick.status == "ongoing" and not tick.pose_fresh:
+                    # Blind-hold refinement (2026-08-16, after a live wall
+                    # hit): with a known-near obstacle, holding the last
+                    # drive command blind pushes INTO it — hold zero
+                    # instead (drive(0,0) still feeds the watchdog). The
+                    # next fresh pose recomputes the real command.
+                    if (last_clearance_m is not None
+                            and last_clearance_m < nav.blind_hold_min_clearance_m):
+                        left = right = 0.0
                 if self._logger is not None:
                     # Logged AFTER the command update: each fresh tick line
                     # pairs heading_err with the command DERIVED FROM IT
@@ -181,6 +196,25 @@ class NavRunner:
                 if tick.status != "ongoing":
                     self._bridge.stop()
                     return tick.status, tick.detail
+                # Drive-phase obstacle guard (2026-08-16): something is
+                # measurably close ahead while the believed target is
+                # still far — the route is blocked (bad coordinate, or a
+                # wall between us and the goal). Debounced over
+                # consecutive fresh polls; the target itself filling the
+                # camera never trips this (dist gate).
+                if (nav.blocked_clearance_m > 0 and tick.pose_fresh
+                        and c_m is not None
+                        and c_m < nav.blocked_clearance_m
+                        and tick.ground_dist is not None
+                        and tick.ground_dist > nav.blocked_min_target_dist_m):
+                    blocked_polls += 1
+                    if blocked_polls >= nav.blocked_debounce_polls:
+                        self._bridge.stop()
+                        return "blocked", (
+                            f"obstacle {c_m:.2f} m ahead with target still "
+                            f"{tick.ground_dist:.2f} m away")
+                elif tick.pose_fresh:
+                    blocked_polls = 0
 
             # HOLD RULE: called every tick, fresh pose or not (see module
             # docstring) — the bridge decides what hits the wire. Skipped
@@ -195,11 +229,25 @@ class NavRunner:
 
     # ── helpers ──────────────────────────────────────────────────────────
 
-    def _safe_pose(self):
+    def _safe_pose_clearance(self):
         try:
-            return self._rtsm.get_robot_pose()
+            return self._rtsm.get_pose_and_clearance()
         except Exception:  # noqa: BLE001 — an RTSM hiccup is a stale tick,
-            return None    # never a crashed control loop
+            return None, None  # never a crashed control loop
+
+    def _valid_clearance_m(self, clearance) -> Optional[float]:
+        """Clearance meters from a fresh-enough sample, else None. A stale
+        sample is ignored entirely — the blind-hold refinement must key on
+        the last VALID measurement, not a frozen one."""
+        if not clearance:
+            return None
+        try:
+            age = time.time() - float(clearance.get("timestamp", 0))
+            if age > self._cfg.nav.clearance_max_age_s:
+                return None
+            return float(clearance.get("clearance_m", 0.0))
+        except (TypeError, ValueError):
+            return None
 
     def _note_progress(self, tick) -> None:
         self._progress["ticks"] = self._progress.get("ticks", 0) + 1

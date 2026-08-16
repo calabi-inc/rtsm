@@ -90,6 +90,21 @@ class NavCfg:
     discontinuity_rate_mps: float
     timeout_rtsm_s: float
     timeout_baseline_s: float
+    # Drive-phase obstacle guard (2026-08-16, after a live wall hit during
+    # a search trial's DRIVE: the acquired coordinate routed through a
+    # wall and blind-hold pushed into it). Applies to BOTH conditions.
+    # Trip rule: fresh clearance below blocked_clearance_m while the
+    # believed target is still farther than blocked_min_target_dist_m
+    # (so the target itself filling the camera never trips it), for
+    # blocked_debounce_polls consecutive fresh polls -> verdict "blocked".
+    blocked_clearance_m: float = 0.30    # <=0 disables the drive guard
+    blocked_min_target_dist_m: float = 0.75
+    blocked_debounce_polls: int = 3
+    # Blind-hold refinement: if the pose feed goes stale while last-known
+    # clearance was below this, hold ZERO (stop) instead of holding the
+    # last drive command — never push blind toward a known-near obstacle.
+    blind_hold_min_clearance_m: float = 0.50
+    clearance_max_age_s: float = 2.0     # stale clearance sample = ignore it
 
 
 @dataclass(frozen=True)

@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 
@@ -152,6 +152,15 @@ class RtsmClient:
         except requests.RequestException:
             return None
         return c if isinstance(c, dict) else None
+
+    def get_pose_and_clearance(self) -> Tuple[Optional[PoseSample],
+                                              Optional[Dict[str, Any]]]:
+        """Pose + forward clearance from ONE /stats call — the nav loop
+        polls at 10 Hz and must not pay two HTTP round-trips per poll."""
+        s = self.stats()
+        pose = self._parse_pose(s.get("robot_pose"))
+        c = s.get("forward_clearance")
+        return pose, (c if isinstance(c, dict) else None)
 
     def get_object_snapshot_b64(self, object_id: str) -> Optional[str]:
         """Base64 JPEG of the object's most recent observation crop via
