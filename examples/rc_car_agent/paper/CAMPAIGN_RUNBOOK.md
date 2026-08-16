@@ -1,4 +1,4 @@
-# E1 Campaign Runbook — simple operator guide
+﻿# E1 Campaign Runbook — simple operator guide
 
 Follow this top to bottom. Claude does all computer work; you do hands
 and tape measure. Full rules live in E1_PROTOCOL.md — this is the
@@ -7,7 +7,7 @@ follow-along version.
 **The plan: 5 evenings. Each evening = 1 layout = 12 trials. 60 total.**
 
 Objects (same 5 all campaign, locked 2026-08-15 after Check A): **teddy
-bear, soda can, water bottle, scissors, humidifier**.
+bear, game controller, cola can, tissue box, scissors**.
 
 ---
 
@@ -72,80 +72,80 @@ Each object gets a back-to-back pair (memory then search, or flipped).
 |---|-----------|------|---------|------|
 | 1 | memory | teddy bear | | |
 | 2 | search | teddy bear | | |
-| 3 | memory | soda can | | |
-| 4 | search | soda can | | |
-| 5 | memory | water bottle | | |
-| 6 | search | water bottle | | |
-| 7 | memory | scissors | | |
-| 8 | search | scissors | | |
-| 9 | memory | humidifier | | |
-| 10 | search | humidifier | | |
+| 3 | memory | game controller | | |
+| 4 | search | game controller | | |
+| 5 | memory | cola can | | |
+| 6 | search | cola can | | |
+| 7 | memory | tissue box | | |
+| 8 | search | tissue box | | |
+| 9 | memory | scissors | | |
+| 10 | search | scissors | | |
 | 11 | memory | teddy bear (repeat) | | |
 | 12 | search | teddy bear (repeat) | | |
 
 ### Layout L2 (starts with search)
 | # | condition | goal | tape cm | done |
 |---|-----------|------|---------|------|
-| 1 | search | soda can | | |
-| 2 | memory | soda can | | |
-| 3 | search | water bottle | | |
-| 4 | memory | water bottle | | |
-| 5 | search | scissors | | |
-| 6 | memory | scissors | | |
-| 7 | search | humidifier | | |
-| 8 | memory | humidifier | | |
+| 1 | search | game controller | | |
+| 2 | memory | game controller | | |
+| 3 | search | cola can | | |
+| 4 | memory | cola can | | |
+| 5 | search | tissue box | | |
+| 6 | memory | tissue box | | |
+| 7 | search | scissors | | |
+| 8 | memory | scissors | | |
 | 9 | search | teddy bear | | |
 | 10 | memory | teddy bear | | |
-| 11 | search | soda can (repeat) | | |
-| 12 | memory | soda can (repeat) | | |
+| 11 | search | game controller (repeat) | | |
+| 12 | memory | game controller (repeat) | | |
 
 ### Layout L3 (starts with memory)
 | # | condition | goal | tape cm | done |
 |---|-----------|------|---------|------|
-| 1 | memory | water bottle | | |
-| 2 | search | water bottle | | |
-| 3 | memory | scissors | | |
-| 4 | search | scissors | | |
-| 5 | memory | humidifier | | |
-| 6 | search | humidifier | | |
+| 1 | memory | cola can | | |
+| 2 | search | cola can | | |
+| 3 | memory | tissue box | | |
+| 4 | search | tissue box | | |
+| 5 | memory | scissors | | |
+| 6 | search | scissors | | |
 | 7 | memory | teddy bear | | |
 | 8 | search | teddy bear | | |
-| 9 | memory | soda can | | |
-| 10 | search | soda can | | |
-| 11 | memory | water bottle (repeat) | | |
-| 12 | search | water bottle (repeat) | | |
+| 9 | memory | game controller | | |
+| 10 | search | game controller | | |
+| 11 | memory | cola can (repeat) | | |
+| 12 | search | cola can (repeat) | | |
 
 ### Layout L4 (starts with search)
 | # | condition | goal | tape cm | done |
 |---|-----------|------|---------|------|
-| 1 | search | scissors | | |
-| 2 | memory | scissors | | |
-| 3 | search | humidifier | | |
-| 4 | memory | humidifier | | |
+| 1 | search | tissue box | | |
+| 2 | memory | tissue box | | |
+| 3 | search | scissors | | |
+| 4 | memory | scissors | | |
 | 5 | search | teddy bear | | |
 | 6 | memory | teddy bear | | |
-| 7 | search | soda can | | |
-| 8 | memory | soda can | | |
-| 9 | search | water bottle | | |
-| 10 | memory | water bottle | | |
-| 11 | search | scissors (repeat) | | |
-| 12 | memory | scissors (repeat) | | |
+| 7 | search | game controller | | |
+| 8 | memory | game controller | | |
+| 9 | search | cola can | | |
+| 10 | memory | cola can | | |
+| 11 | search | tissue box (repeat) | | |
+| 12 | memory | tissue box (repeat) | | |
 
 ### Layout L5 (starts with memory)
 | # | condition | goal | tape cm | done |
 |---|-----------|------|---------|------|
-| 1 | memory | humidifier | | |
-| 2 | search | humidifier | | |
+| 1 | memory | scissors | | |
+| 2 | search | scissors | | |
 | 3 | memory | teddy bear | | |
 | 4 | search | teddy bear | | |
-| 5 | memory | soda can | | |
-| 6 | search | soda can | | |
-| 7 | memory | water bottle | | |
-| 8 | search | water bottle | | |
-| 9 | memory | scissors | | |
-| 10 | search | scissors | | |
-| 11 | memory | humidifier (repeat) | | |
-| 12 | search | humidifier (repeat) | | |
+| 5 | memory | game controller | | |
+| 6 | search | game controller | | |
+| 7 | memory | cola can | | |
+| 8 | search | cola can | | |
+| 9 | memory | tissue box | | |
+| 10 | search | tissue box | | |
+| 11 | memory | scissors (repeat) | | |
+| 12 | search | scissors (repeat) | | |
 
 ---
 
