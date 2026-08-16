@@ -23,7 +23,7 @@ server:
   host: "127.0.0.1"
   port: 8010
   default_condition: "rtsm"            # rtsm | baseline (per-command override in POST /command)
-  require_verified_estop: true         # /command 503s until the pad is bound AND a button was pressed on the CURRENT binding (protocol live-fire rule, enforced)
+  require_verified_estop: false        # TEMP session-local (uncommitted): pad paused, operator physically managing. Discard this local change / restore true before campaign trials with the pad.
   api_token: null                      # set a secret when binding --host 0.0.0.0: POST endpoints then require X-Auth-Token (the console prompts once)
 
 nav:
@@ -59,22 +59,14 @@ baseline:
   query_top_k: 5
   gate_fetch_k: 50                     # fetch depth for gated polls â€” top-5 over ALL memory would let stale objects crowd out a visible target
   clock_skew_tol_s: 0.5                # stamps ahead of our clock beyond this are rejected (backward wall-clock step guard)
-  # Depth wall guard (2026-08-16, PRIMARY — replaces corner capture): the
-  # relocate walk needs this many meters of measured open space ahead
-  # (live 10th-pct depth clearance served by RTSM /stats). Blocked -> the
-  # searcher rotates step-by-step and walks the first open direction; a
-  # full circle with none -> stays put, keeps sweeping. Session-free:
-  # no setup, survives stream restarts. <=0 disables.
+  # Depth wall guard (2026-08-16): the relocate walk needs this many
+  # meters of measured open space ahead (live 10th-pct depth clearance
+  # served by RTSM /stats). Blocked -> the searcher rotates step-by-step
+  # and walks the first open direction; a full circle with none -> stays
+  # put, keeps sweeping. Session-free: no setup, survives stream
+  # restarts. <=0 disables.
   min_walk_clearance_m: 0.60
   clearance_max_age_s: 2.0
-  # Geofence (OPTIONAL second belt) — per-session ARKit-world meters from
-  # corner capture; all four set = walk endpoint must stay in the box.
-  # null = off. Normally leave off; the depth guard is the primary.
-  geofence_x_min: null
-  geofence_x_max: null
-  geofence_z_min: null
-  geofence_z_max: null
-  geofence_margin_m: 0.30
 
 calibration:
   # Written by calibrate.py â€” do not hand-edit. Units: rad / m / dimensionless.

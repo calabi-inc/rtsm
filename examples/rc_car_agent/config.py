@@ -119,25 +119,14 @@ class BaselineCfg:
     query_top_k: int
     gate_fetch_k: int
     clock_skew_tol_s: float
-    # Geofence for the search's relocate walk (the car has no obstacle
-    # sensors; its pose is the only guardrail). All four set -> the walk
-    # is SKIPPED whenever its projected endpoint (+ margin) would leave
-    # the box; sweeping in place continues. Any None -> guard off.
-    # Values are ARKit-world meters and are PER-SESSION (origin changes
-    # every Lens session) — captured at setup by placing the car in two
-    # opposite corners of the drivable area, then written here.
-    geofence_x_min: Optional[float] = None
-    geofence_x_max: Optional[float] = None
-    geofence_z_min: Optional[float] = None
-    geofence_z_max: Optional[float] = None
-    geofence_margin_m: float = 0.30
-    # Depth wall guard (2026-08-16, replaces manual corner capture): the
-    # relocate walk requires this many meters of MEASURED open space ahead
-    # (10th-percentile of the phone's live depth band, served by RTSM).
-    # Blocked -> the searcher rotates step-by-step and walks the first
-    # open direction; a full circle with none -> stays put and keeps
-    # sweeping. <= 0 disables the depth guard. Session-independent: no
-    # setup, survives stream restarts.
+    # Depth wall guard (2026-08-16; superseded the short-lived geofence —
+    # the car senses walls with the live depth stream instead of a
+    # per-session corner-captured box): the relocate walk requires this
+    # many meters of MEASURED open space ahead (10th-percentile of the
+    # phone's live depth band, served by RTSM). Blocked -> the searcher
+    # rotates step-by-step and walks the first open direction; a full
+    # circle with none -> stays put and keeps sweeping. <= 0 disables.
+    # Session-independent: no setup, survives stream restarts.
     min_walk_clearance_m: float = 0.60
     clearance_max_age_s: float = 2.0     # stale clearance = blind = no walk
 

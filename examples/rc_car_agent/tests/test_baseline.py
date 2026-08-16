@@ -214,46 +214,6 @@ def test_dead_pose_feed_during_search_aborts():
     assert acq.status == "stale_stop"
 
 
-# ── geofence walk guard (2026-08-15: no obstacle sensors, pose is the
-#    only wall protection) ────────────────────────────────────────────────
-
-
-def _fenced(x_min, x_max, z_min, z_max, margin=0.30):
-    return replace(FAST, baseline=replace(
-        FAST.baseline, geofence_x_min=x_min, geofence_x_max=x_max,
-        geofence_z_min=z_min, geofence_z_max=z_max,
-        geofence_margin_m=margin))
-
-
-def test_walk_safe_when_fence_unset():
-    s = mk_searcher(FAST, FakeBridge(), StubRtsm(lambda n: []))
-    assert s._walk_is_safe() is True                 # guard off by default
-
-
-def test_walk_safe_inside_generous_fence():
-    # StubRtsm pose: camera at origin facing +Z; walk endpoint lands well
-    # inside a 4x4 m box centered on the origin.
-    s = mk_searcher(_fenced(-2.0, 2.0, -2.0, 2.0), FakeBridge(),
-                    StubRtsm(lambda n: []))
-    assert s._walk_is_safe() is True
-
-
-def test_walk_blocked_when_endpoint_would_exit():
-    # Fence entirely elsewhere -> projected endpoint is outside -> no walk.
-    s = mk_searcher(_fenced(5.0, 6.0, 5.0, 6.0), FakeBridge(),
-                    StubRtsm(lambda n: []))
-    assert s._walk_is_safe() is False
-
-
-def test_walk_blocked_when_pose_unavailable():
-    class DeadRtsm:
-        def get_robot_pose(self):
-            return None
-
-    s = mk_searcher(_fenced(-2.0, 2.0, -2.0, 2.0), FakeBridge(), DeadRtsm())
-    assert s._walk_is_safe() is False                # can't verify -> no motion
-
-
 def _clear_now():
     return {"clearance_m": 2.5, "valid_frac": 0.9, "timestamp": time.time()}
 
@@ -267,15 +227,6 @@ def _searcher_with_progress(cfg, rtsm):
         progress=progress,
     )
     return s, progress
-
-
-def test_geofence_blocked_everywhere_skips_walk_but_search_continues():
-    rtsm = StubRtsm(lambda n: [])                    # never a fresh hit
-    rtsm.clearance = _clear_now()                    # depth says open —
-    s, progress = _searcher_with_progress(_fenced(5.0, 6.0, 5.0, 6.0), rtsm)
-    acq = s.acquire("m", "t-8", budget_s=2.5)        # — but the fence blocks
-    assert acq.status == "timeout"                   # search kept running
-    assert progress.get("walk_blocked_skips", 0) >= 1
 
 
 # ── depth wall guard (2026-08-16: no corners, the camera senses walls) ───
