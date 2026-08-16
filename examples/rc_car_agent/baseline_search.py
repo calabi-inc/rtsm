@@ -183,24 +183,61 @@ class BaselineSearcher:
                 self._progress["ticks"] = self._progress.get("ticks", 0) + 1
 
             sweeps += 1
-            # Full sweep, nothing fresh — relocate forward and sweep again.
-            # Geofence guard (2026-08-15): the car has no obstacle sensors,
-            # so the pose is the only wall protection. If the walk's
-            # projected endpoint would leave the drivable box, skip the
-            # relocation and keep sweeping in place.
-            if self._walk_is_safe():
-                r = self._move(b.walk_speed, b.walk_speed, b.walk_s, deadline)
+            # Full sweep, nothing fresh — relocate to a new viewpoint.
+            # Wall guard (2026-08-16): the walk needs measured open space
+            # ahead (live depth clearance served by RTSM) AND, if a
+            # geofence is configured, an in-bounds endpoint. When blocked,
+            # rotate one step at a time and walk the FIRST open direction
+            # — the car turns away from walls instead of grinding them.
+            # A full circle with no open direction -> stay put, keep
+            # sweeping (logged; budget keeps running).
+            walked = False
+            for _ in range(b.steps_per_sweep):
+                if self._walk_is_clear() and self._walk_is_safe():
+                    r = self._move(b.walk_speed, b.walk_speed, b.walk_s,
+                                   deadline)
+                    if r is not None:
+                        return self._interrupted(r, t0, sweeps)
+                    walked = True
+                    break
+                r = self._move(sweep_sign * -b.sweep_step_turn,
+                               sweep_sign * b.sweep_step_turn,
+                               b.sweep_step_s, deadline)
                 if r is not None:
                     return self._interrupted(r, t0, sweeps)
-            else:
-                self._progress["geofence_skips"] = (
-                    self._progress.get("geofence_skips", 0) + 1)
+                # Short settle so the clearance sample refreshes at the
+                # new heading before re-checking.
+                r = self._dwell_and_watch_pose(min(b.dwell_s, 0.6), deadline)
+                if r is not None:
+                    return self._stamp(r, t0, sweeps)
+            if not walked:
+                self._progress["walk_blocked_skips"] = (
+                    self._progress.get("walk_blocked_skips", 0) + 1)
                 if self._logger is not None:
                     self._logger.log_event(
-                        "geofence_walk_skipped", time.monotonic() - t0,
-                        sweeps=sweeps)
+                        "walk_blocked_all_directions",
+                        time.monotonic() - t0, sweeps=sweeps)
 
     # ── helpers ──────────────────────────────────────────────────────────
+
+    def _walk_is_clear(self) -> bool:
+        """True when the live depth stream measures at least
+        min_walk_clearance_m of open space ahead, with a fresh sample.
+        Fail-closed everywhere: no clearance data, stale data, or an
+        RTSM hiccup all mean 'do not walk blind'. Guard disabled when
+        min_walk_clearance_m <= 0."""
+        b = self._cfg.baseline
+        if b.min_walk_clearance_m <= 0:
+            return True
+        try:
+            c = self._rtsm.get_forward_clearance()
+        except Exception:  # noqa: BLE001
+            return False
+        if c is None:
+            return False
+        if self._now_wall() - float(c.get("timestamp", 0)) > b.clearance_max_age_s:
+            return False
+        return float(c.get("clearance_m", 0.0)) >= b.min_walk_clearance_m
 
     def _walk_is_safe(self) -> bool:
         """True when the relocate walk's projected endpoint (+ margin)

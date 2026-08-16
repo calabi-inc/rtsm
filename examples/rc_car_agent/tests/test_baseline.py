@@ -41,6 +41,11 @@ class StubRtsm:
         self._ts = 100.0
         self.freeze_at = None
         self.bump_epoch_at = None
+        # Depth wall-guard signal; None = no data (fail-closed, no walk).
+        self.clearance = None
+
+    def get_forward_clearance(self):
+        return self.clearance
 
     def get_robot_pose(self):
         self._pose_calls += 1
@@ -249,16 +254,85 @@ def test_walk_blocked_when_pose_unavailable():
     assert s._walk_is_safe() is False                # can't verify -> no motion
 
 
-def test_blocked_walk_skips_and_counts_but_search_continues():
-    bridge = FakeBridge()
-    rtsm = StubRtsm(lambda n: [])                    # never a fresh hit
+def _clear_now():
+    return {"clearance_m": 2.5, "valid_frac": 0.9, "timestamp": time.time()}
+
+
+def _searcher_with_progress(cfg, rtsm):
     progress = {}
     s = BaselineSearcher(
-        _fenced(5.0, 6.0, 5.0, 6.0), bridge, rtsm,
+        cfg, FakeBridge(), rtsm,
         stop_event=threading.Event(), preempt_event=threading.Event(),
         cancel_event=threading.Event(), shutdown_event=threading.Event(),
         progress=progress,
     )
-    acq = s.acquire("m", "t-8", budget_s=2.5)
+    return s, progress
+
+
+def test_geofence_blocked_everywhere_skips_walk_but_search_continues():
+    rtsm = StubRtsm(lambda n: [])                    # never a fresh hit
+    rtsm.clearance = _clear_now()                    # depth says open —
+    s, progress = _searcher_with_progress(_fenced(5.0, 6.0, 5.0, 6.0), rtsm)
+    acq = s.acquire("m", "t-8", budget_s=2.5)        # — but the fence blocks
     assert acq.status == "timeout"                   # search kept running
-    assert progress.get("geofence_skips", 0) >= 1    # walk was refused
+    assert progress.get("walk_blocked_skips", 0) >= 1
+
+
+# ── depth wall guard (2026-08-16: no corners, the camera senses walls) ───
+
+
+def test_no_clearance_data_blocks_walk_fail_closed():
+    rtsm = StubRtsm(lambda n: [])                    # clearance stays None
+    s, progress = _searcher_with_progress(FAST, rtsm)
+    acq = s.acquire("m", "t-9", budget_s=2.0)
+    assert acq.status == "timeout"
+    assert progress.get("walk_blocked_skips", 0) >= 1
+    # never a straight-line walk command (equal positive wheels)
+    walks = [c for c in s._bridge.drive_calls
+             if c[1] == c[2] and c[1] > 0]
+    assert walks == []
+
+
+def test_stale_clearance_blocks_walk():
+    rtsm = StubRtsm(lambda n: [])
+    rtsm.clearance = {"clearance_m": 3.0, "valid_frac": 0.9,
+                      "timestamp": time.time() - 30.0}   # ancient sample
+    s, progress = _searcher_with_progress(FAST, rtsm)
+    acq = s.acquire("m", "t-10", budget_s=2.0)
+    assert acq.status == "timeout"
+    assert progress.get("walk_blocked_skips", 0) >= 1
+
+
+def test_fresh_clearance_allows_walk():
+    rtsm = StubRtsm(lambda n: [])
+    rtsm.clearance = _clear_now()
+    s, _ = _searcher_with_progress(FAST, rtsm)
+    acq = s.acquire("m", "t-11", budget_s=2.5)
+    assert acq.status == "timeout"
+    walks = [c for c in s._bridge.drive_calls
+             if c[1] == c[2] and c[1] > 0]
+    assert walks                                     # relocation happened
+
+
+def test_blocked_then_clear_rotates_and_walks():
+    # The "turn away from the wall" behavior: blocked ahead, the searcher
+    # rotates a step, re-checks, and walks the first open direction.
+    rtsm = StubRtsm(lambda n: [])
+    blocked = {"clearance_m": 0.2, "valid_frac": 0.9,
+               "timestamp": time.time()}
+    calls = {"n": 0}
+
+    def clearance_script():
+        calls["n"] += 1
+        if calls["n"] <= 2:                          # blocked twice...
+            return dict(blocked, timestamp=time.time())
+        return _clear_now()                          # ...then open
+
+    rtsm.get_forward_clearance = clearance_script
+    s, progress = _searcher_with_progress(FAST, rtsm)
+    acq = s.acquire("m", "t-12", budget_s=3.0)
+    assert acq.status == "timeout"
+    walks = [c for c in s._bridge.drive_calls
+             if c[1] == c[2] and c[1] > 0]
+    assert walks                                     # eventually walked
+    assert progress.get("walk_blocked_skips", 0) == 0  # found a way, no skip

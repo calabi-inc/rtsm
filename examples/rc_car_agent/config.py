@@ -131,6 +131,15 @@ class BaselineCfg:
     geofence_z_min: Optional[float] = None
     geofence_z_max: Optional[float] = None
     geofence_margin_m: float = 0.30
+    # Depth wall guard (2026-08-16, replaces manual corner capture): the
+    # relocate walk requires this many meters of MEASURED open space ahead
+    # (10th-percentile of the phone's live depth band, served by RTSM).
+    # Blocked -> the searcher rotates step-by-step and walks the first
+    # open direction; a full circle with none -> stays put and keeps
+    # sweeping. <= 0 disables the depth guard. Session-independent: no
+    # setup, survives stream restarts.
+    min_walk_clearance_m: float = 0.60
+    clearance_max_age_s: float = 2.0     # stale clearance = blind = no walk
 
 
 @dataclass(frozen=True)

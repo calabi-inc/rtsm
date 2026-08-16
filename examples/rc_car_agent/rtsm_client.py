@@ -142,6 +142,17 @@ class RtsmClient:
         except (requests.RequestException, ValueError):
             return None
 
+    def get_forward_clearance(self) -> Optional[Dict[str, Any]]:
+        """Latest depth-derived forward clearance via /stats:
+        {clearance_m, valid_frac, timestamp} or None (older RTSM / no
+        depth frames yet). clearance_m == 0.0 means blocked or
+        unmeasurable — the writer is fail-closed."""
+        try:
+            c = self.stats().get("forward_clearance")
+        except requests.RequestException:
+            return None
+        return c if isinstance(c, dict) else None
+
     def get_object_snapshot_b64(self, object_id: str) -> Optional[str]:
         """Base64 JPEG of the object's most recent observation crop via
         GET /objects/{id}/snapshots/0/image, or None on any failure —

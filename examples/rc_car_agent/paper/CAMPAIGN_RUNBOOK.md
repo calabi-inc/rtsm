@@ -27,10 +27,9 @@ bear, soda can, water bottle, scissors, humidifier**.
       5 objects from ~1 m, two angles each. About 3 minutes.
 - [ ] 8. Say "scan done" → Claude checks: all 5 objects findable, pose
       feed healthy, car reachable, battery voltage
-- [ ] 8b. Wall guard: put the car (phone mounted, streaming) in one corner
-      of the drivable floor, say "corner 1". Move it to the OPPOSITE
-      corner, say "corner 2". Claude records the safe box — during search
-      the car will refuse to drive past it.
+- [ ] 8b. Wall guard: automatic — the car senses walls with the phone's
+      depth camera and turns away on its own during search. Nothing for
+      you to do. (Corner capture is gone.)
 - [ ] 9. Claude starts the agent server. If using the controller: press X
       once when asked
 - [ ] 10. Claude says "ready for trial 1" → go
