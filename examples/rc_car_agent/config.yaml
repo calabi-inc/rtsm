@@ -12,7 +12,7 @@ rtsm:
   diagnostics_for_trials: true         # spawn RTSM with event-log diagnostics on (paper failure-analysis data)
 
 esp32:
-  url: "http://192.168.1.189"          # from the ESP32 boot log
+  url: "http://192.168.1.204"          # from the ESP32 boot log (board #2, replaced 2026-08-16 after short-circuit killed the original; give this MAC a DHCP reservation)
   drive_rate_hz: 10                    # cap â€” Arduino WebServer has no keep-alive; >10 Hz exhausts sockets
   heartbeat_s: 0.25                    # re-send held command to feed the 300 ms firmware watchdog
   change_epsilon: 0.04                 # only send /drive when command changed by more than this

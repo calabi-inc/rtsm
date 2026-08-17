@@ -92,13 +92,47 @@ int8_t teleopAppliedRight = 0;
 
 WebServer server(80);
 
+// === I2C health tracking (2026-08-17, added after a dead controller was
+// misdiagnosed for hours: every Wire call ignored its error code, so a
+// non-ACKing / burned Hiwonder board looked identical to healthy-but-idle.
+// Rule: the firmware must be able to SAY "the controller is not there.") ===
+volatile uint8_t  lastI2cError   = 255;  // 255 = never attempted; 0 = OK
+volatile uint32_t i2cOkCount     = 0;
+volatile uint32_t i2cFailCount   = 0;
+bool controllerFoundAtBoot = false;
+
+void noteI2cResult(uint8_t err) {
+    lastI2cError = err;
+    if (err == 0) i2cOkCount++; else i2cFailCount++;
+}
+
+// Boot-time bus scan: prints every ACKing address, and specifically whether
+// the Hiwonder controller (0x34) is present. THE first thing to check on
+// any bring-up or after any hardware change.
+void scanI2cBus() {
+    Serial.println("I2C bus scan:");
+    int found = 0;
+    for (byte addr = 1; addr < 127; addr++) {
+        Wire.beginTransmission(addr);
+        if (Wire.endTransmission() == 0) {
+            Serial.printf("  device ACK at 0x%02X%s\n", addr,
+                          addr == MOTOR_ADDR ? "  <-- Hiwonder motor controller" : "");
+            if (addr == MOTOR_ADDR) controllerFoundAtBoot = true;
+            found++;
+        }
+    }
+    if (found == 0) Serial.println("  NO devices found — check SDA/SCL/5V/GND wiring and controller power");
+    if (!controllerFoundAtBoot)
+        Serial.println("  WARNING: motor controller 0x34 NOT responding — motors will not move");
+}
+
 // === Low-level I2C helpers ===
 
 void writeMotorReg(byte reg, byte value) {
     Wire.beginTransmission(MOTOR_ADDR);
     Wire.write(reg);
     Wire.write(value);
-    Wire.endTransmission();
+    noteI2cResult(Wire.endTransmission());
 }
 
 // FIXED_SPEED mode (register 0x33) — closed-loop. Set once, controller maintains.
@@ -110,7 +144,7 @@ void setMotorSpeed(int8_t m1, int8_t m2, int8_t m3, int8_t m4) {
     Wire.write((byte)m2);
     Wire.write((byte)m3);
     Wire.write((byte)m4);
-    Wire.endTransmission();
+    noteI2cResult(Wire.endTransmission());
 }
 
 void stopMotors() {
@@ -242,6 +276,24 @@ void handleBattery() {
     server.send(200, "application/json", resp);
 }
 
+// GET /i2c — controller-link health. THE diagnostic for "board answers
+// HTTP but the car doesn't move": live=true means the Hiwonder controller
+// ACKed a probe JUST NOW; last_error is the most recent Wire status
+// (0=OK, 2=addr NACK i.e. controller absent/dead, 5=timeout).
+void handleI2cHealth() {
+    Wire.beginTransmission(MOTOR_ADDR);
+    uint8_t probe = Wire.endTransmission();
+    String resp = "{\"live\":";
+    resp += (probe == 0) ? "true" : "false";
+    resp += ",\"probe_error\":" + String(probe);
+    resp += ",\"found_at_boot\":";
+    resp += controllerFoundAtBoot ? "true" : "false";
+    resp += ",\"last_error\":" + String(lastI2cError);
+    resp += ",\"ok_count\":" + String(i2cOkCount);
+    resp += ",\"fail_count\":" + String(i2cFailCount) + "}";
+    server.send(200, "application/json", resp);
+}
+
 // === Setup ===
 
 void setup() {
@@ -253,6 +305,10 @@ void setup() {
     // I2C init
     Wire.begin();   // default SDA=21, SCL=22
     delay(50);
+
+    // Bus scan FIRST: know whether the controller is even there before
+    // pretending to initialize it (2026-08-17).
+    scanI2cBus();
 
     // Initialize motor driver — delays match Hiwonder reference Python (0.5 sec).
     writeMotorReg(MOTOR_TYPE_ADDR, MOTOR_TYPE_JGB37_520);
@@ -281,6 +337,7 @@ void setup() {
     server.on("/stop",     HTTP_POST, handleStop);
     server.on("/drive",    HTTP_POST, handleDrive);
     server.on("/battery",  HTTP_GET,  handleBattery);
+    server.on("/i2c",      HTTP_GET,  handleI2cHealth);
     server.on("/test_m1",  HTTP_POST, []() { handleTestMotor(1); });
     server.on("/test_m2",  HTTP_POST, []() { handleTestMotor(2); });
     server.on("/test_m3",  HTTP_POST, []() { handleTestMotor(3); });
