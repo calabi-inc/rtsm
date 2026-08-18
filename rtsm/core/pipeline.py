@@ -72,6 +72,9 @@ class Pipeline:
         self.sweep_cache = sweep_cache or SweepCache()
         self._seg_analytics = seg_analytics
         self._latency_analytics = latency_analytics
+        # Frames dropped because a present pose failed matrix conversion
+        # (exposed via /stats; see _get_snapshot_via_queue)
+        self.pose_conversion_failures = 0
 
         # Periodic summary logger
         log_cfg = cfg.get("logging", {})
@@ -427,10 +430,18 @@ class Pipeline:
         intr = None
         if pkt.intr is not None:
             intr = {"fx": float(pkt.intr.fx), "fy": float(pkt.intr.fy), "cx": float(pkt.intr.cx), "cy": float(pkt.intr.cy)}
-        # Convert pose to T_cam_world if available
+        # Convert pose to T_cam_world if available.
+        # A frame with NO pose (pkt.pose is None — pose-less sources like the
+        # webcam demo) proceeds with pose_cam_T_world=None and keeps its
+        # camera-frame behavior. A pose that is PRESENT but fails conversion
+        # (raises, or produces a non-finite matrix) is corrupt input: the
+        # frame is DROPPED here. Letting it through would make the associator
+        # fall back to an identity world transform and insert objects at
+        # camera-frame coordinates into the world-frame map — silent
+        # corruption with no crash.
         T = None
-        try:
-            if pkt.pose is not None:
+        if pkt.pose is not None:
+            try:
                 T_wc = pkt.pose.T_wc()
                 # Note: ARKit→OpenCV camera flip is applied at ingestion
                 # (WebSocketReceiver) so T_wc is already in OpenCV convention.
@@ -448,8 +459,17 @@ class Pipeline:
                 T = np.eye(4, dtype=np.float32)
                 T[:3, :3] = R.T
                 T[:3, 3] = (-R.T @ t)
-        except Exception:
-            T = None
+                if not np.isfinite(T).all():
+                    raise ValueError("pose matrix has non-finite values")
+            except Exception as e:
+                self.pose_conversion_failures += 1
+                n = self.pose_conversion_failures
+                if n <= 3 or n % 100 == 0:
+                    logger.warning(
+                        f"[pipeline] dropping frame: pose present but conversion "
+                        f"failed (#{n}): {e}"
+                    )
+                return None, None
         return Snapshot(rgb=rgb, depth_m=depth_m, intrinsics=intr, pose_cam_T_world=T), pkt
 
     def _score_and_select(

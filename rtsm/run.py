@@ -345,6 +345,7 @@ def main():
         vectors=vectors,
         extra_stats_provider=lambda: {
             "ingest_q": ingest_q.qsize(),
+            "pose_conversion_failures": pipe.pose_conversion_failures,
         },
         reset_components=reset_components,
         seg_analytics=seg_analytics,
