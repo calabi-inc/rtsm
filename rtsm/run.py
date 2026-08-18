@@ -290,6 +290,7 @@ def main():
             latency_analytics=latency_analytics,
         )
         t = threading.Thread(target=sub.run_forever, daemon=True)
+        sub._thread = t  # watchdog reads thread liveness via sub.liveness()
         t.start()
         logger.info(f"ZeroMQ dual-socket subscriber started (camera + RTABMap)")
         frame_window_for_reset = sub.fw
@@ -318,6 +319,31 @@ def main():
         seg_analytics=seg_analytics,
         latency_analytics=latency_analytics,
     )
+
+    # ---------------- Frame-flow watchdog (live receivers only) ----------------
+    # Distinguishes "starved" (input stopped), "hung" (frames waiting, loop
+    # silent), and "receiver_dead" — surfaced on /healthz. Replay mode skips it
+    # (a finished replay looks exactly like starvation).
+    watchdog = None
+    wd_cfg = cfg.get("health", {}).get("watchdog", {})
+    if bool(wd_cfg.get("enable", True)) and not args.replay:
+        receiver_liveness = None
+        if receiver_type == "websocket":
+            receiver_liveness = ws_receiver.liveness
+        elif receiver_type == "zeromq":
+            receiver_liveness = sub.liveness
+        if receiver_liveness is not None:
+            from rtsm.core.watchdog import Watchdog
+            watchdog = Watchdog(
+                heartbeat=pipe.heartbeat,
+                queue_size=ingest_q.qsize,
+                receiver_liveness=receiver_liveness,
+                starved_after_s=float(wd_cfg.get("starved_after_s", 5.0)),
+                hung_after_s=float(wd_cfg.get("hung_after_s", 10.0)),
+                poll_interval_s=float(wd_cfg.get("poll_interval_s", 1.0)),
+            )
+            watchdog.start()
+            logger.info("Frame-flow watchdog started")
 
     # ---------------- Start FastAPI control-plane ----------------
     api_cfg = cfg.get("api", {})
@@ -355,6 +381,7 @@ def main():
         vis_broadcaster=vis_broadcaster,
         vis_registry=vis_server_registry,
         static_dir=static_dir,
+        frame_flow_provider=watchdog.status if watchdog else None,
     )
     start_server(app, host=host, port=port)
     logger.info(f"FastAPI server started on http://{display_host}:{port}")

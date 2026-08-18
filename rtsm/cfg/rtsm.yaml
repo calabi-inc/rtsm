@@ -318,6 +318,17 @@ api:
   host: "0.0.0.0"
   port: 8002
 
+# -------------------- Health --------------------
+# Frame-flow watchdog: classifies starved / hung / receiver_dead /
+# pose_degraded and surfaces it on /healthz. Observational only — it never
+# restarts anything. Not active in replay mode.
+health:
+  watchdog:
+    enable: true
+    poll_interval_s: 1.0            # How often the watchdog evaluates
+    starved_after_s: 5.0            # No client input for this long -> starved
+    hung_after_s: 10.0              # Frames waiting but pipeline loop silent -> hung
+
 # -------------------- MCP (Model Context Protocol) --------------------
 # Embedded MCP server exposes RTSM spatial memory as tools for AI agents.
 # Mounts on the existing API server at /mcp/ (SSE transport).

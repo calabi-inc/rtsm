@@ -117,6 +117,12 @@ class ZeroMQSubscriber:
         self._last_nonkf_enq_mono: float = 0.0
         self._nonkf_min_interval_s: float = 0.5  # Max ~2 non-KF per second
 
+        # Frame-flow liveness stamps (read by the watchdog). The subscriber
+        # thread is created externally; run.py assigns it to self._thread.
+        self.last_rx_mono: Optional[float] = None
+        self.last_enqueue_mono: Optional[float] = None
+        self._thread: Optional[Any] = None
+
     def close(self):
         """Clean up ZMQ resources."""
         try:
@@ -508,6 +514,7 @@ class ZeroMQSubscriber:
             self._latency_analytics.sample_queue_depth(self.ingest_q.qsize())
         ok = self.ingest_q.put(fp, block=False)
         if ok:
+            self.last_enqueue_mono = time.monotonic()
             self._last_enq_ts_ns = ts_ns
             if not is_keyframe:
                 self._last_nonkf_enq_mono = now_mono
@@ -518,6 +525,16 @@ class ZeroMQSubscriber:
                 self._latency_analytics.record_queue_drop()
             frame_type = "keyframe" if is_keyframe else "non-KF"
             logger.warning(f"[zeromq] ingest queue full; dropping {frame_type}")
+
+    def liveness(self) -> dict:
+        """Frame-flow liveness snapshot for the watchdog."""
+        t = self._thread
+        return {
+            "alive": bool(t is not None and t.is_alive()),
+            "last_rx_mono": self.last_rx_mono,
+            "last_enqueue_mono": self.last_enqueue_mono,
+            "tracking_drops": 0,  # no tracking-state concept on the ZMQ path
+        }
 
     def run_forever(self) -> None:
         """Main loop: poll both sockets and dispatch messages."""
@@ -542,6 +559,7 @@ class ZeroMQSubscriber:
 
                 # Handle camera messages
                 if self.camera_sock in socks:
+                    self.last_rx_mono = time.monotonic()
                     parts = self.camera_sock.recv_multipart()
                     topic = parts[0].decode(errors="ignore")
                     if topic == "camera.rgbd":
@@ -549,6 +567,7 @@ class ZeroMQSubscriber:
 
                 # Handle RTABMap messages
                 if self.rtabmap_sock in socks:
+                    self.last_rx_mono = time.monotonic()
                     parts = self.rtabmap_sock.recv_multipart()
                     topic = parts[0].decode(errors="ignore")
                     if topic == "rtabmap.tracking_pose":

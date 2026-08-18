@@ -21,6 +21,7 @@ from rtsm.core.ingest_gate import IngestGate
 from rtsm.stores.sweep_cache import SweepCache
 from rtsm.io.ingest_queue import IngestQueue
 from rtsm.core.datamodel import FramePacket
+from rtsm.core.watchdog import PipelineHeartbeat
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +76,8 @@ class Pipeline:
         # Frames dropped because a present pose failed matrix conversion
         # (exposed via /stats; see _get_snapshot_via_queue)
         self.pose_conversion_failures = 0
+        # Frame-flow heartbeat read by the watchdog (see rtsm/core/watchdog.py)
+        self.heartbeat = PipelineHeartbeat()
 
         # Periodic summary logger
         log_cfg = cfg.get("logging", {})
@@ -99,7 +102,7 @@ class Pipeline:
 
     def stop(self):
         self._running = False
-        
+
     # -------- single step (one snapshot) --------
     @torch.no_grad()
     def run_one_step(self):
@@ -117,9 +120,11 @@ class Pipeline:
         This function is called repeatedly in the main loop to process incoming frames.
         """
         snap, pkt = self._get_snapshot_via_queue()
+        self.heartbeat.beat_step()
         if snap is None:
             time.sleep(0.01)
             return
+        self.heartbeat.beat_frame()
 
         # Ingest gate: accept keyframes unconditionally, gate non-KFs with policy
         accept = True
@@ -497,7 +502,7 @@ class Pipeline:
         If there are fewer than K candidates, return all.
         The returned list is sorted in descending order of priority.
         """
-        
+
         if frame_hw is not None:
             H, W = frame_hw
         else:

@@ -35,6 +35,7 @@ def create_app(
     vis_broadcaster: Optional[Any] = None,
     vis_registry: Optional[Any] = None,
     static_dir: Optional[str] = None,
+    frame_flow_provider: Optional[Callable[[], Dict[str, Any]]] = None,
 ) -> FastAPI:
     """
     Build a FastAPI app exposing:
@@ -107,8 +108,23 @@ def create_app(
 
     # ---------------- Routes ----------------
     @app.get("/healthz")
-    def healthz() -> Dict[str, str]:
-        return {"status": "ok"}
+    def healthz() -> Dict[str, Any]:
+        # Additive shape: "status" stays "ok"/"degraded"; "frame_flow" and
+        # "reasons" appear only when a watchdog is wired (see
+        # rtsm/core/watchdog.py). Consumers reading only "status" are
+        # unaffected.
+        out: Dict[str, Any] = {"status": "ok"}
+        if frame_flow_provider is not None:
+            try:
+                ff = frame_flow_provider() or {}
+                out["frame_flow"] = ff
+                if ff.get("degraded"):
+                    out["status"] = "degraded"
+                    out["reasons"] = list(ff.get("reasons", []))
+            except Exception:
+                # Health endpoint must never fail because the watchdog did.
+                out["frame_flow"] = {"state": "unknown"}
+        return out
 
     @app.get("/readyz")
     def readyz() -> Dict[str, str]:
