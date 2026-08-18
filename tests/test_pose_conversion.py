@@ -11,7 +11,6 @@ its existing behavior: snapshot proceeds with pose_cam_T_world=None.
 from __future__ import annotations
 
 import numpy as np
-import pytest
 
 from rtsm.core.datamodel import FramePacket, PoseStamped, TimeBundle
 from rtsm.core.pipeline import Pipeline
