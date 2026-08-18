@@ -250,6 +250,12 @@ class WebSocketReceiver:
         self._last_enq_ts_ns: Optional[int] = None
         self._active_session_id: Optional[str] = None
 
+        # Frame-flow liveness stamps (server-lifetime, read by the watchdog).
+        # Bare float/int assignment is atomic under the GIL — no lock needed.
+        self.last_rx_mono: Optional[float] = None
+        self.last_enqueue_mono: Optional[float] = None
+        self.tracking_drops: int = 0
+
         # Threading
         self._server_thread: Optional[threading.Thread] = None
         self._shutdown_event = asyncio.Event()
@@ -343,6 +349,7 @@ class WebSocketReceiver:
             while True:
                 msg = await ws.receive()
                 if msg["type"] == "websocket.receive":
+                    self.last_rx_mono = time.monotonic()
                     if "bytes" in msg and msg["bytes"]:
                         # Binary frame
                         frames_received += 1
@@ -367,6 +374,7 @@ class WebSocketReceiver:
                                 ok = self.ingest_q.put(pkt, block=False)
                                 if ok:
                                     frames_enqueued += 1
+                                    self.last_enqueue_mono = time.monotonic()
                                     self._last_enq_ts_ns = pkt.time.t_sensor_ns
                                     if not pkt.is_keyframe:
                                         self._last_nonkf_enq_mono = time.monotonic()
@@ -536,6 +544,7 @@ class WebSocketReceiver:
         # 5. Tracking state filter
         tracking_state = header.get("tracking_state", "not_available")
         if self._require_tracking_normal and tracking_state != "normal":
+            self.tracking_drops += 1
             if self._latency_analytics:
                 self._latency_analytics.record_tracking_drop()
             logger.info(
@@ -714,6 +723,16 @@ class WebSocketReceiver:
             name="websocket-receiver",
         )
         self._server_thread.start()
+
+    def liveness(self) -> dict:
+        """Frame-flow liveness snapshot for the watchdog."""
+        t = self._server_thread
+        return {
+            "alive": bool(t is not None and t.is_alive()),
+            "last_rx_mono": self.last_rx_mono,
+            "last_enqueue_mono": self.last_enqueue_mono,
+            "tracking_drops": self.tracking_drops,
+        }
 
     def stop(self) -> None:
         """Signal shutdown (best-effort; daemon thread exits with process)."""
