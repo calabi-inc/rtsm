@@ -21,6 +21,7 @@ from rtsm.core.ingest_gate import IngestGate
 from rtsm.stores.sweep_cache import SweepCache
 from rtsm.io.ingest_queue import IngestQueue
 from rtsm.core.datamodel import FramePacket
+from rtsm.core.watchdog import PipelineHeartbeat
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +73,8 @@ class Pipeline:
         self.sweep_cache = sweep_cache or SweepCache()
         self._seg_analytics = seg_analytics
         self._latency_analytics = latency_analytics
+        # Frame-flow heartbeat read by the watchdog (see rtsm/core/watchdog.py)
+        self.heartbeat = PipelineHeartbeat()
 
         # Periodic summary logger
         log_cfg = cfg.get("logging", {})
@@ -114,9 +117,11 @@ class Pipeline:
         This function is called repeatedly in the main loop to process incoming frames.
         """
         snap, pkt = self._get_snapshot_via_queue()
+        self.heartbeat.beat_step()
         if snap is None:
             time.sleep(0.01)
             return
+        self.heartbeat.beat_frame()
 
         # Ingest gate: accept keyframes unconditionally, gate non-KFs with policy
         accept = True

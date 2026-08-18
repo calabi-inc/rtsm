@@ -35,6 +35,7 @@ def create_app(
     vis_broadcaster: Optional[Any] = None,
     vis_registry: Optional[Any] = None,
     static_dir: Optional[str] = None,
+    frame_flow_provider: Optional[Callable[[], Dict[str, Any]]] = None,
 ) -> FastAPI:
     """
     Build a FastAPI app exposing:
@@ -107,8 +108,23 @@ def create_app(
 
     # ---------------- Routes ----------------
     @app.get("/healthz")
-    def healthz() -> Dict[str, str]:
-        return {"status": "ok"}
+    def healthz() -> Dict[str, Any]:
+        # Additive shape: "status" stays "ok"/"degraded"; "frame_flow" and
+        # "reasons" appear only when a watchdog is wired (see
+        # rtsm/core/watchdog.py). Consumers reading only "status" are
+        # unaffected.
+        out: Dict[str, Any] = {"status": "ok"}
+        if frame_flow_provider is not None:
+            try:
+                ff = frame_flow_provider() or {}
+                out["frame_flow"] = ff
+                if ff.get("degraded"):
+                    out["status"] = "degraded"
+                    out["reasons"] = list(ff.get("reasons", []))
+            except Exception:
+                # Health endpoint must never fail because the watchdog did.
+                out["frame_flow"] = {"state": "unknown"}
+        return out
 
     @app.get("/readyz")
     def readyz() -> Dict[str, str]:
@@ -366,13 +382,14 @@ def create_app(
         Clears:
         - WorkingMemory (all objects, proto/confirmed)
         - ProximityIndex (spatial grid, via WM.clear())
+        - Vector store (FAISS LTM index — stale ids otherwise surface as
+          ghost objects in /search/semantic after reset)
         - SweepCache (sweep timestamps, camera snapshots)
         - FrameWindow (buffered RGB-D frames)
         - VisualizationServer registry (keyframes/point clouds)
 
         Does NOT clear:
         - FastSAM / CLIP models (expensive to reload)
-        - FAISS LTM vectors (preserves long-term memory)
         - Configuration
         """
         result: Dict[str, Any] = {
@@ -387,6 +404,17 @@ def create_app(
             result["cleared"]["working_memory"] = wm_result
         except Exception as e:
             result["cleared"]["working_memory"] = {"error": str(e)}
+
+        # Clear vector store — WM.clear() only clears the spatial index;
+        # the FAISS index is a separate store and must be reset with it.
+        if vectors is not None:
+            try:
+                if hasattr(vectors, "clear"):
+                    result["cleared"]["vector_store"] = vectors.clear()
+                else:
+                    result["cleared"]["vector_store"] = {"error": "vector store has no clear()"}
+            except Exception as e:
+                result["cleared"]["vector_store"] = {"error": str(e)}
 
         # Clear SweepCache
         if reset_components and reset_components.sweep_cache:
@@ -545,7 +573,9 @@ def create_app(
             entry: Dict[str, Any] = {
                 "id": oid,
                 "score": round(float(score), 4),
-                "confirmed": obj.confirmed if obj else True,
+                # A vector-store id with no WM object is stale (e.g. survived
+                # a partial clear) — never advertise it as confirmed.
+                "confirmed": obj.confirmed if obj else False,
                 "stability": round(float(obj.stability), 3) if obj else 0.0,
                 "xyz_world": obj.xyz_world.tolist() if obj and obj.xyz_world is not None else None,
             }
