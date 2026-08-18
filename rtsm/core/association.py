@@ -115,6 +115,16 @@ class Associator:
             # if caller supplied world->cam missing, try 'pose_world_T_cam' or identity
             T_wc = getattr(snap, 'pose_world_T_cam', None)
             if T_wc is None:
+                # Identity fallback = camera-frame map. Legitimate only for
+                # pose-less sources (e.g. webcam demo); frames whose pose
+                # failed conversion are dropped upstream in the pipeline and
+                # never reach here. Log once so this is never silent.
+                if not getattr(self, '_warned_identity_world', False):
+                    self._warned_identity_world = True
+                    logger.warning(
+                        "[assoc] snapshot has no camera pose; using identity "
+                        "world transform (camera-frame map)"
+                    )
                 T_cw = np.eye(4, dtype=np.float32)
                 T_wc = np.eye(4, dtype=np.float32)
             else:
