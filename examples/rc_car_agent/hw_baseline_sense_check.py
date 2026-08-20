@@ -44,34 +44,49 @@ def main() -> int:
     print(f"query={args.query!r}  freshness_gate={gate_s}s  "
           f"wall_threshold={wall_m}m\n")
 
-    wall_close = None          # tri-state so the first reading prints
-    detected = None
-    first_detect_mono = None
+    # Debounced two-state machines with an explicit UNKNOWN third value:
+    # a failed fetch is "don't know", never "gone" — one RTSM hiccup used
+    # to flip BOTH printers in the same tick, which read as the wall and
+    # detection triggers being tangled together (they share the server,
+    # not any logic). State changes need DEBOUNCE consecutive definite
+    # readings.
+    DEBOUNCE = 2
+    wall_state = None            # committed state: True/False/None(=never)
+    wall_pend, wall_pend_n = None, 0
+    det_state = None
+    det_pend, det_pend_n = None, 0
+    first_detect_stamp = None
+    fetch_fails = 0
     t_start = time.monotonic()
 
+    def commit(pend_val, pend_n, reading, state):
+        """Debounce helper: returns (new_pend, new_pend_n, fire) where
+        fire=True when `reading` has been seen DEBOUNCE times in a row and
+        differs from the committed state. reading=None never fires."""
+        if reading is None or reading == state:
+            return None, 0, False
+        if reading == pend_val:
+            pend_n += 1
+        else:
+            pend_val, pend_n = reading, 1
+        return pend_val, pend_n, pend_n >= DEBOUNCE
+
     while True:
+        stamp = time.monotonic() - t_start
+
+        # ── one /stats fetch: pose + clearance ───────────────────────────
         try:
             pose, clearance = rtsm.get_pose_and_clearance()
+            stats_ok = True
         except Exception:  # noqa: BLE001
-            pose, clearance = None, None
+            pose, clearance, stats_ok = None, None, False
 
         c_m = None
         if clearance and time.time() - clearance.get("timestamp", 0) <= 2.0:
             c_m = float(clearance.get("clearance_m", 0.0))
 
-        # ── wall rule (same threshold the relocate walk uses) ────────────
-        now_wall_close = (c_m is not None and c_m < wall_m)
-        if now_wall_close != wall_close:
-            stamp = time.monotonic() - t_start
-            if now_wall_close:
-                print(f"\n[{stamp:6.1f}s] WALL IS CLOSE  ({c_m:.2f} m ahead)")
-            elif wall_close is not None:
-                print(f"\n[{stamp:6.1f}s] wall clear     "
-                      f"({c_m if c_m is not None else float('nan'):.2f} m ahead)")
-            wall_close = now_wall_close
-
         # ── freshness-gated query (the baseline's acquisition rule) ─────
-        hit = None
+        hit, query_ok = None, True
         try:
             res = rtsm.semantic_query(args.query,
                                       top_k=cfg.baseline.gate_fetch_k)
@@ -80,34 +95,62 @@ def main() -> int:
             if fresh:
                 hit = fresh[0]
         except Exception:  # noqa: BLE001
-            pass
+            query_ok = False
 
-        now_detected = hit is not None
-        if now_detected != detected:
-            stamp = time.monotonic() - t_start
-            if now_detected:
-                if first_detect_mono is None:
-                    first_detect_mono = time.monotonic()
-                    print(f"\n[{stamp:6.1f}s] {args.query.upper()} DETECTED  "
-                          f"(FIRST detection {stamp:.1f}s after start)")
-                else:
-                    print(f"\n[{stamp:6.1f}s] {args.query.upper()} DETECTED")
-                age = time.time() - hit.last_seen_wall_utc
-                print(f"           id={hit.id}  score={hit.score:.4f}  "
-                      f"confirmed={hit.confirmed}  seen {age:.1f}s ago  "
-                      f"xyz=[{hit.xyz_world[0]:.2f}, {hit.xyz_world[2]:.2f}]")
-            elif detected is not None:
+        # ── fetch-health accounting (visible, never a state flip) ───────
+        if stats_ok and query_ok:
+            fetch_fails = 0
+        else:
+            fetch_fails += 1
+            if fetch_fails == 4:
+                print(f"\n[{stamp:6.1f}s] WARNING: RTSM not answering "
+                      f"(4 consecutive fetch failures) — states frozen "
+                      f"until it recovers")
+
+        # ── wall machine (reading is None when clearance unknown) ───────
+        wall_reading = None if c_m is None else (c_m < wall_m)
+        wall_pend, wall_pend_n, fire = commit(wall_pend, wall_pend_n,
+                                              wall_reading, wall_state)
+        if fire:
+            wall_state = wall_reading
+            if wall_state:
+                print(f"\n[{stamp:6.1f}s] WALL IS CLOSE  ({c_m:.2f} m ahead)")
+            else:
+                print(f"\n[{stamp:6.1f}s] wall clear     ({c_m:.2f} m ahead)")
+
+        # ── detection machine (reading None when the QUERY failed;
+        #    a successful query with no fresh hit is a definite False) ───
+        det_reading = None if not query_ok else (hit is not None)
+        det_pend, det_pend_n, fire = commit(det_pend, det_pend_n,
+                                            det_reading, det_state)
+        if fire:
+            det_prev = det_state
+            det_state = det_reading
+            if det_state:
+                extra = ""
+                if first_detect_stamp is None:
+                    first_detect_stamp = stamp
+                    extra = f"  (FIRST detection {stamp:.1f}s after start)"
+                print(f"\n[{stamp:6.1f}s] {args.query.upper()} DETECTED{extra}")
+                if hit is not None:
+                    age = time.time() - hit.last_seen_wall_utc
+                    print(f"           id={hit.id}  score={hit.score:.4f}  "
+                          f"confirmed={hit.confirmed}  seen {age:.1f}s ago  "
+                          f"xyz=[{hit.xyz_world[0]:.2f}, "
+                          f"{hit.xyz_world[2]:.2f}]")
+            elif det_prev is True:       # never print "lost" before a find
                 print(f"\n[{stamp:6.1f}s] {args.query} lost "
                       f"(no fresh hit in {gate_s}s window)")
-            detected = now_detected
 
         # ── status line ──────────────────────────────────────────────────
-        pose_age = ("n/a" if pose is None
+        pose_age = ("n/a " if pose is None
                     else f"{time.time() - pose.timestamp:4.1f}s")
-        c_txt = "none" if c_m is None else f"{c_m:4.2f}m"
+        c_txt = " ?  " if c_m is None else f"{c_m:4.2f}m"
+        det_txt = {True: "YES", False: "no ", None: " ? "}[det_state]
+        wall_txt = {True: "YES", False: "no ", None: " ? "}[wall_state]
+        health = "" if fetch_fails == 0 else f"  fetch_fails={fetch_fails}"
         print(f"\rpose_age={pose_age}  clearance={c_txt}  "
-              f"wall_close={str(bool(wall_close)):5}  "
-              f"detected={str(bool(detected)):5}   ",
+              f"wall_close={wall_txt}  detected={det_txt}{health}   ",
               end="", flush=True)
         time.sleep(0.35)
 
