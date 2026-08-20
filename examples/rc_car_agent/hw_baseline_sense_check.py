@@ -57,6 +57,8 @@ def main() -> int:
     det_pend, det_pend_n = None, 0
     first_detect_stamp = None
     fetch_fails = 0
+    tracked: dict = {}           # id -> lifecycle record (NEW/DROPPED table)
+    last_table_stamp = 0.0
     t_start = time.monotonic()
 
     def commit(pend_val, pend_n, reading, state):
@@ -86,7 +88,7 @@ def main() -> int:
             c_m = float(clearance.get("clearance_m", 0.0))
 
         # ── freshness-gated query (the baseline's acquisition rule) ─────
-        hit, query_ok = None, True
+        hit, fresh, query_ok = None, [], True
         try:
             res = rtsm.semantic_query(args.query,
                                       top_k=cfg.baseline.gate_fetch_k)
@@ -96,6 +98,48 @@ def main() -> int:
                 hit = fresh[0]
         except Exception:  # noqa: BLE001
             query_ok = False
+
+        # ── per-id candidate table: every id that ever passed the gate.
+        #    NEW prints on first appearance; DROPPED prints when an id is
+        #    absent from the fresh set for DEBOUNCE consecutive good
+        #    queries (a specific registration lost freshness — occlusion,
+        #    association miss, or the camera moved on). Duplicates of one
+        #    physical object show up here as separate ids at ~the same
+        #    xyz: that is the proto/association behavior made visible. ──
+        if query_ok:
+            fresh_ids = {h.id for h in fresh}
+            for h in fresh:
+                t = tracked.get(h.id)
+                if t is None:
+                    tracked[h.id] = {
+                        "first": stamp, "last_fresh": stamp,
+                        "best_score": h.score, "confirmed": h.confirmed,
+                        "xyz": h.xyz_world, "polls_fresh": 1,
+                        "absent": 0, "dropped": False,
+                    }
+                    print(f"\n[{stamp:6.1f}s] NEW candidate  id={h.id}  "
+                          f"score={h.score:.4f}  confirmed={h.confirmed}  "
+                          f"xyz=[{h.xyz_world[0]:.2f}, {h.xyz_world[2]:.2f}]")
+                else:
+                    t["last_fresh"] = stamp
+                    t["polls_fresh"] += 1
+                    t["absent"] = 0
+                    t["best_score"] = max(t["best_score"], h.score)
+                    t["confirmed"] = t["confirmed"] or h.confirmed
+                    if t["dropped"]:
+                        t["dropped"] = False
+                        print(f"\n[{stamp:6.1f}s] RE-ACQUIRED    id={h.id}  "
+                              f"score={h.score:.4f}")
+            for oid, t in tracked.items():
+                if oid in fresh_ids or t["dropped"]:
+                    continue
+                t["absent"] += 1
+                if t["absent"] >= DEBOUNCE:
+                    t["dropped"] = True
+                    held = t["last_fresh"] - t["first"]
+                    print(f"\n[{stamp:6.1f}s] DROPPED        id={oid}  "
+                          f"(fresh for {held:.1f}s, {t['polls_fresh']} polls, "
+                          f"best score {t['best_score']:.4f})")
 
         # ── fetch-health accounting (visible, never a state flip) ───────
         if stats_ok and query_ok:
@@ -142,15 +186,31 @@ def main() -> int:
                 print(f"\n[{stamp:6.1f}s] {args.query} lost "
                       f"(no fresh hit in {gate_s}s window)")
 
+        # ── periodic candidate-table dump ────────────────────────────────
+        if tracked and stamp - last_table_stamp >= 30.0:
+            last_table_stamp = stamp
+            live = sum(1 for t in tracked.values() if not t["dropped"])
+            print(f"\n[{stamp:6.1f}s] candidate table "
+                  f"({live} live / {len(tracked)} seen):")
+            for oid, t in sorted(tracked.items(), key=lambda kv: kv[1]["first"]):
+                state = "LIVE   " if not t["dropped"] else "dropped"
+                print(f"    {state} id={oid}  first={t['first']:6.1f}s  "
+                      f"last={t['last_fresh']:6.1f}s  "
+                      f"polls={t['polls_fresh']:3d}  "
+                      f"best={t['best_score']:.4f}  conf={t['confirmed']}  "
+                      f"xyz=[{t['xyz'][0]:.2f}, {t['xyz'][2]:.2f}]")
+
         # ── status line ──────────────────────────────────────────────────
         pose_age = ("n/a " if pose is None
                     else f"{time.time() - pose.timestamp:4.1f}s")
         c_txt = " ?  " if c_m is None else f"{c_m:4.2f}m"
         det_txt = {True: "YES", False: "no ", None: " ? "}[det_state]
         wall_txt = {True: "YES", False: "no ", None: " ? "}[wall_state]
+        live_n = sum(1 for t in tracked.values() if not t["dropped"])
         health = "" if fetch_fails == 0 else f"  fetch_fails={fetch_fails}"
         print(f"\rpose_age={pose_age}  clearance={c_txt}  "
-              f"wall_close={wall_txt}  detected={det_txt}{health}   ",
+              f"wall_close={wall_txt}  detected={det_txt}  "
+              f"ids={live_n}/{len(tracked)}{health}   ",
               end="", flush=True)
         time.sleep(0.35)
 
