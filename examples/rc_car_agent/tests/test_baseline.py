@@ -9,7 +9,9 @@ from dataclasses import replace
 
 import pytest
 
-from baseline_search import AcquireResult, BaselineSearcher, derive_seed, fresh_hits
+from baseline_search import (AcquireResult, BaselineSearcher,
+                             best_relocation_rotation, derive_seed,
+                             fresh_hits)
 from config import load_config
 from rtsm_client import PoseSample, SemanticHit, SemanticResult
 from test_nav import FakeBridge
@@ -227,6 +229,42 @@ def _searcher_with_progress(cfg, rtsm):
         progress=progress,
     )
     return s, progress
+
+
+# ── steered relocation (2026-08-17: walk toward measured open space) ────
+
+
+def test_steer_picks_most_open_heading():
+    # Step 2 (0-indexed) of 12 is the most open; its heading is 3 steps
+    # forward from sweep end -> rotate 3 steps in the sweep direction.
+    c = [0.5] * 12
+    c[2] = 3.0
+    assert best_relocation_rotation(c, 12) == (3, 1.0)
+
+
+def test_steer_takes_shortest_way_around():
+    # Step 9 of 12: 10 forward vs 2 backward -> 2 steps the OTHER way.
+    c = [0.5] * 12
+    c[9] = 3.0
+    assert best_relocation_rotation(c, 12) == (2, -1.0)
+
+
+def test_steer_tie_prefers_fewer_steps():
+    c = [None] * 12
+    c[0] = 2.0                                   # 1 step forward
+    c[9] = 2.0                                   # 2 steps backward
+    assert best_relocation_rotation(c, 12) == (1, 1.0)
+
+
+def test_steer_none_without_samples():
+    assert best_relocation_rotation([None] * 12, 12) is None
+
+
+def test_steer_full_circle_costs_zero():
+    # The last step's heading IS the sweep-end heading: no rotation.
+    c = [0.5] * 12
+    c[11] = 3.0
+    assert best_relocation_rotation(c, 12) == (0, 1.0)
 
 
 # ── depth wall guard (2026-08-16: no corners, the camera senses walls) ───

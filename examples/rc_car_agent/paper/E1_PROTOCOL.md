@@ -9,7 +9,19 @@ data to be valid.
 
 **Conditions.** (a) `rtsm` — memory: plan from the scanned map, drive.
 (b) `baseline` — memoryless: freshness-gated search (only observations
-< 2 s old are usable), then drive. Same perception, same pose stream, same
+< 2 s old are usable), then drive.
+
+> **AMENDMENT 2026-08-17 (pre-campaign, no trial data): steered
+> relocation.** The baseline's search sweep records the forward depth
+> clearance at each dwell heading; after a fruitless 360° sweep it
+> rotates the SHORTEST way to the most-open recorded heading before its
+> relocate walk (live walk guard still applies; blocked/stale falls
+> back to rotate-until-open). Rationale: with no obstacle sensors the
+> searcher previously walked whatever direction the sweep ended on —
+> into narrow gaps and corners where the camera captures little. Each
+> steer is logged (`relocate_steered`: rotation steps, best clearance).
+> This STRENGTHENS the memoryless comparator; conservative w.r.t. the
+> memory-advantage claim. Same perception, same pose stream, same
 controller, same target-selection rule; the ONLY masked capability is
 persistence. **Budgets are hard TOTAL clocks from command receipt** —
 planning/selection time counts in (a) exactly as search time counts in

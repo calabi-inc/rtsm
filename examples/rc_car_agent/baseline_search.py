@@ -79,6 +79,34 @@ def derive_seed(cfg_seed: int, trial_id: str) -> int:
     return sum(ord(c) for c in trial_id) * 2654435761 % (2 ** 31)
 
 
+def best_relocation_rotation(clearances, steps_per_sweep: int):
+    """Steered relocation (2026-08-17): given the clearance sampled at
+    each sweep step (list of Optional[float], index = step), return
+    (n_steps, sign) — the SHORTEST rotation from the sweep-end heading to
+    the most-open recorded heading — or None when no valid samples exist.
+    sign is +1.0 to continue in the sweep's rotation direction, -1.0 to
+    rotate back the other way. Ties on clearance prefer fewer steps.
+
+    Heading bookkeeping: step k's dwell heading is (k+1) rotation steps
+    from the sweep start; a full sweep returns to the start heading, so
+    reaching step k again costs (k+1) mod N steps forward or N-that
+    backward."""
+    best = None                       # (clearance, -steps, n_steps, sign)
+    n_total = int(steps_per_sweep)
+    for k, c in enumerate(clearances[:n_total]):
+        if c is None:
+            continue
+        fwd = (k + 1) % n_total
+        bwd = n_total - fwd
+        steps, sign = (fwd, 1.0) if fwd <= bwd else (bwd, -1.0)
+        cand = (float(c), -steps, steps, sign)
+        if best is None or cand[:2] > best[:2]:
+            best = cand
+    if best is None:
+        return None
+    return best[2], best[3]
+
+
 def fresh_hits(hits, now_wall: float, gate_s: float, skew_tol_s: float = 0.5):
     """The freshness gate: navigable hits observed within gate_s of now.
     Fail-closed twice over: a hit without last_seen_wall_utc (old server)
@@ -153,6 +181,9 @@ class BaselineSearcher:
 
         while True:
             step_in_sweep = 0
+            # Clearance sampled at each dwell heading — the sweep doubles
+            # as a free 360° depth survey that steers the relocation.
+            heading_clearance = [None] * b.steps_per_sweep
             while step_in_sweep < b.steps_per_sweep:
                 # one rotate step, then dwell + poll
                 r = self._move(sweep_sign * -b.sweep_step_turn,
@@ -163,6 +194,7 @@ class BaselineSearcher:
                 r = self._dwell_and_watch_pose(b.dwell_s, deadline)
                 if r is not None:
                     return self._stamp(r, t0, sweeps)
+                heading_clearance[step_in_sweep] = self._clearance_now()
 
                 found = self._gated_poll(query)
                 if isinstance(found, AcquireResult):
@@ -180,12 +212,38 @@ class BaselineSearcher:
 
             sweeps += 1
             # Full sweep, nothing fresh — relocate to a new viewpoint.
+            # STEERED (2026-08-17): rotate the shortest way to the most
+            # open heading the sweep just measured, so the searcher walks
+            # toward space — never into narrow gaps, out of corners
+            # toward the wide side, re-sweeping from vantage points that
+            # can actually see objects.
+            steer = best_relocation_rotation(heading_clearance,
+                                             b.steps_per_sweep)
+            if steer is not None:
+                n_steps, sign = steer
+                if self._logger is not None:
+                    valid = [c for c in heading_clearance if c is not None]
+                    self._logger.log_event(
+                        "relocate_steered", time.monotonic() - t0,
+                        rotate_steps=int(n_steps * sign),
+                        best_clearance_m=round(max(valid), 3),
+                        sweeps=sweeps)
+                for _ in range(int(n_steps)):
+                    r = self._move(sweep_sign * sign * -b.sweep_step_turn,
+                                   sweep_sign * sign * b.sweep_step_turn,
+                                   b.sweep_step_s, deadline)
+                    if r is not None:
+                        return self._interrupted(r, t0, sweeps)
+                r = self._dwell_and_watch_pose(min(b.dwell_s, 0.6), deadline)
+                if r is not None:
+                    return self._stamp(r, t0, sweeps)
             # Wall guard (2026-08-16): the walk needs measured open space
-            # ahead (live depth clearance served by RTSM). When blocked,
-            # rotate one step at a time and walk the FIRST open direction
-            # — the car turns away from walls instead of grinding them.
-            # A full circle with no open direction -> stay put, keep
-            # sweeping (logged; budget keeps running).
+            # ahead (live depth clearance served by RTSM). When blocked
+            # (or the steer target went stale), rotate one step at a time
+            # and walk the FIRST open direction — the car turns away from
+            # walls instead of grinding them. A full circle with no open
+            # direction -> stay put, keep sweeping (logged; budget keeps
+            # running).
             walked = False
             for _ in range(b.steps_per_sweep):
                 if self._walk_is_clear():
@@ -215,24 +273,29 @@ class BaselineSearcher:
 
     # ── helpers ──────────────────────────────────────────────────────────
 
-    def _walk_is_clear(self) -> bool:
-        """True when the live depth stream measures at least
-        min_walk_clearance_m of open space ahead, with a fresh sample.
-        Fail-closed everywhere: no clearance data, stale data, or an
-        RTSM hiccup all mean 'do not walk blind'. Guard disabled when
-        min_walk_clearance_m <= 0."""
+    def _clearance_now(self):
+        """Fresh clearance meters, or None (no data / stale / hiccup)."""
         b = self._cfg.baseline
-        if b.min_walk_clearance_m <= 0:
-            return True
         try:
             c = self._rtsm.get_forward_clearance()
         except Exception:  # noqa: BLE001
-            return False
+            return None
         if c is None:
-            return False
+            return None
         if self._now_wall() - float(c.get("timestamp", 0)) > b.clearance_max_age_s:
-            return False
-        return float(c.get("clearance_m", 0.0)) >= b.min_walk_clearance_m
+            return None
+        return float(c.get("clearance_m", 0.0))
+
+    def _walk_is_clear(self) -> bool:
+        """True when the live depth stream measures at least
+        min_walk_clearance_m of open space ahead, with a fresh sample.
+        Fail-closed: no data / stale / hiccup all mean 'do not walk
+        blind'. Guard disabled when min_walk_clearance_m <= 0."""
+        b = self._cfg.baseline
+        if b.min_walk_clearance_m <= 0:
+            return True
+        c_m = self._clearance_now()
+        return c_m is not None and c_m >= b.min_walk_clearance_m
 
     def _seed_epoch(self) -> None:
         try:
