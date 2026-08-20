@@ -76,6 +76,7 @@ def main() -> int:
                                       top_k=cfg.baseline.gate_fetch_k)
             fresh = fresh_hits(res.results, time.time(), gate_s,
                                cfg.baseline.clock_skew_tol_s)
+            fresh = fresh[:1]   # top-1 only: the best-ranked fresh match
         except Exception:  # noqa: BLE001
             query_ok = False
 
