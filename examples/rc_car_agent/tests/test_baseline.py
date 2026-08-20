@@ -11,7 +11,7 @@ import pytest
 
 from baseline_search import (AcquireResult, BaselineSearcher,
                              best_relocation_rotation, derive_seed,
-                             fresh_hits)
+                             fresh_hits, relocation_stride_m)
 from config import load_config
 from rtsm_client import PoseSample, SemanticHit, SemanticResult
 from test_nav import FakeBridge
@@ -21,7 +21,11 @@ FAST = replace(
     BASE,
     nav=replace(BASE.nav, tick_s=0.01, stale_abort_s=0.5),
     baseline=replace(BASE.baseline, sweep_step_s=0.1, dwell_s=0.15,
-                     steps_per_sweep=3, walk_s=0.1, walk_speed=0.2),
+                     steps_per_sweep=3, walk_s=0.1, walk_speed=0.2,
+                     walk_min_m=0.01, walk_chunk_m=0.02, walk_max_m=0.03),
+    # Unit-speed calibration so strides take milliseconds, not the real
+    # rig's 25 s/m.
+    calibration=replace(BASE.calibration, speed_scale_mps=1.0),
 )
 
 
@@ -265,6 +269,13 @@ def test_steer_full_circle_costs_zero():
     c = [0.5] * 12
     c[11] = 3.0
     assert best_relocation_rotation(c, 12) == (0, 1.0)
+
+
+def test_stride_is_half_clearance_capped_and_floored():
+    assert relocation_stride_m(2.0, 0.12, 1.2) == 1.0     # half
+    assert relocation_stride_m(5.0, 0.12, 1.2) == 1.2     # cap
+    assert relocation_stride_m(0.1, 0.12, 1.2) == 0.12    # floor
+    assert relocation_stride_m(None, 0.12, 1.2) == 0.12   # no data -> floor
 
 
 # ── depth wall guard (2026-08-16: no corners, the camera senses walls) ───

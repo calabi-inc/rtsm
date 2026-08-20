@@ -79,6 +79,16 @@ def derive_seed(cfg_seed: int, trial_id: str) -> int:
     return sum(ord(c) for c in trial_id) * 2654435761 % (2 ** 31)
 
 
+def relocation_stride_m(clearance_m, walk_min_m: float, walk_max_m: float):
+    """Steered stride (2026-08-17): half the measured open depth, floored
+    and capped — the next sweep happens mid-open-area, and the stride can
+    never overrun because it commits only half the free space the sweep
+    just measured. None clearance -> the floor (old fixed-hop behavior)."""
+    if clearance_m is None:
+        return walk_min_m
+    return max(walk_min_m, min(walk_max_m, float(clearance_m) / 2.0))
+
+
 def best_relocation_rotation(clearances, steps_per_sweep: int):
     """Steered relocation (2026-08-17): given the clearance sampled at
     each sweep step (list of Optional[float], index = step), return
@@ -243,12 +253,17 @@ class BaselineSearcher:
             # and walk the FIRST open direction — the car turns away from
             # walls instead of grinding them. A full circle with no open
             # direction -> stay put, keep sweeping (logged; budget keeps
-            # running).
+            # running). Stride = half the clearance measured at the walk
+            # heading (2026-08-17): the next sweep happens mid-open-area.
             walked = False
             for _ in range(b.steps_per_sweep):
-                if self._walk_is_clear():
-                    r = self._move(b.walk_speed, b.walk_speed, b.walk_s,
-                                   deadline)
+                c_now = self._clearance_now()
+                if (b.min_walk_clearance_m <= 0
+                        or (c_now is not None
+                            and c_now >= b.min_walk_clearance_m)):
+                    stride = relocation_stride_m(c_now, b.walk_min_m,
+                                                 b.walk_max_m)
+                    r = self._walk_stride(stride, deadline)
                     if r is not None:
                         return self._interrupted(r, t0, sweeps)
                     walked = True
@@ -285,6 +300,27 @@ class BaselineSearcher:
         if self._now_wall() - float(c.get("timestamp", 0)) > b.clearance_max_age_s:
             return None
         return float(c.get("clearance_m", 0.0))
+
+    def _walk_stride(self, stride_m: float, deadline: float):
+        """Walk stride_m forward in chunks of walk_chunk_m, re-checking
+        the live clearance guard between chunks — a long stride must not
+        outrun a stale measurement. Blocked mid-stride stops silently
+        (partial progress is progress; the next sweep happens wherever we
+        stopped). Returns an interrupt name from _move, or None."""
+        b = self._cfg.baseline
+        cal = self._cfg.calibration
+        speed_mps = max(1e-6, b.walk_speed * cal.speed_scale_mps)
+        remaining = float(stride_m)
+        while remaining > 1e-3:
+            if not self._walk_is_clear():
+                return None
+            chunk = min(b.walk_chunk_m, remaining)
+            r = self._move(b.walk_speed, b.walk_speed,
+                           chunk / speed_mps, deadline)
+            if r is not None:
+                return r
+            remaining -= chunk
+        return None
 
     def _walk_is_clear(self) -> bool:
         """True when the live depth stream measures at least

@@ -21,7 +21,12 @@ data to be valid.
 > into narrow gaps and corners where the camera captures little. Each
 > steer is logged (`relocate_steered`: rotation steps, best clearance).
 > This STRENGTHENS the memoryless comparator; conservative w.r.t. the
-> memory-advantage claim. Same perception, same pose stream, same
+> memory-advantage claim.
+> **Stride (same amendment): the relocate walk covers HALF the measured
+> open depth** toward the chosen heading (capped 1.2 m, floored 0.12 m),
+> walked in 0.3 m chunks with a live clearance re-check between chunks —
+> the next sweep happens mid-open-area with visibility all around,
+> replacing the legacy fixed 12 cm hop from the blind-walk era. Same perception, same pose stream, same
 controller, same target-selection rule; the ONLY masked capability is
 persistence. **Budgets are hard TOTAL clocks from command receipt** —
 planning/selection time counts in (a) exactly as search time counts in

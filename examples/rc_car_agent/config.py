@@ -144,6 +144,14 @@ class BaselineCfg:
     # Session-independent: no setup, survives stream restarts.
     min_walk_clearance_m: float = 0.60
     clearance_max_age_s: float = 2.0     # stale clearance = blind = no walk
+    # Steered stride (2026-08-17): walk HALF the measured open depth
+    # toward the most open heading — the next sweep happens mid-open-area
+    # with visibility all around, instead of a fixed 12 cm hop (a relic
+    # of the blind-walk era). Capped, floored, and walked in chunks with
+    # a clearance re-check between chunks.
+    walk_max_m: float = 1.2
+    walk_min_m: float = 0.12
+    walk_chunk_m: float = 0.30
 
 
 @dataclass(frozen=True)
