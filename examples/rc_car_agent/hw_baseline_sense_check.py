@@ -2,21 +2,25 @@
 Hand-held sense check for the two baseline-search inputs (2026-08-17).
 
 Run with RTSM up and the phone streaming, then walk around holding the
-phone (or the whole car) and watch the prints:
+phone (or the whole car):
 
     .venv/Scripts/python.exe hw_baseline_sense_check.py [--query "tissue box"]
 
-  * WALL IS CLOSE  — forward depth clearance dropped below the walk
-                     threshold (the exact signal the searcher's relocate
-                     walk checks). Point at a wall and approach it.
-  * TISSUE BOX DETECTED — the freshness-gated semantic query returned a
-                     fresh hit: the SAME gate the baseline's acquisition
-                     poll applies. Point at the object and hold it in
-                     view; on a fresh map the seconds until this prints
-                     ARE the proto->searchable maturation latency.
+Prints, with timestamps:
 
-Status line updates in place; state TRANSITIONS print on their own lines
-with timestamps. Ctrl-C to exit. Read-only — no motion commands.
+    [  12.3s] tissue box 1 found
+    [  18.9s] tissue box 1 lost
+    [  25.0s] tissue box 2 found        <- a second registration (new id)
+    [  31.2s] wall close (0.44 m)
+    [  40.8s] wall clear (1.62 m)
+
+"tissue box N" numbers distinct memory ids in order of first appearance
+(same physical box re-registered under a new id = next number). found /
+lost use the SAME freshness gate the baseline's acquisition poll applies;
+wall close/clear uses the SAME clearance threshold the relocate walk
+checks. Transitions are debounced (2 consecutive readings) and fetch
+failures freeze state rather than printing false losses. Read-only.
+Ctrl-C to exit.
 """
 
 from __future__ import annotations
@@ -44,39 +48,18 @@ def main() -> int:
     print(f"query={args.query!r}  freshness_gate={gate_s}s  "
           f"wall_threshold={wall_m}m\n")
 
-    # Debounced two-state machines with an explicit UNKNOWN third value:
-    # a failed fetch is "don't know", never "gone" — one RTSM hiccup used
-    # to flip BOTH printers in the same tick, which read as the wall and
-    # detection triggers being tangled together (they share the server,
-    # not any logic). State changes need DEBOUNCE consecutive definite
-    # readings.
     DEBOUNCE = 2
-    wall_state = None            # committed state: True/False/None(=never)
+    wall_state = None                 # True/False/None(never committed)
     wall_pend, wall_pend_n = None, 0
-    det_state = None
-    det_pend, det_pend_n = None, 0
-    first_detect_stamp = None
+    ordinal: dict = {}                # id -> "tissue box N" number
+    live: dict = {}                   # id -> True(live)/False(lost)
+    absent: dict = {}                 # id -> consecutive absent count
     fetch_fails = 0
-    tracked: dict = {}           # id -> lifecycle record (NEW/DROPPED table)
-    last_table_stamp = 0.0
     t_start = time.monotonic()
-
-    def commit(pend_val, pend_n, reading, state):
-        """Debounce helper: returns (new_pend, new_pend_n, fire) where
-        fire=True when `reading` has been seen DEBOUNCE times in a row and
-        differs from the committed state. reading=None never fires."""
-        if reading is None or reading == state:
-            return None, 0, False
-        if reading == pend_val:
-            pend_n += 1
-        else:
-            pend_val, pend_n = reading, 1
-        return pend_val, pend_n, pend_n >= DEBOUNCE
 
     while True:
         stamp = time.monotonic() - t_start
 
-        # ── one /stats fetch: pose + clearance ───────────────────────────
         try:
             pose, clearance = rtsm.get_pose_and_clearance()
             stats_ok = True
@@ -87,130 +70,74 @@ def main() -> int:
         if clearance and time.time() - clearance.get("timestamp", 0) <= 2.0:
             c_m = float(clearance.get("clearance_m", 0.0))
 
-        # ── freshness-gated query (the baseline's acquisition rule) ─────
-        hit, fresh, query_ok = None, [], True
+        fresh, query_ok = [], True
         try:
             res = rtsm.semantic_query(args.query,
                                       top_k=cfg.baseline.gate_fetch_k)
             fresh = fresh_hits(res.results, time.time(), gate_s,
                                cfg.baseline.clock_skew_tol_s)
-            if fresh:
-                hit = fresh[0]
         except Exception:  # noqa: BLE001
             query_ok = False
 
-        # ── per-id candidate table: every id that ever passed the gate.
-        #    NEW prints on first appearance; DROPPED prints when an id is
-        #    absent from the fresh set for DEBOUNCE consecutive good
-        #    queries (a specific registration lost freshness — occlusion,
-        #    association miss, or the camera moved on). Duplicates of one
-        #    physical object show up here as separate ids at ~the same
-        #    xyz: that is the proto/association behavior made visible. ──
-        if query_ok:
-            fresh_ids = {h.id for h in fresh}
-            for h in fresh:
-                t = tracked.get(h.id)
-                if t is None:
-                    tracked[h.id] = {
-                        "first": stamp, "last_fresh": stamp,
-                        "best_score": h.score, "confirmed": h.confirmed,
-                        "xyz": h.xyz_world, "polls_fresh": 1,
-                        "absent": 0, "dropped": False,
-                    }
-                    print(f"\n[{stamp:6.1f}s] NEW candidate  id={h.id}  "
-                          f"score={h.score:.4f}  confirmed={h.confirmed}  "
-                          f"xyz=[{h.xyz_world[0]:.2f}, {h.xyz_world[2]:.2f}]")
-                else:
-                    t["last_fresh"] = stamp
-                    t["polls_fresh"] += 1
-                    t["absent"] = 0
-                    t["best_score"] = max(t["best_score"], h.score)
-                    t["confirmed"] = t["confirmed"] or h.confirmed
-                    if t["dropped"]:
-                        t["dropped"] = False
-                        print(f"\n[{stamp:6.1f}s] RE-ACQUIRED    id={h.id}  "
-                              f"score={h.score:.4f}")
-            for oid, t in tracked.items():
-                if oid in fresh_ids or t["dropped"]:
-                    continue
-                t["absent"] += 1
-                if t["absent"] >= DEBOUNCE:
-                    t["dropped"] = True
-                    held = t["last_fresh"] - t["first"]
-                    print(f"\n[{stamp:6.1f}s] DROPPED        id={oid}  "
-                          f"(fresh for {held:.1f}s, {t['polls_fresh']} polls, "
-                          f"best score {t['best_score']:.4f})")
-
-        # ── fetch-health accounting (visible, never a state flip) ───────
         if stats_ok and query_ok:
             fetch_fails = 0
         else:
             fetch_fails += 1
             if fetch_fails == 4:
-                print(f"\n[{stamp:6.1f}s] WARNING: RTSM not answering "
-                      f"(4 consecutive fetch failures) — states frozen "
-                      f"until it recovers")
+                print(f"\n[{stamp:6.1f}s] warning: RTSM not answering — "
+                      f"holding state until it recovers")
 
-        # ── wall machine (reading is None when clearance unknown) ───────
-        wall_reading = None if c_m is None else (c_m < wall_m)
-        wall_pend, wall_pend_n, fire = commit(wall_pend, wall_pend_n,
-                                              wall_reading, wall_state)
-        if fire:
-            wall_state = wall_reading
-            if wall_state:
-                print(f"\n[{stamp:6.1f}s] WALL IS CLOSE  ({c_m:.2f} m ahead)")
+        # ── wall (debounced; unknown never flips state) ──────────────────
+        reading = None if c_m is None else (c_m < wall_m)
+        if reading is None or reading == wall_state:
+            wall_pend, wall_pend_n = None, 0
+        else:
+            if reading == wall_pend:
+                wall_pend_n += 1
             else:
-                print(f"\n[{stamp:6.1f}s] wall clear     ({c_m:.2f} m ahead)")
+                wall_pend, wall_pend_n = reading, 1
+            if wall_pend_n >= DEBOUNCE:
+                wall_state = reading
+                wall_pend, wall_pend_n = None, 0
+                word = "wall close" if wall_state else "wall clear"
+                print(f"\n[{stamp:6.1f}s] {word} ({c_m:.2f} m)")
 
-        # ── detection machine (reading None when the QUERY failed;
-        #    a successful query with no fresh hit is a definite False) ───
-        det_reading = None if not query_ok else (hit is not None)
-        det_pend, det_pend_n, fire = commit(det_pend, det_pend_n,
-                                            det_reading, det_state)
-        if fire:
-            det_prev = det_state
-            det_state = det_reading
-            if det_state:
-                extra = ""
-                if first_detect_stamp is None:
-                    first_detect_stamp = stamp
-                    extra = f"  (FIRST detection {stamp:.1f}s after start)"
-                print(f"\n[{stamp:6.1f}s] {args.query.upper()} DETECTED{extra}")
-                if hit is not None:
-                    age = time.time() - hit.last_seen_wall_utc
-                    print(f"           id={hit.id}  score={hit.score:.4f}  "
-                          f"confirmed={hit.confirmed}  seen {age:.1f}s ago  "
-                          f"xyz=[{hit.xyz_world[0]:.2f}, "
-                          f"{hit.xyz_world[2]:.2f}]")
-            elif det_prev is True:       # never print "lost" before a find
-                print(f"\n[{stamp:6.1f}s] {args.query} lost "
-                      f"(no fresh hit in {gate_s}s window)")
-
-        # ── periodic candidate-table dump ────────────────────────────────
-        if tracked and stamp - last_table_stamp >= 30.0:
-            last_table_stamp = stamp
-            live = sum(1 for t in tracked.values() if not t["dropped"])
-            print(f"\n[{stamp:6.1f}s] candidate table "
-                  f"({live} live / {len(tracked)} seen):")
-            for oid, t in sorted(tracked.items(), key=lambda kv: kv[1]["first"]):
-                state = "LIVE   " if not t["dropped"] else "dropped"
-                print(f"    {state} id={oid}  first={t['first']:6.1f}s  "
-                      f"last={t['last_fresh']:6.1f}s  "
-                      f"polls={t['polls_fresh']:3d}  "
-                      f"best={t['best_score']:.4f}  conf={t['confirmed']}  "
-                      f"xyz=[{t['xyz'][0]:.2f}, {t['xyz'][2]:.2f}]")
+        # ── per-object found/lost (debounced via absent counter) ────────
+        if query_ok:
+            fresh_ids = {h.id for h in fresh}
+            for h in fresh:
+                if h.id not in ordinal:
+                    ordinal[h.id] = len(ordinal) + 1
+                    live[h.id] = True
+                    absent[h.id] = 0
+                    print(f"\n[{stamp:6.1f}s] {args.query} "
+                          f"{ordinal[h.id]} found")
+                elif not live[h.id]:
+                    live[h.id] = True
+                    absent[h.id] = 0
+                    print(f"\n[{stamp:6.1f}s] {args.query} "
+                          f"{ordinal[h.id]} found again")
+                else:
+                    absent[h.id] = 0
+            for oid, is_live in live.items():
+                if not is_live or oid in fresh_ids:
+                    continue
+                absent[oid] += 1
+                if absent[oid] >= DEBOUNCE:
+                    live[oid] = False
+                    print(f"\n[{stamp:6.1f}s] {args.query} "
+                          f"{ordinal[oid]} lost")
 
         # ── status line ──────────────────────────────────────────────────
         pose_age = ("n/a " if pose is None
                     else f"{time.time() - pose.timestamp:4.1f}s")
         c_txt = " ?  " if c_m is None else f"{c_m:4.2f}m"
-        det_txt = {True: "YES", False: "no ", None: " ? "}[det_state]
         wall_txt = {True: "YES", False: "no ", None: " ? "}[wall_state]
-        live_n = sum(1 for t in tracked.values() if not t["dropped"])
+        n_live = sum(1 for v in live.values() if v)
         health = "" if fetch_fails == 0 else f"  fetch_fails={fetch_fails}"
         print(f"\rpose_age={pose_age}  clearance={c_txt}  "
-              f"wall_close={wall_txt}  detected={det_txt}  "
-              f"ids={live_n}/{len(tracked)}{health}   ",
+              f"wall_close={wall_txt}  {args.query}s_live={n_live}"
+              f"{health}   ",
               end="", flush=True)
         time.sleep(0.35)
 
