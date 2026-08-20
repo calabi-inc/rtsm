@@ -149,9 +149,17 @@ class BaselineCfg:
     # with visibility all around, instead of a fixed 12 cm hop (a relic
     # of the blind-walk era). Capped, floored, and walked in chunks with
     # a clearance re-check between chunks.
-    walk_max_m: float = 1.2
+    walk_max_m: float = 1.0
     walk_min_m: float = 0.12
     walk_chunk_m: float = 0.30
+    # Search leash (2026-08-17): depth can see PAST the venue (the tape
+    # boundary is not a wall), so open-space steering alone would walk
+    # the car out of the experiment area. The searcher stays within this
+    # radius of its START pose: strides are trimmed at the leash, and
+    # when every open heading leads outside, it walks back toward the
+    # start instead. Sized for a car starting centered in a ~4.9 x 3 m
+    # venue (half-diagonal ~2.9 m). <= 0 disables.
+    search_leash_m: float = 2.0
 
 
 @dataclass(frozen=True)

@@ -70,9 +70,13 @@ baseline:
   # Steered stride (2026-08-17): walk HALF the measured open depth toward
   # the most open heading (next sweep happens mid-open-area), capped/
   # floored, in chunks with a clearance re-check between chunks.
-  walk_max_m: 1.2
+  walk_max_m: 1.0                      # user-set for the ~4.9x3 m venue
   walk_min_m: 0.12
   walk_chunk_m: 0.30
+  # Leash: stay within this radius of the trial START pose (car starts
+  # centered; depth sees past the venue tape). Outbound strides are
+  # trimmed; all-outbound -> walk back toward start. <=0 disables.
+  search_leash_m: 2.0
 
 calibration:
   # Written by calibrate.py â€” do not hand-edit. Units: rad / m / dimensionless.

@@ -53,7 +53,11 @@ import time
 from dataclasses import dataclass
 from typing import Callable, Optional
 
+import math
+
 from config import Config
+from geometry import (DegenerateHeadingError, camera_to_car,
+                      yaw_from_quat_xyzw)
 from rtsm_client import PoseSample, RtsmClient, SemanticHit
 from trial_logger import TrialLogger
 
@@ -77,6 +81,88 @@ def derive_seed(cfg_seed: int, trial_id: str) -> int:
     if cfg_seed != 0:
         return int(cfg_seed)
     return sum(ord(c) for c in trial_id) * 2654435761 % (2 ** 31)
+
+
+def rotation_to_step(k: int, steps_per_sweep: int):
+    """Shortest rotation from the sweep-end heading to step k's heading:
+    (n_steps, sign). sign +1.0 continues the sweep direction."""
+    n_total = int(steps_per_sweep)
+    fwd = (k + 1) % n_total
+    bwd = n_total - fwd
+    return (fwd, 1.0) if fwd <= bwd else (bwd, -1.0)
+
+
+def leash_limited_stride(px, pz, yaw, start_xy, leash_m):
+    """Meters the car may travel along heading `yaw` from (px, pz) before
+    its distance to start_xy exceeds leash_m. 0.0 when already outside
+    and the heading points further out; unbounded (inf) when leash <= 0."""
+    if leash_m <= 0:
+        return float("inf")
+    dx, dz = px - start_xy[0], pz - start_xy[1]
+    ux, uz = math.sin(yaw), math.cos(yaw)
+    du = dx * ux + dz * uz
+    inside = leash_m * leash_m - (dx * dx + dz * dz)
+    disc = du * du + inside
+    if disc <= 0:
+        return 0.0
+    s = -du + math.sqrt(disc)
+    return max(0.0, s)
+
+
+def leashed_choice(samples, start_xy, leash_m, min_clear_m,
+                   walk_min_m: float, walk_max_m: float):
+    """Steered + leashed relocation choice (2026-08-17).
+
+    samples: per sweep step, None or (x, z, yaw, clearance|None) recorded
+    at that step's dwell. Returns (step_k, stride_m, mode) or None.
+
+    mode "open": the most-open heading whose leash-limited stride is
+    still worth walking (>= walk_min). Ties prefer fewer rotation steps.
+    mode "return": every open heading leads out of the leash — walk the
+    heading that points most directly back toward the start instead
+    (the car turns around at the boundary rather than leaving the
+    venue). None: no usable samples (caller keeps legacy behavior)."""
+    best = None                    # (clearance, -rot_steps, k, stride)
+    n = len(samples)
+    for k, s in enumerate(samples):
+        if s is None:
+            continue
+        x, z, yaw, c = s
+        if c is None or c < min_clear_m:
+            continue
+        stride = min(c / 2.0, walk_max_m,
+                     leash_limited_stride(x, z, yaw, start_xy, leash_m))
+        if stride < walk_min_m:
+            continue
+        rot, _sign = rotation_to_step(k, n)
+        cand = (float(c), -rot, k, stride)
+        if best is None or cand[:2] > best[:2]:
+            best = cand
+    if best is not None:
+        return best[2], best[3], "open"
+
+    # Return-toward-start: pick the sampled heading pointing most nearly
+    # back at the start; stride bounded by distance home and clearance.
+    back = None                    # (inward_dot, k, stride)
+    for k, s in enumerate(samples):
+        if s is None:
+            continue
+        x, z, yaw, c = s
+        dx, dz = start_xy[0] - x, start_xy[1] - z
+        dist_home = math.hypot(dx, dz)
+        if dist_home < walk_min_m:
+            continue               # effectively at start already
+        inward = (math.sin(yaw) * dx + math.cos(yaw) * dz) / dist_home
+        stride = min(dist_home, walk_max_m,
+                     (c / 2.0) if c is not None else walk_min_m)
+        if stride < walk_min_m or inward <= 0.0:
+            continue
+        cand = (inward, k, stride)
+        if back is None or cand[0] > back[0]:
+            back = cand
+    if back is not None:
+        return back[1], back[2], "return"
+    return None
 
 
 def relocation_stride_m(clearance_m, walk_min_m: float, walk_max_m: float):
@@ -178,6 +264,11 @@ class BaselineSearcher:
         self._st = {"last_ts": None, "ref_epoch": None, "last_fresh_mono": t0}
         self._seed_epoch()
         sweeps = 0
+        # Leash anchor (2026-08-17): the trial's start position. Depth can
+        # see past the venue boundary, so steering is confined to a
+        # radius around HERE; unknown start pose disables the leash.
+        start_xy = self._car_xy_yaw()
+        start_xy = (start_xy[0], start_xy[1]) if start_xy else None
 
         # Try before moving at all — the target might already be in view.
         first = self._gated_poll(query)
@@ -191,8 +282,10 @@ class BaselineSearcher:
 
         while True:
             step_in_sweep = 0
-            # Clearance sampled at each dwell heading — the sweep doubles
-            # as a free 360° depth survey that steers the relocation.
+            # Pose + clearance sampled at each dwell heading — the sweep
+            # doubles as a free 360° depth survey that steers the
+            # relocation, leashed to the start position.
+            samples = [None] * b.steps_per_sweep
             heading_clearance = [None] * b.steps_per_sweep
             while step_in_sweep < b.steps_per_sweep:
                 # one rotate step, then dwell + poll
@@ -204,7 +297,12 @@ class BaselineSearcher:
                 r = self._dwell_and_watch_pose(b.dwell_s, deadline)
                 if r is not None:
                     return self._stamp(r, t0, sweeps)
-                heading_clearance[step_in_sweep] = self._clearance_now()
+                c_now = self._clearance_now()
+                heading_clearance[step_in_sweep] = c_now
+                xyz_yaw = self._car_xy_yaw()
+                if xyz_yaw is not None:
+                    samples[step_in_sweep] = (xyz_yaw[0], xyz_yaw[1],
+                                              xyz_yaw[2], c_now)
 
                 found = self._gated_poll(query)
                 if isinstance(found, AcquireResult):
@@ -222,22 +320,39 @@ class BaselineSearcher:
 
             sweeps += 1
             # Full sweep, nothing fresh — relocate to a new viewpoint.
-            # STEERED (2026-08-17): rotate the shortest way to the most
-            # open heading the sweep just measured, so the searcher walks
-            # toward space — never into narrow gaps, out of corners
-            # toward the wide side, re-sweeping from vantage points that
-            # can actually see objects.
-            steer = best_relocation_rotation(heading_clearance,
-                                             b.steps_per_sweep)
-            if steer is not None:
-                n_steps, sign = steer
-                if self._logger is not None:
+            # STEERED + LEASHED (2026-08-17): rotate the shortest way to
+            # the most open heading whose stride stays within the leash
+            # around the start pose; when every open heading leads out of
+            # bounds, turn back toward the start instead. The stride is
+            # half the measured open depth (leash-trimmed, capped), so
+            # the next sweep happens mid-open-area INSIDE the venue.
+            chosen = None
+            if start_xy is not None:
+                chosen = leashed_choice(samples, start_xy,
+                                        b.search_leash_m,
+                                        b.min_walk_clearance_m,
+                                        b.walk_min_m, b.walk_max_m)
+            if chosen is not None:
+                k, stride, mode = chosen
+                n_steps, sign = rotation_to_step(k, b.steps_per_sweep)
+            else:
+                # No pose data (or nothing eligible): legacy clearance-
+                # only steer with the default stride rule.
+                steer = best_relocation_rotation(heading_clearance,
+                                                b.steps_per_sweep)
+                if steer is not None:
+                    n_steps, sign = steer
                     valid = [c for c in heading_clearance if c is not None]
+                    stride = relocation_stride_m(max(valid), b.walk_min_m,
+                                                 b.walk_max_m)
+                    mode = "open_unleashed"
+                    chosen = True
+            if chosen is not None:
+                if self._logger is not None:
                     self._logger.log_event(
                         "relocate_steered", time.monotonic() - t0,
-                        rotate_steps=int(n_steps * sign),
-                        best_clearance_m=round(max(valid), 3),
-                        sweeps=sweeps)
+                        rotate_steps=int(n_steps * sign), mode=mode,
+                        stride_m=round(stride, 3), sweeps=sweeps)
                 for _ in range(int(n_steps)):
                     r = self._move(sweep_sign * sign * -b.sweep_step_turn,
                                    sweep_sign * sign * b.sweep_step_turn,
@@ -247,6 +362,12 @@ class BaselineSearcher:
                 r = self._dwell_and_watch_pose(min(b.dwell_s, 0.6), deadline)
                 if r is not None:
                     return self._stamp(r, t0, sweeps)
+                if self._walk_is_clear():
+                    r = self._walk_stride(stride, deadline)
+                    if r is not None:
+                        return self._interrupted(r, t0, sweeps)
+                    self._progress["phase"] = "searching"
+                    continue                     # next sweep from here
             # Wall guard (2026-08-16): the walk needs measured open space
             # ahead (live depth clearance served by RTSM). When blocked
             # (or the steer target went stale), rotate one step at a time
@@ -263,6 +384,20 @@ class BaselineSearcher:
                             and c_now >= b.min_walk_clearance_m)):
                     stride = relocation_stride_m(c_now, b.walk_min_m,
                                                  b.walk_max_m)
+                    xyz_yaw = self._car_xy_yaw()
+                    if start_xy is not None and xyz_yaw is not None:
+                        stride = min(stride, leash_limited_stride(
+                            xyz_yaw[0], xyz_yaw[1], xyz_yaw[2],
+                            start_xy, b.search_leash_m))
+                        if stride < b.walk_min_m:
+                            # open but out of bounds — keep rotating
+                            r = self._move(
+                                sweep_sign * -b.sweep_step_turn,
+                                sweep_sign * b.sweep_step_turn,
+                                b.sweep_step_s, deadline)
+                            if r is not None:
+                                return self._interrupted(r, t0, sweeps)
+                            continue
                     r = self._walk_stride(stride, deadline)
                     if r is not None:
                         return self._interrupted(r, t0, sweeps)
@@ -287,6 +422,25 @@ class BaselineSearcher:
                         time.monotonic() - t0, sweeps=sweeps)
 
     # ── helpers ──────────────────────────────────────────────────────────
+
+    def _car_xy_yaw(self):
+        """Car ground position + heading from the live pose (calibrated
+        camera->car transform), or None when pose is unavailable or the
+        heading is degenerate."""
+        try:
+            pose = self._rtsm.get_robot_pose()
+        except Exception:  # noqa: BLE001
+            return None
+        if pose is None:
+            return None
+        try:
+            cam_yaw = yaw_from_quat_xyzw(pose.quaternion_xyzw)
+        except DegenerateHeadingError:
+            return None
+        cal = self._cfg.calibration
+        x, z, car_yaw = camera_to_car(pose.xyz, cam_yaw,
+                                      cal.yaw_offset_rad, cal.lever_arm_rf)
+        return x, z, car_yaw
 
     def _clearance_now(self):
         """Fresh clearance meters, or None (no data / stale / hiccup)."""

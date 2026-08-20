@@ -11,7 +11,8 @@ import pytest
 
 from baseline_search import (AcquireResult, BaselineSearcher,
                              best_relocation_rotation, derive_seed,
-                             fresh_hits, relocation_stride_m)
+                             fresh_hits, leash_limited_stride,
+                             leashed_choice, relocation_stride_m)
 from config import load_config
 from rtsm_client import PoseSample, SemanticHit, SemanticResult
 from test_nav import FakeBridge
@@ -276,6 +277,75 @@ def test_stride_is_half_clearance_capped_and_floored():
     assert relocation_stride_m(5.0, 0.12, 1.2) == 1.2     # cap
     assert relocation_stride_m(0.1, 0.12, 1.2) == 0.12    # floor
     assert relocation_stride_m(None, 0.12, 1.2) == 0.12   # no data -> floor
+
+
+# ── search leash (2026-08-17: depth sees past the venue; stay near start) ─
+
+import math as _math
+
+
+def test_leash_from_center_allows_full_radius():
+    # At the start, any heading may travel exactly the leash length.
+    s = leash_limited_stride(0.0, 0.0, 0.0, (0.0, 0.0), 2.0)
+    assert abs(s - 2.0) < 1e-9
+
+
+def test_leash_trims_outbound_heading():
+    # 1.5 m from start, heading straight away: only 0.5 m remains.
+    s = leash_limited_stride(0.0, 1.5, 0.0, (0.0, 0.0), 2.0)
+    assert abs(s - 0.5) < 1e-9
+
+
+def test_leash_inbound_heading_gets_extra_room():
+    # 1.5 m out, heading straight BACK: may cross start and continue to
+    # the far side of the leash = 1.5 + 2.0.
+    s = leash_limited_stride(0.0, 1.5, _math.pi, (0.0, 0.0), 2.0)
+    assert abs(s - 3.5) < 1e-6
+
+
+def test_leash_disabled_is_unbounded():
+    assert leash_limited_stride(9.0, 9.0, 0.0, (0.0, 0.0), 0.0) == float("inf")
+
+
+def test_leashed_choice_prefers_open_inside():
+    # Step 0: hugely open but points out of the leash from a far spot.
+    # Step 1: modestly open, points inward. Choice must be step 1.
+    samples = [
+        (0.0, 1.9, 0.0, 5.0),          # near edge, heading further out
+        (0.0, 1.9, _math.pi, 1.6),     # heading back toward start
+    ] + [None] * 10
+    k, stride, mode = leashed_choice(samples, (0.0, 0.0), 2.0, 0.6,
+                                     0.12, 1.0)
+    assert (k, mode) == (1, "open")
+    assert abs(stride - 0.8) < 1e-9    # half of 1.6, inside leash room
+
+
+def test_inbound_open_heading_wins_even_from_outside():
+    # Drifted outside the leash: a clear heading pointing home is still
+    # an ordinary 'open' choice (crossing back in is always allowed).
+    samples = [(0.0, 2.5, 0.0, 4.0),               # heading further out
+               (0.0, 2.5, _math.pi, 4.0)] + [None] * 10   # heading home
+    k, stride, mode = leashed_choice(samples, (0.0, 0.0), 2.0, 0.6,
+                                     0.12, 1.0)
+    assert (k, mode) == (1, "open")
+    assert stride == 1.0               # capped at walk_max
+
+
+def test_leashed_choice_returns_home_when_no_open_inbound():
+    # Outbound headings are leash-blocked and the homeward heading has no
+    # depth data -> 'return' mode walks it at the safe floor stride.
+    samples = [(0.0, 2.5, 0.0, 4.0),               # out, blocked by leash
+               (0.0, 2.5, _math.pi, None)] + [None] * 10  # home, no depth
+    k, stride, mode = leashed_choice(samples, (0.0, 0.0), 2.0, 0.6,
+                                     0.12, 1.0)
+    assert mode == "return"
+    assert k == 1
+    assert abs(stride - 0.12) < 1e-9   # no depth -> floor stride only
+
+
+def test_leashed_choice_none_without_samples():
+    assert leashed_choice([None] * 12, (0.0, 0.0), 2.0, 0.6,
+                          0.12, 1.0) is None
 
 
 # ── depth wall guard (2026-08-16: no corners, the camera senses walls) ───

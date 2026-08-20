@@ -23,10 +23,16 @@ data to be valid.
 > This STRENGTHENS the memoryless comparator; conservative w.r.t. the
 > memory-advantage claim.
 > **Stride (same amendment): the relocate walk covers HALF the measured
-> open depth** toward the chosen heading (capped 1.2 m, floored 0.12 m),
+> open depth** toward the chosen heading (capped 1.0 m, floored 0.12 m),
 > walked in 0.3 m chunks with a live clearance re-check between chunks —
 > the next sweep happens mid-open-area with visibility all around,
-> replacing the legacy fixed 12 cm hop from the blind-walk era. Same perception, same pose stream, same
+> replacing the legacy fixed 12 cm hop from the blind-walk era.
+> **Leash (same amendment):** depth sees PAST the venue tape (the
+> boundary is not a wall), so the searcher stays within 2.0 m of its
+> START pose: outbound strides are trimmed at the leash, and when every
+> open heading leads outside, it walks back toward the start instead
+> (mode logged per relocation: open / return / open_unleashed). Sized
+> for a car starting centered in the ~4.9 × 3 m venue. Same perception, same pose stream, same
 controller, same target-selection rule; the ONLY masked capability is
 persistence. **Budgets are hard TOTAL clocks from command receipt** —
 planning/selection time counts in (a) exactly as search time counts in
