@@ -160,6 +160,14 @@ class BaselineCfg:
     # start instead. Sized for a car starting centered in a ~4.9 x 3 m
     # venue (half-diagonal ~2.9 m). <= 0 disables.
     search_leash_m: float = 2.0
+    # Relevance floor (2026-08-28): a fresh observation must score at
+    # least this against the goal phrase before it is offered to the
+    # (slow, LLM) selection call. In a cluttered room the first sweep
+    # otherwise pays 4-12 s of image-verified rejection PER VISIBLE
+    # OBJECT (walls, chairs, doors — observed live: 12 calls in 150 s,
+    # sweep crawling). Verified roster targets score >= 0.10 vs their
+    # phrases post-color-fix; junk scores 0.01-0.03. <= 0 disables.
+    min_candidate_score: float = 0.05
 
 
 @dataclass(frozen=True)

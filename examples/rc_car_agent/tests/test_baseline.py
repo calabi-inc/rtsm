@@ -272,6 +272,27 @@ def test_steer_full_circle_costs_zero():
     assert best_relocation_rotation(c, 12) == (0, 1.0)
 
 
+def test_low_score_fresh_hit_never_reaches_selection():
+    # Relevance floor (2026-08-28): junk in view (fresh but scoring ~0.02
+    # vs the goal) must not trigger acquisition/LLM calls; a real target
+    # scoring above the floor still acquires.
+    junk = mk_hit(age_s=0.1, hid="wall-1")
+    junk = type(junk)(id="wall-1", score=0.02, confirmed=True,
+                      stability=0.9, xyz_world=[1.0, 0.3, 1.0],
+                      last_seen_wall_utc=time.time() - 0.1)
+    rtsm = StubRtsm(lambda n: [junk])
+    rtsm.clearance = _clear_now()
+    acq = mk_searcher(FAST, FakeBridge(), rtsm).acquire("m", "t-fl",
+                                                        budget_s=1.5)
+    assert acq.status == "timeout"          # junk never acquired
+
+    real = mk_hit(age_s=0.1, hid="mug-1")   # score 0.8 >> floor
+    rtsm2 = StubRtsm(lambda n: [real])
+    acq2 = mk_searcher(FAST, FakeBridge(), rtsm2).acquire("m", "t-fl2",
+                                                          budget_s=5.0)
+    assert acq2.status == "acquired"
+
+
 def test_stride_is_half_clearance_capped_and_floored():
     assert relocation_stride_m(2.0, 0.12, 1.2) == 1.0     # half
     assert relocation_stride_m(5.0, 0.12, 1.2) == 1.2     # cap

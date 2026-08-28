@@ -530,6 +530,11 @@ class BaselineSearcher:
                            b.clock_skew_tol_s)
         fresh = [h for h in fresh
                  if h.id not in getattr(self, "_exclude", frozenset())]
+        # Relevance floor (2026-08-28): don't wake the LLM for objects
+        # that don't even vaguely match the goal — in a cluttered room
+        # the junk tax was 4-12 s per visible object on the first sweep.
+        if b.min_candidate_score > 0:
+            fresh = [h for h in fresh if h.score >= b.min_candidate_score]
         if not fresh:
             return None
         age = now - fresh[0].last_seen_wall_utc
