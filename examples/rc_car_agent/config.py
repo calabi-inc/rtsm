@@ -196,6 +196,17 @@ class BaselineCfg:
     # see PlannerCfg.retrieval. The round window / masking / batched
     # image selection are identical either way.
     retrieval: str = "label_first"
+    # Label early-exit (2026-08-28, operator: "RTSM answers fast; the
+    # agent takes too long to lock"): during the sweep, every dwell ends
+    # with a cheap label-only peek (no LLM); a goal-labeled, round-fresh,
+    # unmasked hit breaks out of the sweep straight to the batched
+    # confirm — lock in ~10 s instead of waiting out the full ~45 s
+    # sweep. Semantic-only candidates (the flat-band junk that caused
+    # the per-dwell LLM tax) still wait for sweep end. After an
+    # early-exit candidate is REJECTED, the searcher re-observes from
+    # the same standpoint (no relocation — the sweep never finished).
+    # Requires retrieval == label_first; ignored otherwise.
+    label_early_exit: bool = True
 
 
 @dataclass(frozen=True)

@@ -37,8 +37,11 @@ Search policy (v2, 2026-08-28 — observe-then-confirm rounds; v1's
 per-dwell confirmation is gone):
 
     round (repeat until candidates / interrupt / caller's budget):
-        sweeps_per_round (3) full 360° sweeps in place — rotate ~30°,
-        dwell ~1.2 s, NO queries: pure observation. The pipeline
+        sweeps_per_round full 360° sweeps in place — rotate ~30°,
+        dwell ~1.2 s; each dwell ends with a cheap label-only peek
+        (no LLM) that BREAKS the sweep straight to the confirm when a
+        goal-labeled round-fresh hit exists (label early-exit,
+        2026-08-28 — a rejected early candidate re-observes in place). The pipeline
         accumulates every heading's objects over multiple passes
         (multiple views -> better crops) while the sweep doubles as a
         depth survey (pose + clearance recorded per heading).
@@ -301,6 +304,14 @@ class BaselineSearcher:
         self._query_failures = 0
         self._retrieval_path = "semantic"   # which search served the
                                             # latest round (audit field)
+        # True while the latest acquisition came from a mid-sweep label
+        # early-exit — its rejection must RE-OBSERVE in place, never
+        # relocate (the standpoint was not fully swept).
+        self._early_acquire = False
+        # One wasted early exit (peek fired, confirm empty) suppresses
+        # peeking for the next FULL sweep — bounds the peek/confirm
+        # divergence to one partial round per standpoint.
+        self._suppress_peek = False
 
     # ── the acquisition loop ─────────────────────────────────────────────
 
@@ -339,21 +350,29 @@ class BaselineSearcher:
         start_xy = self._start_xy
 
         if exclude_ids:
-            r = self._relocate(self._last_samples, start_xy, sweep_sign,
-                               deadline, t0, sweeps)
-            if r is not None:
-                return r
+            # Relocate only when the judged standpoint was FULLY observed.
+            # An early-exit acquisition ran the confirm mid-sweep; its
+            # rejection means "keep looking from HERE" — the un-swept arc
+            # was never seen (2026-08-28).
+            if self._early_acquire:
+                self._early_acquire = False
+            else:
+                r = self._relocate(self._last_samples, start_xy, sweep_sign,
+                                   deadline, t0, sweeps)
+                if r is not None:
+                    return r
 
         while True:
-            # ── observe: sweeps_per_round full 360° passes, no queries ──
+            # ── observe: sweeps_per_round full 360° passes ──────────────
             round_start_wall = self._now_wall()
+            early_exit = False
             # Pose + clearance sampled at each dwell heading — the sweep
             # doubles as a free 360° depth survey that steers the
             # relocation, leashed to the start position. Later passes
             # overwrite a heading's sample only when they bring a live
             # clearance reading (freshest usable data wins).
             samples = [None] * b.steps_per_sweep
-            for _ in range(b.sweeps_per_round):
+            for sweep_i in range(b.sweeps_per_round):
                 step_in_sweep = 0
                 while step_in_sweep < b.steps_per_sweep:
                     r = self._move(sweep_sign * -b.sweep_step_turn,
@@ -374,9 +393,42 @@ class BaselineSearcher:
                     step_in_sweep += 1
                     self._progress["phase"] = "searching"
                     self._progress["ticks"] = self._progress.get("ticks", 0) + 1
+                    # Label early-exit (2026-08-28): a cheap label-only
+                    # peek per dwell — no LLM. A goal-labeled, round-
+                    # fresh, unmasked, navigable hit ends the observation
+                    # phase NOW; the batched confirm runs immediately.
+                    # Semantic-only candidates still wait for sweep end
+                    # (they are the flat-band junk that caused the old
+                    # per-dwell LLM tax). NOT on the round's final step
+                    # (the sweep is already complete — breaking there
+                    # would miscount it as partial and wrongly skip the
+                    # relocate on rejection), and NOT while suppressed
+                    # (one wasted early-exit round disables peeking for
+                    # the next full sweep — forward progress is bounded).
+                    final_step = (step_in_sweep >= b.steps_per_sweep
+                                  and sweep_i == b.sweeps_per_round - 1)
+                    if (b.label_early_exit
+                            and b.retrieval == "label_first"
+                            and not self._suppress_peek
+                            and not final_step):
+                        peek = self._label_peek(query, round_start_wall)
+                        if isinstance(peek, AcquireResult):
+                            return self._stamp(peek, t0, sweeps)
+                        if peek:
+                            early_exit = True
+                            if self._logger is not None:
+                                self._logger.log_event(
+                                    "label_early_exit",
+                                    time.monotonic() - t0,
+                                    rounds=rounds + 1, sweeps=sweeps,
+                                    step=step_in_sweep)
+                            break
+                if early_exit:
+                    break
                 sweeps += 1
             rounds += 1
             self._last_samples = samples
+            self._early_acquire = early_exit
 
             # ── confirm: ONE deep query over this round's observations ──
             # Retried on transient errors (2026-08-28 review finding: a
@@ -406,25 +458,42 @@ class BaselineSearcher:
                 self._query_failures += 1
                 continue
             self._rounds_queried += 1
+            if not early_exit:
+                # A FULL round completed its confirm — lift any peek
+                # suppression from a previous wasted early exit.
+                self._suppress_peek = False
             if isinstance(found, AcquireResult):
                 return self._stamp(found, t0, sweeps)
             if found is not None:
                 hits, pose, age = found
+                early_tag = ", early" if early_exit else ""
                 return AcquireResult(status="acquired", hits=tuple(hits),
                                      pose=pose, hit_age_s=age,
                                      detail=(f"round {rounds} ({sweeps} sweeps,"
-                                             f" {self._retrieval_path})"),
+                                             f" {self._retrieval_path}"
+                                             f"{early_tag})"),
                                      elapsed_s=time.monotonic() - t0,
                                      sweeps=sweeps,
                                      rounds_queried=self._rounds_queried,
                                      query_failures=self._query_failures)
             # Nothing rankable observed from this standpoint — move on
-            # without spending any LLM time.
+            # without spending any LLM time. EXCEPT after an early exit
+            # whose peeked hit evaporated by confirm time: the standpoint
+            # was never fully observed, so re-observe instead of leaving.
             if self._logger is not None:
                 self._logger.log_event("round_no_candidates",
                                        time.monotonic() - t0,
                                        rounds=rounds, sweeps=sweeps,
                                        retrieval=self._retrieval_path)
+            if early_exit:
+                # Bound the loop (review 2026-08-28): a peek that fired
+                # but confirmed to nothing must not fire again next
+                # round — the next sweep runs FULL, and if IT confirms
+                # empty the normal relocate happens. Worst case is one
+                # wasted partial round per standpoint, never a livelock.
+                self._early_acquire = False
+                self._suppress_peek = True
+                continue
             r = self._relocate(samples, start_xy, sweep_sign,
                                deadline, t0, sweeps)
             if r is not None:
@@ -705,6 +774,36 @@ class BaselineSearcher:
             return None
         age = now - fresh[0].last_seen_wall_utc
         return fresh, res.robot_pose, age
+
+    def _label_peek(self, query, round_start_wall: float):
+        """Opportunistic per-dwell label check (2026-08-28) — the cheap
+        signal that gates the expensive one. Returns True when the
+        detector-label search holds a round-fresh, unmasked, navigable
+        hit for the goal (observation may stop and the batched confirm
+        run NOW); False otherwise, including on any error — the
+        sweep-end round query with retries stays authoritative. Returns
+        an AcquireResult on a frame-epoch change (same guard as every
+        query the searcher acts on)."""
+        b = self._cfg.baseline
+        try:
+            res = self._rtsm.label_query(query, top_k=b.query_top_k)
+        except Exception:  # noqa: BLE001 — opportunistic; never blocks
+            return False
+        if res.robot_pose is not None:
+            bad = self._note_epoch(res.robot_pose.frame_epoch)
+            if bad is not None:
+                return AcquireResult(status="frame_reset",
+                                     detail=f"{bad} at label peek")
+        now = self._now_wall()
+        window_s = (now - round_start_wall) + b.freshness_gate_s
+        kept = fresh_hits(res.results, now, window_s, b.clock_skew_tol_s)
+        # SAME gates as the confirm (review 2026-08-28): a peek passing
+        # a hit the confirm then drops would spin the standpoint loop —
+        # the score floor especially must not diverge.
+        if b.min_candidate_score > 0:
+            kept = [h for h in kept if h.score >= b.min_candidate_score]
+        exclude = getattr(self, "_exclude", frozenset())
+        return any(h.id not in exclude for h in kept)
 
     def _check_interrupts(self) -> Optional[str]:
         if self._shutdown.is_set():

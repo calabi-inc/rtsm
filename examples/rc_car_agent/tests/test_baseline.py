@@ -315,6 +315,113 @@ def test_label_miss_falls_back_to_semantic():
     assert rtsm.label_queries >= 1, "label search was tried first"
 
 
+def test_label_hit_mid_sweep_exits_early():
+    """Label early-exit (2026-08-28): a goal-labeled hit visible from
+    the first dwell must end observation immediately — no waiting out
+    the full sweep. (Operator: 'RTSM answers fast; the agent takes too
+    long to lock.')"""
+    rtsm = StubRtsm(lambda n: [mk_hit(age_s=0.1, hid="lab-1")])
+    rtsm.label_results_fn = lambda n: [mk_hit(age_s=0.1, hid="lab-1")]
+    acq = mk_searcher(FAST, FakeBridge(), rtsm).acquire("m", "t-ee",
+                                                        budget_s=8.0)
+    assert acq.status == "acquired"
+    assert acq.hits[0].id == "lab-1"
+    assert "early" in acq.detail
+    assert acq.sweeps == 0, "sweep was cut short — never completed"
+
+
+def test_semantic_only_hits_wait_for_sweep_end():
+    """No label hits -> no early exit: semantic-only candidates (the
+    flat-band junk class) are still judged once per completed sweep."""
+    rtsm = StubRtsm(lambda n: [mk_hit(age_s=0.1, hid="sem-1")])
+    acq = mk_searcher(FAST, FakeBridge(), rtsm).acquire("m", "t-ee2",
+                                                        budget_s=8.0)
+    assert acq.status == "acquired"
+    assert "early" not in acq.detail
+    assert acq.sweeps == FAST.baseline.sweeps_per_round
+
+
+def test_rejected_early_candidate_reobserves_in_place():
+    """An early-exit acquisition judged no-match must NOT relocate on
+    re-entry — the standpoint's sweep never finished. The masked id no
+    longer triggers the peek; the next goal-labeled object does."""
+    rtsm = StubRtsm(lambda n: [mk_hit(age_s=0.1, hid="fp-1"),
+                               mk_hit(age_s=0.1, hid="real-2")])
+    rtsm.label_results_fn = lambda n: [mk_hit(age_s=0.1, hid="fp-1"),
+                                       mk_hit(age_s=0.1, hid="real-2")]
+    rtsm.clearance = _clear_now()
+    bridge = FakeBridge()
+    s = mk_searcher(FAST, bridge, rtsm)
+    acq1 = s.acquire("m", "t-ee3", budget_s=8.0)
+    assert acq1.status == "acquired" and "early" in acq1.detail
+
+    bridge.drive_calls.clear()
+    acq2 = s.acquire("m", "t-ee3", budget_s=8.0,
+                     exclude_ids=frozenset({"fp-1"}))
+    assert acq2.status == "acquired"
+    assert [h.id for h in acq2.hits] == ["real-2"]
+    walks = [c for c in bridge.drive_calls if c[1] == c[2] and c[1] > 0]
+    assert walks == [], "early-exit rejection must re-observe IN PLACE"
+
+
+def test_below_floor_label_hit_never_livelocks_the_standpoint():
+    """REVIEW 2026-08-28: the peek must apply the SAME score floor as
+    the confirm — a persistent goal-labeled hit below the floor used to
+    fire the peek every round while the confirm dropped it, spinning the
+    car at one standpoint for the whole search cap (and miscoding the
+    trial not_found). With aligned gates the sweep completes and the
+    empty round RELOCATES."""
+    cfg = replace(FAST, baseline=replace(FAST.baseline,
+                                         min_candidate_score=0.05))
+    rtsm = StubRtsm(lambda n: [])
+    rtsm.label_results_fn = lambda n: [_mk_scored("weak", 0.03)]
+    rtsm.clearance = _clear_now()
+    bridge = FakeBridge()
+    acq = mk_searcher(cfg, bridge, rtsm).acquire("m", "t-llk", budget_s=3.0)
+    assert acq.status == "timeout"
+    walks = [c for c in bridge.drive_calls if c[1] == c[2] and c[1] > 0]
+    assert walks, "empty rounds must still relocate — never spin in place"
+
+
+def test_wasted_early_exit_suppresses_peek_then_relocates():
+    """REVIEW 2026-08-28: a peek that fired but confirmed to nothing
+    (hit evaporated between peek and confirm) must not fire again next
+    round — the following sweep runs FULL and its empty confirm
+    relocates. Worst case one wasted partial round per standpoint."""
+    rtsm = StubRtsm(lambda n: [])
+    # The label hit exists only for the FIRST label call (the peek);
+    # every later call — the confirm's label side included — sees none.
+    rtsm.label_results_fn = (
+        lambda n: [mk_hit(age_s=0.1, hid="ghost")] if n == 1 else [])
+    rtsm.clearance = _clear_now()
+    bridge = FakeBridge()
+    acq = mk_searcher(FAST, bridge, rtsm).acquire("m", "t-gh", budget_s=4.0)
+    assert acq.status == "timeout"
+    walks = [c for c in bridge.drive_calls if c[1] == c[2] and c[1] > 0]
+    assert walks, "the suppressed full round's empty confirm relocates"
+
+
+def test_peek_skipped_on_the_rounds_final_step():
+    """REVIEW 2026-08-28: a peek on the final step of the final sweep
+    would tag a FULLY observed standpoint as partial (sweeps undercount;
+    rejection would wrongly re-observe instead of relocating). The final
+    step skips the peek — the confirm runs moments later anyway."""
+    cfg = replace(FAST, baseline=replace(FAST.baseline, sweeps_per_round=1))
+    calls = {"peeks": 0}
+    rtsm = StubRtsm(lambda n: [])
+    # Hits appear from label call 3 on. Steps per sweep is 3: peeks run
+    # at steps 1 and 2 (empty), step 3's peek is SKIPPED, so call 3 is
+    # the confirm's label fetch — a full-round, non-early acquisition.
+    rtsm.label_results_fn = (
+        lambda n: [mk_hit(age_s=0.1, hid="late")] if n >= 3 else [])
+    acq = mk_searcher(cfg, FakeBridge(), rtsm).acquire("m", "t-fs",
+                                                       budget_s=8.0)
+    assert acq.status == "acquired"
+    assert acq.hits[0].id == "late"
+    assert "early" not in acq.detail
+    assert acq.sweeps == 1, "the completed sweep must be counted"
+
+
 def test_leash_anchor_persists_across_reentries():
     """REVIEW 2026-08-28: the leash must confine the TRIAL, not each
     call — a per-call anchor let every no-match rejection re-anchor the

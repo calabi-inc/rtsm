@@ -102,7 +102,15 @@ planning/selection time counts in (a) exactly as search time counts in
 > sight, so multi-view accumulation buys no candidate recall — each
 > round is ONE 360° observation sweep followed by the decision point
 > (candidates → one batched image call → drive or mask-and-relocate;
-> none → relocate ~1 m). The freshness/
+> none → relocate ~1 m). **Label early-exit (same day):** each dwell
+> ends with a cheap label-only peek (no LLM); a goal-labeled,
+> round-fresh, unmasked hit ends observation immediately and the
+> batched confirm runs mid-sweep (~10 s lock vs ~45 s; measured: RTSM
+> serves label search in milliseconds while the agent waited out the
+> sweep). A rejected early candidate re-observes IN PLACE — the
+> standpoint was not fully swept, so no relocation; semantic-only
+> candidates still wait for sweep end (they are the flat-band class
+> that caused the original per-dwell LLM tax). The freshness/
 > round window, rejected-id masking, and the single batched
 > image-verified selection call are unchanged — the detector label
 > GENERATES candidates; the image check remains the arbiter (GDINO

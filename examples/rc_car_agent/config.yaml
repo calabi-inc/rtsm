@@ -99,6 +99,12 @@ baseline:
   # tissue-box detections while /search/semantic surfaced nothing).
   # Semantic remains the fallback on label miss/error/off-vocab goals.
   retrieval: "label_first"
+  # Label early-exit (2026-08-28): every dwell ends with a cheap
+  # label-only peek (no LLM); a goal-labeled round-fresh hit breaks the
+  # sweep straight to the batched confirm (~10 s lock vs ~45 s full
+  # sweep). A rejected early candidate re-observes IN PLACE (the sweep
+  # never finished). Semantic-only candidates still wait for sweep end.
+  label_early_exit: true
 
 calibration:
   # Written by calibrate.py â€” do not hand-edit. Units: rad / m / dimensionless.
