@@ -75,7 +75,35 @@ planning/selection time counts in (a) exactly as search time counts in
 > the trial's start pose and persists across no-match re-entries, so
 > cumulative relocation drift stays inside the venue; and every
 > relocation requires live pose evidence (a timestamp change) before
-> the car moves. The memoryless definition is
+> the car moves.
+
+> **AMENDMENT 2026-08-28b (pre-campaign, no trial data): grounded
+> detection + label-first retrieval.** Perception backend switched from
+> FastSAM+YOLOE (dual) to GroundingDINO+SAM2 prompted with the venue
+> vocabulary (teddy bear, water bottle, scissors, tissue box, dumbbell
+> — disclosed; identical for both conditions). Motivation, measured
+> live: the RC-mounted low camera angle made generic-proposal retrieval
+> unstable, and single-standpoint SigLIP scores are non-discriminative
+> (flat 0.03-0.08 band); meanwhile a per-label detector monitor showed
+> GDINO firing reliably on the roster (e.g. 82 tissue-box detections,
+> peak conf 0.71) while the object sat proto/unindexed — invisible to
+> embedding search for minutes (confirmation gates + upsert lag).
+> Retrieval policy is therefore the UNION of label search and embedding
+> search for BOTH conditions, label hits ranked first, deduped
+> (`/search/label`: normalized substring, query-inside-label, over
+> working memory INCLUDING protos; GDINO span-merged compound phrases
+> are normalized to their single best vocabulary entry at the detector).
+> A fall-back-on-miss variant was reviewed out the same day: one stale
+> or masked label hit could suppress the embedding candidates entirely.
+> A label-side error alone (older server) degrades to pure embedding
+> search; the served sources are logged per plan/round. The freshness/
+> round window, rejected-id masking, and the single batched
+> image-verified selection call are unchanged — the detector label
+> GENERATES candidates; the image check remains the arbiter (GDINO
+> false positives observed live: a wall light switch offered as a
+> roster candidate and rejected by image). Symmetry preserved: same
+> detector, same vocabulary, same retrieval policy, same selection rule
+> in both arms; the ONLY masked capability remains persistence. The memoryless definition is
 > unchanged in spirit and stricter in mechanism: candidates never
 > persist across standpoints or trials; only what the round's sweeps
 > observed from the CURRENT position is actionable. This STRENGTHENS the

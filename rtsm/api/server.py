@@ -638,6 +638,83 @@ def create_app(
             "results": results,
         }
 
+    # ---- Label search endpoint ----
+    @app.get("/search/label")
+    def label_search(
+        query: str,
+        top_k: int = 10,
+        include_proto: bool = True,
+    ) -> Dict[str, Any]:
+        """Search objects by DETECTOR label (2026-08-28).
+
+        With a prompted backend (grounded_sam2 + operator vocabulary) the
+        detection label is meaningful in a way embeddings are not on this
+        rig: single-standpoint SigLIP scores sit in a flat ~0.03-0.08
+        band, and confirmation/indexing lag hides freshly seen objects
+        from /search/semantic for minutes. Label search matches over
+        WORKING MEMORY — protos included by default, because "the
+        detector sees a tissue box right now" must be answerable before
+        any confirmation gate passes.
+
+        Matching is normalized-substring, query-inside-label ONLY:
+        GDINO's span decoding sometimes merges adjacent vocabulary
+        entries ("water bottle tissue box"), which must still match
+        "tissue box"; the reverse direction is deliberately NOT matched
+        (generic classifier labels like "box" must not match a
+        "tissue box" query). All accumulated labels are searched, not
+        just label_primary. Result shape mirrors /search/semantic so
+        agents reuse their freshness gates, masking, and snapshot
+        verification unchanged; score = the matched label's accumulated
+        confidence.
+        """
+        q = " ".join(query.lower().split())
+        if not q:
+            raise HTTPException(status_code=422, detail="empty query")
+        try:
+            objs: List[Any] = working_memory.iter_objects()
+        except Exception:
+            objs = []
+        scored = []
+        for o in objs:
+            if not include_proto and not getattr(o, "confirmed", False):
+                continue
+            labels = dict(getattr(o, "label_scores", None) or {})
+            lp = getattr(o, "label_primary", None)
+            if lp and lp not in labels:
+                labels[lp] = 0.0
+            best = None
+            for lbl, sc in labels.items():
+                if lbl and q in " ".join(str(lbl).lower().split()):
+                    if best is None or float(sc) > best[1]:
+                        best = (str(lbl), float(sc))
+            if best is not None:
+                seen = float(getattr(o, "last_seen_wall_utc", 0.0) or 0.0)
+                scored.append((best[1], seen, best[0], o))
+        # Rank by confidence, ties by recency — insertion (=creation)
+        # order must never decide (a stale early object would otherwise
+        # outrank the freshly seen target on equal scores).
+        scored.sort(key=lambda t: (t[0], t[1]), reverse=True)
+
+        results = []
+        for score, _seen, matched_label, o in scored[: max(1, top_k)]:
+            results.append({
+                "id": o.id,
+                "score": round(float(score), 4),
+                "matched_label": matched_label,
+                "confirmed": bool(getattr(o, "confirmed", False)),
+                "stability": round(float(getattr(o, "stability", 0.0)), 3),
+                "xyz_world": (o.xyz_world.tolist()
+                              if getattr(o, "xyz_world", None) is not None
+                              else None),
+                "last_seen_wall_utc": (
+                    float(getattr(o, "last_seen_wall_utc", 0.0)) or None),
+            })
+        return {
+            "query": query,
+            "robot_pose": working_memory.get_robot_pose(),
+            "results": results,
+        }
+
     # ---- Spatial search endpoint ----
     @app.get("/search/spatial")
     def spatial_search(

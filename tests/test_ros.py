@@ -2,7 +2,9 @@ import argparse
 import sys
 import time
 
-import roslibpy
+import pytest
+
+roslibpy = pytest.importorskip("roslibpy")
 
 def _stamp_to_float(stamp):
     if not isinstance(stamp, dict):

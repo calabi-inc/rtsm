@@ -242,6 +242,14 @@ class Pipeline:
         t_seg_end = time.perf_counter()
         # Store for downstream priority boost and label propagation
         self._last_seg_result = seg_result
+        # Detector-label monitor (2026-08-28): tally what the PROMPTED
+        # detector claims to see this frame, before any association/
+        # confirmation gate can hide it — served in /stats so operators
+        # can separate "detector never saw it" from "memory never
+        # surfaced it".
+        if self.working_mem is not None and seg_result.labels:
+            self.working_mem.note_label_detections(seg_result.labels,
+                                                   seg_result.scores)
 
         # Extract masks - use prepare_ann for consistency with existing pipeline
         if seg_result.has_masks:
@@ -925,25 +933,43 @@ class Pipeline:
                     label, tv, class_idx, topk = cls[row]
                     # Always store top-K labels with scores (frontend will pick best for display)
                     setattr(cands[i], 'label_topk', [(cid, float(sc)) for (cid, sc, _j) in topk])
-        # Merge YOLOE detection labels with CLIP vocab labels.
-        # For dual-confirmed masks, prepend the YOLOE label (higher specificity
-        # from detection head) ahead of CLIP's vocab-classifier labels.
+        # Merge DETECTION labels with CLIP vocab labels — the detection
+        # head's label (higher specificity; for prompted backends it is
+        # matched against the operator's vocabulary) goes ahead of CLIP's
+        # vocab-classifier labels. Sources: dual/YOLOE fill
+        # detection_labels/label_confidence; grounded_sam2 and standalone
+        # yoloe fill the base labels/scores fields (2026-08-28: grounded
+        # labels were silently dropped here — objects kept only CLIP
+        # classifier labels like 'card box' for a GDINO-detected
+        # 'tissue box', so label search had nothing to match).
         seg = getattr(self, '_last_seg_result', None)
-        if seg is not None and seg.detection_labels is not None:
+        if seg is not None:
             det_labels = seg.detection_labels
             det_conf = seg.label_confidence
-            for i, c in enumerate(cands):
-                src_idx = c.stats.idx  # original mask index from segmentation output
-                if src_idx < len(det_labels) and det_labels[src_idx]:
-                    yoloe_label = det_labels[src_idx]
-                    yoloe_score = float(det_conf[src_idx]) if det_conf and src_idx < len(det_conf) else 0.5
-                    existing = getattr(c, 'label_topk', None) or []
-                    # Merge: YOLOE label first (if not already present), then CLIP labels
-                    merged = [(yoloe_label, yoloe_score)]
-                    for lbl, sc in existing:
-                        if lbl != yoloe_label:
-                            merged.append((lbl, sc))
-                    c.label_topk = merged[:5]
+            if det_labels is None and seg.labels is not None:
+                det_labels = seg.labels
+                det_conf = ([float(s) for s in seg.scores]
+                            if seg.scores is not None else None)
+            if det_labels is not None:
+                for i, c in enumerate(cands):
+                    src_idx = c.stats.idx  # original mask index from segmentation output
+                    if src_idx < len(det_labels) and det_labels[src_idx]:
+                        det_label = det_labels[src_idx]
+                        # RAW measured confidence (0.5 only when the
+                        # backend reports none) — a floor here saturates
+                        # label_scores to a constant, which destroys
+                        # label-search ranking (exact ties broken by
+                        # object age) and fabricates every stored
+                        # label_confidence (reviewed 2026-08-28).
+                        det_score = (float(det_conf[src_idx])
+                                     if det_conf and src_idx < len(det_conf)
+                                     else 0.5)
+                        existing = getattr(c, 'label_topk', None) or []
+                        merged = [(det_label, det_score)]
+                        for lbl, sc in existing:
+                            if lbl != det_label:
+                                merged.append((lbl, sc))
+                        c.label_topk = merged[:5]
 
         # Single boundary cast: move whole batch to CPU numpy float32 for association/WM
         try:

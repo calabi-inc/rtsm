@@ -47,6 +47,7 @@ planner:
   api_timeout_s: 30                    # 2026-08-10: 10 s caused timeout->retry loops (~48 s planning); slow first call now succeeds in one attempt
   fallback: "top1"                     # deterministic fallback if the API is down (logged per trial)
   snapshot_max_candidates: 10          # must cover baseline.query_top_k (validated) — every batched candidate carries its crop; labels/scores are non-discriminative in the flat band
+  retrieval: "label_first"             # 2026-08-28: detector-label search first (prompted GDINO vocab; reaches protos), semantic fallback — SHARED policy with the baseline (see baseline.retrieval)
 
 baseline:
   freshness_gate_s: 4.0                # only objects seen within this window count as "currently visible". 2026-08-11: 2.0 was inside the real upsert lag under ingest load (bear invisible while the camera stared at it, t20260811-233410-001); 4.0 ~ one sweep-step cycle, so each poll covers the whole previous step — still unambiguously "now" vs 900 s trials
@@ -91,6 +92,12 @@ baseline:
   # NOT FOUND (explicit outcome; remainder of the 900 s stays reserved
   # for a completable drive at the rig's ~0.04 m/s). 8 min, operator-set.
   search_cap_s: 480
+  # Round-query retrieval (2026-08-28): the detector's prompted label is
+  # the reliable signal on this rig (SigLIP scores flat; protos invisible
+  # to semantic search until confirmed+indexed — observed live: 82
+  # tissue-box detections while /search/semantic surfaced nothing).
+  # Semantic remains the fallback on label miss/error/off-vocab goals.
+  retrieval: "label_first"
 
 calibration:
   # Written by calibrate.py â€” do not hand-edit. Units: rad / m / dimensionless.

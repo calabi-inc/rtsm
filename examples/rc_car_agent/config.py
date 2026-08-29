@@ -123,6 +123,12 @@ class PlannerCfg:
     # band (0.028-0.045 measured 2026-08-28) labels+scores cannot carry a
     # rejection on their own.
     snapshot_max_candidates: int = 10
+    # Shared retrieval policy (2026-08-28): "label_first" = detector-label
+    # search (prompted vocabulary; reaches protos), semantic fallback on
+    # miss/error/off-vocab goal; "semantic" = embeddings only (pre-
+    # grounded behavior). Applies to condition (a)'s plan(); the baseline
+    # has its own copy of the knob so both are visible in trial configs.
+    retrieval: str = "label_first"
 
 
 @dataclass(frozen=True)
@@ -184,6 +190,10 @@ class BaselineCfg:
     # (query_top_k) + ONE batched image-verified LLM call per round.
     # The knob stays for venues with a measured separated band. <= 0 off.
     min_candidate_score: float = 0.0
+    # Round-query retrieval (2026-08-28): "label_first" | "semantic" —
+    # see PlannerCfg.retrieval. The round window / masking / batched
+    # image selection are identical either way.
+    retrieval: str = "label_first"
 
 
 @dataclass(frozen=True)
@@ -287,6 +297,17 @@ def _validate(cfg: Config) -> None:
         raise ValueError(
             "baseline.search_cap_s cannot exceed the trial budget "
             "(the cap carves the acquisition phase OUT of timeout_baseline_s)"
+        )
+    for name, val in (("planner", cfg.planner.retrieval),
+                      ("baseline", cfg.baseline.retrieval)):
+        if val not in ("label_first", "semantic"):
+            raise ValueError(
+                f"{name}.retrieval must be label_first|semantic, got {val!r}")
+    if cfg.planner.retrieval != cfg.baseline.retrieval:
+        raise ValueError(
+            "planner.retrieval and baseline.retrieval must MATCH — the E1 "
+            "protocol claims an identical retrieval policy in both arms; "
+            "a silent divergence here would invalidate the comparison"
         )
     if (cfg.planner.include_snapshots
             and cfg.planner.snapshot_max_candidates < cfg.baseline.query_top_k):

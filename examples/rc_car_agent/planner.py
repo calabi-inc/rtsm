@@ -25,13 +25,17 @@ heading/distance are nav's deterministic geometry (invariant 3).
 
 from __future__ import annotations
 
+import logging
 import os
 import sys
 from dataclasses import dataclass
 from typing import List, Optional
 
 from config import Config, load_config
-from rtsm_client import PoseSample, RtsmClient, SemanticHit
+from rtsm_client import (PoseSample, RtsmClient, SemanticHit,
+                         SemanticResult)
+
+logger = logging.getLogger("rc_car_agent.planner")
 
 _SYSTEM_PROMPT = (
     "You are the target-selection step of a robot navigation planner. "
@@ -104,6 +108,10 @@ class PlanResult:
     # ran on scan-age or approach-refreshed coordinates).
     target_last_seen_wall_utc: Optional[float] = None
     reason: Optional[str] = None     # not_found detail or LLM's one-liner
+    # Which retrieval sources produced the candidate set (2026-08-28):
+    # "label" | "semantic" | "label+semantic" — same audit field the
+    # baseline stamps per round, so both arms are inspectable.
+    retrieval: Optional[str] = None
 
 
 def extract_query(goal: str) -> str:
@@ -250,11 +258,42 @@ def select_target_from_hits(hits, goal: str, rtsm: RtsmClient, cfg: Config,
     return picked, planner_path, reason
 
 
+def query_memory(rtsm: RtsmClient, cfg: Config, query: str, top_k: int):
+    """The SHARED retrieval policy (2026-08-28, reviewed same day), used
+    by BOTH conditions so the comparison masks persistence and nothing
+    else: the UNION of detector-label search (prompted-vocabulary labels
+    are the reliable signal on this rig; reaches protos) and semantic
+    embedding search, label hits ranked first, deduped by id, capped at
+    top_k. A fall-back-on-miss predicate was reviewed out — one
+    contaminated label hit would have suppressed the semantic candidates
+    entirely, and condition (a) is one-shot with no masking loop to
+    self-heal. Returns (SemanticResult, retrieval_path). A label-side
+    error alone (older server) degrades to pure semantic, logged."""
+    lres = None
+    if cfg.planner.retrieval == "label_first":
+        try:
+            lres = rtsm.label_query(query, top_k=top_k)
+        except Exception as e:  # noqa: BLE001 — label side is optional
+            logger.warning("label_query failed (%s: %s) — semantic only",
+                           type(e).__name__, e)
+    res = rtsm.semantic_query(query, top_k=top_k)
+    if lres is None or not lres.results:
+        return res, "semantic"
+    seen = {h.id for h in lres.results}
+    merged = list(lres.results) + [h for h in res.results
+                                   if h.id not in seen]
+    merged = merged[:top_k]
+    path = "label+semantic" if len(merged) > len(lres.results[:top_k]) \
+        else "label"
+    return SemanticResult(query=res.query, robot_pose=res.robot_pose,
+                          results=merged), path
+
+
 def plan(goal: str, rtsm: RtsmClient, cfg: Config,
          anthropic_client=None, use_llm: bool = True) -> PlanResult:
     """One-shot plan: query RTSM, pick a target, return it with provenance."""
     query = extract_query(goal)
-    res = rtsm.semantic_query(query, top_k=5)
+    res, retrieval_path = query_memory(rtsm, cfg, query, top_k=5)
 
     plan_epoch = res.robot_pose.frame_epoch if res.robot_pose else None
     sel = select_target_from_hits(res.results, goal, rtsm, cfg,
@@ -264,13 +303,14 @@ def plan(goal: str, rtsm: RtsmClient, cfg: Config,
         detail = "no results" if not res.results else "no candidate has a 3D position"
         return PlanResult(status="not_found", goal=goal, query=query,
                           plan_pose=res.robot_pose, frame_epoch=plan_epoch,
-                          reason=detail)
+                          reason=detail, retrieval=retrieval_path)
     picked, planner_path, reason = sel
     if picked is None:                       # LLM declared no plausible match
         return PlanResult(status="not_found", goal=goal, query=query,
                           planner_path=planner_path, plan_pose=res.robot_pose,
                           frame_epoch=plan_epoch,
-                          reason=reason or "no candidate plausibly matches")
+                          reason=reason or "no candidate plausibly matches",
+                          retrieval=retrieval_path)
 
     return PlanResult(
         status="ok", goal=goal, query=query,
@@ -280,7 +320,7 @@ def plan(goal: str, rtsm: RtsmClient, cfg: Config,
         planner_path=planner_path, plan_pose=res.robot_pose,
         frame_epoch=plan_epoch,
         target_last_seen_wall_utc=picked.last_seen_wall_utc,
-        reason=reason,
+        reason=reason, retrieval=retrieval_path,
     )
 
 

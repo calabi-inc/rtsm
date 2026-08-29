@@ -180,10 +180,22 @@ class RtsmClient:
         except (requests.RequestException, ValueError):
             return None
 
+    def label_query(self, query: str, top_k: int = 5) -> SemanticResult:
+        """One /search/label call (2026-08-28) — DETECTOR-label match over
+        working memory, protos included. Same MemorySlice shape as
+        semantic_query so gates/masking/selection reuse it unchanged.
+        Raises on an older server without the endpoint — falling back to
+        semantic search is the caller's decision."""
+        data = self._get("/search/label", params={"query": query, "top_k": top_k})
+        return self._parse_search(data, query)
+
     def semantic_query(self, query: str, top_k: int = 5) -> SemanticResult:
         """One /search/semantic call — carries BOTH results and robot_pose,
         which is the client-side MemorySlice assembly (one atomic snapshot)."""
         data = self._get("/search/semantic", params={"query": query, "top_k": top_k})
+        return self._parse_search(data, query)
+
+    def _parse_search(self, data, query: str) -> SemanticResult:
         hits = [
             SemanticHit(
                 id=str(e.get("id")),

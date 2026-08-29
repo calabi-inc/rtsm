@@ -49,6 +49,11 @@ class StubRtsm:
         self._results_fn = results_fn
         self.queries = 0
         self.top_ks = []
+        # Label search: None -> endpoint returns no hits (rounds fall back
+        # to semantic, so pre-label tests run unchanged); "raise" -> older
+        # server without /search/label; else a results_fn(label_query_no).
+        self.label_results_fn = None
+        self.label_queries = 0
         self._pose_calls = 0
         self._ts = 100.0
         self.freeze_at = None
@@ -81,6 +86,15 @@ class StubRtsm:
         return PoseSample(xyz=[0.0, 0.3, 0.0], quaternion_xyzw=[0, 0, 0, 1],
                           timestamp=self._ts, fetched_at_mono=0.0,
                           frame_epoch=epoch)
+
+    def label_query(self, query, top_k=5):
+        self.label_queries += 1
+        if self.label_results_fn == "raise":
+            raise RuntimeError("no /search/label on this server")
+        results = ([] if self.label_results_fn is None
+                   else self.label_results_fn(self.label_queries))
+        return SemanticResult(query=query, robot_pose=self.get_robot_pose(),
+                              results=results)
 
     def semantic_query(self, query, top_k=5):
         self.queries += 1
@@ -245,6 +259,60 @@ def test_no_match_reentry_relocates_before_observing():
     assert [h.id for h in acq2.hits] == ["mug-2"], "rejected id stays masked"
     assert forward_at_query and forward_at_query[0] > 0, \
         "relocation walk must precede the re-entered round's query"
+
+
+def test_union_ranks_label_hits_first_and_dedupes():
+    """UNION retrieval (2026-08-28 review): label hits lead the candidate
+    list, semantic-only hits follow, shared ids appear once. The served
+    path is stamped into the acquisition detail for the audit."""
+    rtsm = StubRtsm(lambda n: [mk_hit(age_s=0.1, hid="both-1"),
+                               mk_hit(age_s=0.1, hid="sem-1")])
+    rtsm.label_results_fn = lambda n: [mk_hit(age_s=0.1, hid="lab-1"),
+                                       mk_hit(age_s=0.1, hid="both-1")]
+    acq = mk_searcher(FAST, FakeBridge(), rtsm).acquire("m", "t-lb",
+                                                        budget_s=8.0)
+    assert acq.status == "acquired"
+    assert [h.id for h in acq.hits] == ["lab-1", "both-1", "sem-1"]
+    assert "label+semantic" in acq.detail
+    assert rtsm.queries >= 1, "semantic is ALWAYS consulted (union)"
+
+
+def test_masked_label_hits_never_suppress_semantic_candidates():
+    """REVIEW 2026-08-28: a fall-back-on-miss predicate decided before
+    the gate/mask ran, so one stale or already-rejected label hit could
+    starve every later round of its semantic candidates. Under the
+    union, a fully-masked label side still leaves semantic serving the
+    round."""
+    rtsm = StubRtsm(lambda n: [mk_hit(age_s=0.1, hid="mug-2")])
+    rtsm.label_results_fn = lambda n: [mk_hit(age_s=0.1, hid="rejected-1")]
+    s = mk_searcher(FAST, FakeBridge(), rtsm)
+    acq = s.acquire("m", "t-sup", budget_s=8.0,
+                    exclude_ids=frozenset({"rejected-1"}))
+    assert acq.status == "acquired"
+    assert [h.id for h in acq.hits] == ["mug-2"]
+    assert "semantic" in acq.detail
+
+
+def test_label_error_falls_back_to_semantic():
+    """An older server without /search/label must degrade gracefully —
+    the round is served by semantic search, never lost."""
+    rtsm = StubRtsm(lambda n: [mk_hit(age_s=0.1, hid="sem-1")])
+    rtsm.label_results_fn = "raise"
+    acq = mk_searcher(FAST, FakeBridge(), rtsm).acquire("m", "t-lb2",
+                                                        budget_s=8.0)
+    assert acq.status == "acquired"
+    assert [h.id for h in acq.hits] == ["sem-1"]
+    assert "semantic" in acq.detail
+
+
+def test_label_miss_falls_back_to_semantic():
+    """No label hits (off-vocabulary goal) -> semantic serves the round."""
+    rtsm = StubRtsm(lambda n: [mk_hit(age_s=0.1)])
+    acq = mk_searcher(FAST, FakeBridge(), rtsm).acquire("m", "t-lb3",
+                                                        budget_s=8.0)
+    assert acq.status == "acquired"
+    assert "semantic" in acq.detail
+    assert rtsm.label_queries >= 1, "label search was tried first"
 
 
 def test_leash_anchor_persists_across_reentries():

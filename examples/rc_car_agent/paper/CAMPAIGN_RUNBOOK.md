@@ -7,7 +7,7 @@ follow-along version.
 **The plan: 5 evenings. Each evening = 1 layout = 12 trials. 60 total.**
 
 Objects (same 5 all campaign, locked 2026-08-15 after Check A): **teddy
-bear, game controller, cola can, tissue box, scissors**.
+bear, water bottle, dumbbell, tissue box, scissors**.
 
 ---
 
@@ -72,10 +72,10 @@ Each object gets a back-to-back pair (memory then search, or flipped).
 |---|-----------|------|---------|------|
 | 1 | memory | teddy bear | | |
 | 2 | search | teddy bear | | |
-| 3 | memory | game controller | | |
-| 4 | search | game controller | | |
-| 5 | memory | cola can | | |
-| 6 | search | cola can | | |
+| 3 | memory | water bottle | | |
+| 4 | search | water bottle | | |
+| 5 | memory | dumbbell | | |
+| 6 | search | dumbbell | | |
 | 7 | memory | tissue box | | |
 | 8 | search | tissue box | | |
 | 9 | memory | scissors | | |
@@ -86,34 +86,34 @@ Each object gets a back-to-back pair (memory then search, or flipped).
 ### Layout L2 (starts with search)
 | # | condition | goal | tape cm | done |
 |---|-----------|------|---------|------|
-| 1 | search | game controller | | |
-| 2 | memory | game controller | | |
-| 3 | search | cola can | | |
-| 4 | memory | cola can | | |
+| 1 | search | water bottle | | |
+| 2 | memory | water bottle | | |
+| 3 | search | dumbbell | | |
+| 4 | memory | dumbbell | | |
 | 5 | search | tissue box | | |
 | 6 | memory | tissue box | | |
 | 7 | search | scissors | | |
 | 8 | memory | scissors | | |
 | 9 | search | teddy bear | | |
 | 10 | memory | teddy bear | | |
-| 11 | search | game controller (repeat) | | |
-| 12 | memory | game controller (repeat) | | |
+| 11 | search | water bottle (repeat) | | |
+| 12 | memory | water bottle (repeat) | | |
 
 ### Layout L3 (starts with memory)
 | # | condition | goal | tape cm | done |
 |---|-----------|------|---------|------|
-| 1 | memory | cola can | | |
-| 2 | search | cola can | | |
+| 1 | memory | dumbbell | | |
+| 2 | search | dumbbell | | |
 | 3 | memory | tissue box | | |
 | 4 | search | tissue box | | |
 | 5 | memory | scissors | | |
 | 6 | search | scissors | | |
 | 7 | memory | teddy bear | | |
 | 8 | search | teddy bear | | |
-| 9 | memory | game controller | | |
-| 10 | search | game controller | | |
-| 11 | memory | cola can (repeat) | | |
-| 12 | search | cola can (repeat) | | |
+| 9 | memory | water bottle | | |
+| 10 | search | water bottle | | |
+| 11 | memory | dumbbell (repeat) | | |
+| 12 | search | dumbbell (repeat) | | |
 
 ### Layout L4 (starts with search)
 | # | condition | goal | tape cm | done |
@@ -124,10 +124,10 @@ Each object gets a back-to-back pair (memory then search, or flipped).
 | 4 | memory | scissors | | |
 | 5 | search | teddy bear | | |
 | 6 | memory | teddy bear | | |
-| 7 | search | game controller | | |
-| 8 | memory | game controller | | |
-| 9 | search | cola can | | |
-| 10 | memory | cola can | | |
+| 7 | search | water bottle | | |
+| 8 | memory | water bottle | | |
+| 9 | search | dumbbell | | |
+| 10 | memory | dumbbell | | |
 | 11 | search | tissue box (repeat) | | |
 | 12 | memory | tissue box (repeat) | | |
 
@@ -138,10 +138,10 @@ Each object gets a back-to-back pair (memory then search, or flipped).
 | 2 | search | scissors | | |
 | 3 | memory | teddy bear | | |
 | 4 | search | teddy bear | | |
-| 5 | memory | game controller | | |
-| 6 | search | game controller | | |
-| 7 | memory | cola can | | |
-| 8 | search | cola can | | |
+| 5 | memory | water bottle | | |
+| 6 | search | water bottle | | |
+| 7 | memory | dumbbell | | |
+| 8 | search | dumbbell | | |
 | 9 | memory | tissue box | | |
 | 10 | search | tissue box | | |
 | 11 | memory | scissors (repeat) | | |

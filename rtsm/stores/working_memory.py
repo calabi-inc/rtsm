@@ -175,6 +175,13 @@ class WorkingMemory:
         # open space ahead of the camera). Written per dequeued frame by the
         # pipeline; consumed by agents as a wall guard before blind motion.
         self._latest_clearance: Optional[Dict[str, Any]] = None
+        # Rolling per-label detector tally (2026-08-28): with a PROMPTED
+        # backend (grounded_sam2 + roster vocab) the detector's label is
+        # meaningful, and confirmation/indexing lag can hide detections
+        # from semantic search for minutes — this answers "is the
+        # detector seeing X right now?" independently of memory state.
+        # label -> {n, last_seen_wall, last_score, max_score}
+        self._label_detections: Dict[str, Dict[str, Any]] = {}
         # Reverse index: frame_id -> set of object IDs last updated on that frame
         self._frame_to_objects: Dict[str, set] = {}
         # Min-heap of (deadline_mono, oid) for proto expiry (lazy re-schedule on matches)
@@ -882,6 +889,38 @@ class WorkingMemory:
     def get_forward_clearance(self) -> Optional[Dict[str, Any]]:
         return self._latest_clearance
 
+    def note_label_detections(self, labels, scores=None) -> None:
+        """Tally one frame's detector labels (see _label_detections).
+        Bounded: at most 64 distinct labels are tracked (vocab-prompted
+        backends emit a handful; the guard is for open-vocab defaults)."""
+        if not labels:
+            return
+        now = time.time()
+        with self._lock:
+            for i, label in enumerate(labels):
+                if label is None:
+                    continue
+                key = str(label)
+                rec = self._label_detections.get(key)
+                if rec is None:
+                    if len(self._label_detections) >= 64:
+                        continue
+                    rec = {"n": 0, "last_seen_wall": 0.0,
+                           "last_score": None, "max_score": None}
+                    self._label_detections[key] = rec
+                rec["n"] += 1
+                rec["last_seen_wall"] = now
+                s = None
+                if scores is not None:
+                    try:
+                        s = float(scores[i])
+                    except (IndexError, TypeError, ValueError):
+                        s = None
+                if s is not None:
+                    rec["last_score"] = round(s, 4)
+                    if rec["max_score"] is None or s > rec["max_score"]:
+                        rec["max_score"] = round(s, 4)
+
     def stats(self) -> Dict[str, Any]:
         with self._lock:
             n = len(self._map)
@@ -902,6 +941,9 @@ class WorkingMemory:
                 "ltm_never_upserted": never_upserted,
                 "robot_pose": self._latest_pose,
                 "forward_clearance": self._latest_clearance,
+                "detections_by_label": {
+                    k: dict(v) for k, v in self._label_detections.items()
+                },
             }
 
     def clear(self) -> Dict[str, int]:
@@ -928,6 +970,7 @@ class WorkingMemory:
 
             # Reset counters
             self._upsert_count_total = 0
+            self._label_detections = {}
 
             # Clear attached spatial index if present
             if self.index is not None:

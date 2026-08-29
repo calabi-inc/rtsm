@@ -4,16 +4,12 @@ Run from repo root:  python -m pytest tests/test_model_loading.py -v
 """
 import os
 import sys
-import yaml
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 os.chdir(ROOT)
 
-
-def _load_config():
-    with open(os.path.join(ROOT, "config", "rtsm.yaml")) as f:
-        return yaml.safe_load(f)
+from rtsm.cfg import load_config as _load_config
 
 
 def test_yoloe_model_exists():

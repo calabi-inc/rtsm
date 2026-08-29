@@ -95,6 +95,10 @@ class TrialLogger:
                 "target_age_at_plan_s": (round(time.time() - last_seen, 3)
                                          if last_seen is not None else None),
                 "reason": plan.reason,
+                # Which retrieval sources produced the candidate set —
+                # label | semantic | label+semantic (2026-08-28; the
+                # baseline stamps the same field per round).
+                "retrieval": getattr(plan, "retrieval", None),
             },
             # Pipeline-throughput audit point (upserts delta start->end
             # reveals thermal/throughput drift within a session).

@@ -299,6 +299,8 @@ class BaselineSearcher:
         self._start_xy = None
         self._rounds_queried = 0
         self._query_failures = 0
+        self._retrieval_path = "semantic"   # which search served the
+                                            # latest round (audit field)
 
     # ── the acquisition loop ─────────────────────────────────────────────
 
@@ -410,7 +412,8 @@ class BaselineSearcher:
                 hits, pose, age = found
                 return AcquireResult(status="acquired", hits=tuple(hits),
                                      pose=pose, hit_age_s=age,
-                                     detail=f"round {rounds} ({sweeps} sweeps)",
+                                     detail=(f"round {rounds} ({sweeps} sweeps,"
+                                             f" {self._retrieval_path})"),
                                      elapsed_s=time.monotonic() - t0,
                                      sweeps=sweeps,
                                      rounds_queried=self._rounds_queried,
@@ -420,7 +423,8 @@ class BaselineSearcher:
             if self._logger is not None:
                 self._logger.log_event("round_no_candidates",
                                        time.monotonic() - t0,
-                                       rounds=rounds, sweeps=sweeps)
+                                       rounds=rounds, sweeps=sweeps,
+                                       retrieval=self._retrieval_path)
             r = self._relocate(samples, start_xy, sweep_sign,
                                deadline, t0, sweeps)
             if r is not None:
@@ -651,22 +655,47 @@ class BaselineSearcher:
         None when nothing rankable was observed from this standpoint, or
         the string "error" on a query exception (caller retries)."""
         b = self._cfg.baseline
+        fetch_k = max(b.gate_fetch_k, b.query_top_k)
+        # UNION retrieval (2026-08-28, reviewed same day): fetch BOTH the
+        # detector-label search (prompted vocabulary; reaches protos —
+        # the reliable signal on this rig) AND the semantic search, and
+        # merge label hits FIRST. A fall-back-on-miss predicate was
+        # reviewed out: it decided before the freshness gate/masking ran,
+        # so one stale or masked label hit could suppress semantic search
+        # for the rest of the trial. The union has no predicate to get
+        # wrong — the gate and mask arbitrate over everything, and a
+        # label error alone (older server) degrades to pure semantic.
         try:
-            res = self._rtsm.semantic_query(query,
-                                            top_k=max(b.gate_fetch_k,
-                                                      b.query_top_k))
+            lres = None
+            if b.retrieval == "label_first":
+                try:
+                    lres = self._rtsm.label_query(query, top_k=fetch_k)
+                except Exception:  # noqa: BLE001 — label side is optional
+                    lres = None
+            res = self._rtsm.semantic_query(query, top_k=fetch_k)
         except Exception:  # noqa: BLE001 — retried by the caller; a round
             return "error"  # must never be silently coded as "empty"
-        if res.robot_pose is not None:
-            bad = self._note_epoch(res.robot_pose.frame_epoch)
-            if bad is not None:
-                return AcquireResult(status="frame_reset",
-                                     detail=f"{bad} at acquisition poll")
+        for r in (lres, res):
+            if r is not None and r.robot_pose is not None:
+                bad = self._note_epoch(r.robot_pose.frame_epoch)
+                if bad is not None:
+                    return AcquireResult(status="frame_reset",
+                                         detail=f"{bad} at acquisition poll")
         now = self._now_wall()
         window_s = (now - round_start_wall) + b.freshness_gate_s
-        fresh = fresh_hits(res.results, now, window_s, b.clock_skew_tol_s)
-        fresh = [h for h in fresh
-                 if h.id not in getattr(self, "_exclude", frozenset())]
+        exclude = getattr(self, "_exclude", frozenset())
+
+        def _usable(results):
+            kept = fresh_hits(results, now, window_s, b.clock_skew_tol_s)
+            return [h for h in kept if h.id not in exclude]
+
+        label_fresh = _usable(lres.results) if lres is not None else []
+        sem_fresh = _usable(res.results)
+        seen_ids = {h.id for h in label_fresh}
+        fresh = label_fresh + [h for h in sem_fresh if h.id not in seen_ids]
+        self._retrieval_path = ("label+semantic" if label_fresh and
+                                len(fresh) > len(label_fresh)
+                                else "label" if label_fresh else "semantic")
         # Tail floor — disabled by default (the measured single-standpoint
         # band is flat; see BaselineCfg.min_candidate_score).
         if b.min_candidate_score > 0:

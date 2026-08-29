@@ -1,0 +1,851 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>RTSM Demo — Real-Time Spatio-Semantic Memory</title>
+    <style>
+      html, body { margin: 0; padding: 0; width: 100%; height: 100%; background: #111; color: #eee; overflow: hidden; }
+      #app { width: 100%; height: 100%; }
+
+      /* Tab bar */
+      #tab-bar {
+        position: fixed;
+        top: 0; left: 0; right: 0;
+        height: 32px;
+        display: flex;
+        align-items: stretch;
+        background: rgba(16,16,16,0.9);
+        backdrop-filter: blur(8px);
+        -webkit-backdrop-filter: blur(8px);
+        border-bottom: 1px solid rgba(255,255,255,0.06);
+        z-index: 50;
+        font-family: system-ui, -apple-system, Arial, sans-serif;
+        font-size: 11px;
+        font-weight: 500;
+      }
+      .tab-btn {
+        padding: 0 20px;
+        border: none;
+        background: transparent;
+        color: rgba(255,255,255,0.4);
+        cursor: pointer;
+        border-bottom: 2px solid transparent;
+        transition: color 0.15s, border-color 0.15s;
+        letter-spacing: 0.3px;
+      }
+      .tab-btn:hover { color: rgba(255,255,255,0.7); }
+      .tab-btn.active { color: #fff; border-bottom-color: #1e90ff; }
+
+      #tab-spacer { flex: 1; }
+      #conn-controls {
+        display: flex; align-items: center; gap: 6px;
+        padding: 0 12px;
+      }
+      .conn-dot {
+        width: 7px; height: 7px; border-radius: 50%;
+        transition: background 0.3s;
+      }
+      .conn-dot.connected { background: #00ff88; box-shadow: 0 0 6px rgba(0,255,136,0.4); }
+      .conn-dot.disconnected { background: #ff4444; box-shadow: 0 0 6px rgba(255,68,68,0.3); }
+      .conn-btn {
+        background: none; border: none; cursor: pointer;
+        color: rgba(255,255,255,0.4); padding: 2px;
+        display: flex; align-items: center;
+        transition: color 0.15s;
+      }
+      .conn-btn:hover { color: rgba(255,255,255,0.85); }
+      .conn-btn svg { width: 15px; height: 15px; }
+      .conn-btn-danger:hover { color: #ff6666; }
+
+      /* View containers */
+      #view-3d { display: block; }
+      #view-analytics { display: none; position: fixed; top: 32px; left: 0; right: 0; bottom: 0; overflow-y: auto; overflow-x: hidden; background: #111; }
+
+      #hud {
+        position: fixed;
+        left: 12px;
+        top: 42px;
+        color: rgba(255,255,255,0.85);
+        font-family: system-ui, -apple-system, Arial, sans-serif;
+        font-size: 11px;
+        z-index: 10;
+        text-shadow: 0 1px 3px rgba(0,0,0,0.8);
+        background: rgba(20,20,20,0.6);
+        backdrop-filter: blur(8px);
+        -webkit-backdrop-filter: blur(8px);
+        padding: 8px 12px;
+        border-radius: 10px;
+        line-height: 1.6;
+        box-shadow: 0 2px 12px rgba(0,0,0,0.3);
+      }
+
+      #ui {
+        position: fixed;
+        top: 42px;
+        right: 12px;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        z-index: 11;
+      }
+
+      .ui-row {
+        display: flex;
+        gap: 4px;
+        align-items: center;
+        background: rgba(20,20,20,0.7);
+        backdrop-filter: blur(8px);
+        -webkit-backdrop-filter: blur(8px);
+        padding: 5px 8px;
+        border-radius: 8px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+      }
+
+      #ui input[type="file"] {
+        display: none;
+      }
+
+      #ui button, #ui label {
+        padding: 5px 10px;
+        border-radius: 6px;
+        border: 1px solid rgba(255,255,255,0.08);
+        background: rgba(255,255,255,0.06);
+        color: rgba(255,255,255,0.75);
+        cursor: pointer;
+        font-size: 11px;
+        font-weight: 500;
+        transition: background 0.15s, color 0.15s;
+      }
+
+      #ui button:hover, #ui label:hover {
+        background: rgba(255,255,255,0.12);
+        color: #fff;
+      }
+
+      #ui button.primary {
+        background: rgba(30,144,255,0.25);
+        border-color: rgba(30,144,255,0.3);
+        color: #5ba8ff;
+      }
+      #ui button.primary:hover {
+        background: rgba(30,144,255,0.4);
+        color: #fff;
+      }
+
+      #ui button.success {
+        background: rgba(40,167,69,0.2);
+        border-color: rgba(40,167,69,0.3);
+        color: #5fd47a;
+      }
+      #ui button.success:hover {
+        background: rgba(40,167,69,0.35);
+        color: #fff;
+      }
+
+      #ui button.warning {
+        background: rgba(255,193,7,0.15);
+        border-color: rgba(255,193,7,0.25);
+        color: #e6b800;
+      }
+      #ui button.warning:hover {
+        background: rgba(255,193,7,0.3);
+        color: #fff;
+      }
+
+      #mode {
+        font-size: 10px;
+        color: rgba(255,255,255,0.4);
+        padding: 2px 6px;
+      }
+
+      .section-label {
+        font-size: 9px;
+        color: rgba(255,255,255,0.3);
+        text-transform: uppercase;
+        letter-spacing: 0.8px;
+        margin-right: 4px;
+        font-weight: 600;
+      }
+
+      /* ======== Object Inspector Panel ======== */
+      #object-panel {
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        background: rgba(16,16,16,0.92);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        border-top: 1px solid rgba(255,255,255,0.06);
+        font-family: system-ui, -apple-system, Arial, sans-serif;
+        font-size: 12px;
+        z-index: 20;
+      }
+
+      #object-panel.collapsed #panel-content {
+        max-height: 0; opacity: 0; overflow: hidden; pointer-events: none;
+      }
+      #panel-content {
+        max-height: 200px;
+        overflow-y: auto;
+        transition: max-height 0.25s cubic-bezier(0.4,0,0.2,1), opacity 0.2s ease;
+        opacity: 1;
+      }
+
+      #panel-header {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 7px 12px;
+      }
+
+      #panel-title {
+        font-weight: 600;
+        color: rgba(255,255,255,0.85);
+        font-size: 11px;
+        min-width: 80px;
+      }
+
+      #object-search {
+        flex: 1;
+        max-width: 280px;
+        padding: 4px 10px;
+        border: 1px solid rgba(255,255,255,0.08);
+        border-radius: 6px;
+        background: rgba(255,255,255,0.05);
+        color: #eee;
+        font-size: 11px;
+        transition: border-color 0.15s;
+      }
+
+      #object-search:focus {
+        outline: none;
+        border-color: rgba(30,144,255,0.5);
+      }
+
+      #panel-toggle, #panel-filter, #search-btn, #show-all-btn {
+        padding: 4px 10px;
+        border: 1px solid rgba(255,255,255,0.08);
+        border-radius: 6px;
+        background: rgba(255,255,255,0.06);
+        color: rgba(255,255,255,0.65);
+        cursor: pointer;
+        font-size: 11px;
+        font-weight: 500;
+        transition: background 0.15s, color 0.15s;
+      }
+
+      #panel-toggle:hover, #panel-filter:hover, #search-btn:hover, #show-all-btn:hover {
+        background: rgba(255,255,255,0.12);
+        color: #fff;
+      }
+
+      #panel-filter.active {
+        background: rgba(0,255,136,0.2);
+        color: #5fd47a;
+        border-color: rgba(0,255,136,0.3);
+      }
+
+      #object-list {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+        gap: 4px;
+        padding: 8px;
+      }
+
+      .object-item {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 10px;
+        background: rgba(255,255,255,0.03);
+        border-radius: 6px;
+        cursor: pointer;
+        transition: background 0.15s;
+        border: 1px solid transparent;
+      }
+
+      .object-item:hover {
+        background: rgba(255,255,255,0.07);
+      }
+
+      .object-item.selected {
+        background: rgba(30,144,255,0.12);
+        border-color: rgba(30,144,255,0.3);
+      }
+
+      .object-dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        flex-shrink: 0;
+      }
+
+      .object-dot.confirmed { background: #00ff88; }
+      .object-dot.proto { background: #ffaa00; }
+
+      .object-info {
+        flex: 1;
+        overflow: hidden;
+      }
+
+      .object-label {
+        font-weight: bold;
+        color: #fff;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .object-meta {
+        font-size: 10px;
+        color: #888;
+      }
+
+      .object-scores {
+        font-size: 9px;
+        color: #6a9;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        margin-top: 2px;
+      }
+
+      /* ======== Snapshot Gallery Panel ======== */
+      #snapshot-gallery {
+        position: fixed;
+        right: 12px;
+        bottom: 52px;
+        width: 300px;
+        background: rgba(16,16,16,0.92);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        border-radius: 12px;
+        box-shadow: 0 4px 24px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.06);
+        font-family: system-ui, -apple-system, Arial, sans-serif;
+        font-size: 12px;
+        z-index: 25;
+        display: none;
+        overflow: hidden;
+      }
+
+      #snapshot-gallery.visible {
+        display: block;
+      }
+
+      #gallery-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 8px 12px;
+        cursor: grab;
+        user-select: none;
+      }
+      #gallery-header:active { cursor: grabbing; }
+
+      #gallery-title {
+        font-weight: 600;
+        color: rgba(255,255,255,0.85);
+        font-size: 11px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        max-width: 200px;
+      }
+
+      #gallery-close {
+        background: none;
+        border: none;
+        color: rgba(255,255,255,0.35);
+        cursor: pointer;
+        font-size: 16px;
+        padding: 0 4px;
+        transition: color 0.15s;
+      }
+
+      #gallery-close:hover {
+        color: rgba(255,255,255,0.8);
+      }
+
+      #gallery-content {
+        padding: 12px;
+      }
+
+      #gallery-loading {
+        color: #888;
+        text-align: center;
+        padding: 20px;
+      }
+
+      #gallery-images {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-bottom: 8px;
+      }
+
+      .gallery-thumb {
+        width: 70px;
+        height: 70px;
+        object-fit: cover;
+        border-radius: 4px;
+        border: 2px solid transparent;
+        cursor: pointer;
+        transition: border-color 0.15s, transform 0.2s ease;
+      }
+
+      .gallery-thumb:hover {
+        border-color: #1e90ff;
+      }
+
+      .gallery-thumb.selected {
+        border-color: #00ff88;
+      }
+
+      #ss-rotate {
+        background: #333;
+        color: #ccc;
+        border: 1px solid #555;
+        border-radius: 4px;
+        padding: 2px 4px;
+        font-size: 11px;
+        margin-left: auto;
+        margin-right: 8px;
+        cursor: pointer;
+      }
+
+      #gallery-preview-wrap {
+        overflow: hidden;
+        border-radius: 4px;
+      }
+
+      #gallery-preview {
+        width: 100%;
+        border-radius: 4px;
+        display: none;
+        transition: transform 0.2s ease;
+      }
+
+      #gallery-preview.visible {
+        display: block;
+      }
+
+      #gallery-info {
+        color: #888;
+        font-size: 10px;
+        margin-top: 8px;
+        text-align: center;
+      }
+      /* ======== Analytics Dashboard (Looker-style) ======== */
+      #analytics-panel {
+        width: 100%;
+        padding: 16px 20px;
+        box-sizing: border-box;
+        font-family: system-ui, -apple-system, Arial, sans-serif;
+        font-size: 12px;
+      }
+
+      #analytics-header {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 16px;
+      }
+      #analytics-title { font-weight: bold; font-size: 15px; color: #fff; flex: 1; }
+      #analytics-copy {
+        padding: 4px 12px; border: 1px solid #444; border-radius: 4px;
+        background: #2a2a2a; color: #ccc; cursor: pointer; font-size: 11px;
+      }
+      #analytics-copy:hover { background: #3a3a3a; }
+      #analytics-copy.copied { background: #28a745; color: #fff; border-color: #28a745; }
+
+      /* KPI scorecards row */
+      .kpi-row {
+        display: flex;
+        gap: 10px;
+        margin-bottom: 14px;
+        flex-wrap: wrap;
+        box-sizing: border-box;
+        max-width: 100%;
+      }
+      .kpi-card {
+        flex: 1 1 120px;
+        background: rgba(255,255,255,0.04);
+        border: 1px solid #2a2a2a;
+        border-radius: 6px;
+        padding: 10px 14px;
+        min-width: 120px;
+      }
+      .kpi-label {
+        font-size: 10px; color: #888; text-transform: uppercase;
+        letter-spacing: 0.5px; margin-bottom: 4px;
+      }
+      .kpi-value {
+        font-size: 20px; font-weight: bold; color: #fff;
+        font-family: 'Consolas', 'Monaco', monospace;
+      }
+      .kpi-sub { font-size: 10px; color: #666; margin-top: 2px; }
+      .kpi-value.green { color: #00ff88; }
+      .kpi-value.yellow { color: #ffc107; }
+      .kpi-value.red { color: #ff4444; }
+
+      /* Config (collapsible) */
+      #analytics-config-toggle {
+        font-size: 10px; color: #666; text-transform: uppercase;
+        letter-spacing: 0.5px; cursor: pointer; margin-bottom: 8px;
+      }
+      .config-grid {
+        display: flex; flex-wrap: wrap; gap: 4px 16px;
+        font-size: 10px; font-family: 'Consolas', 'Monaco', monospace;
+        margin-bottom: 14px; padding: 8px 10px;
+        background: rgba(255,255,255,0.02); border-radius: 4px;
+      }
+      .config-item { white-space: nowrap; }
+      .config-key { color: #666; }
+      .config-val { color: #aaa; }
+      .config-highlight { color: #1e90ff; font-weight: bold; }
+
+      /* Chart sections */
+      .chart-section {
+        margin-bottom: 14px;
+      }
+      .chart-section-header {
+        display: flex; align-items: center; gap: 8px;
+        margin-bottom: 6px;
+      }
+      .chart-section-label {
+        font-size: 10px; color: #888; text-transform: uppercase;
+        letter-spacing: 0.5px;
+      }
+      .chart-section-detail {
+        font-size: 10px; color: #555;
+        font-family: 'Consolas', 'Monaco', monospace;
+      }
+      .chart-container {
+        width: 100%;
+        max-width: 100%;
+        overflow: hidden;
+        box-sizing: border-box;
+      }
+
+      /* Latency breakdown (inline bar) */
+      .latency-breakdown {
+        display: flex; gap: 12px; flex-wrap: wrap;
+        font-size: 10px; font-family: 'Consolas', 'Monaco', monospace;
+        margin-bottom: 6px;
+      }
+      .latency-item { display: flex; align-items: center; gap: 4px; }
+      .latency-dot { width: 8px; height: 8px; border-radius: 2px; flex-shrink: 0; }
+      .latency-name { color: #888; }
+      .latency-val { color: #ccc; }
+      .latency-pct { color: #555; }
+
+      /* Congestion accent on KPI */
+      .kpi-card.congestion { border-color: #ff4444; }
+
+      /* ======== Camera Feed PiP (FaceTime-style) ======== */
+      #camera-panel {
+        position: fixed;
+        top: 150px;
+        left: 12px;
+        width: 240px;
+        background: rgba(20,20,20,0.92);
+        border-radius: 12px;
+        font-family: system-ui, -apple-system, Arial, sans-serif;
+        font-size: 12px;
+        z-index: 22;
+        overflow: hidden;
+        box-shadow: 0 4px 24px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.06);
+        transition: box-shadow 0.2s ease;
+        cursor: default;
+      }
+      #camera-panel:hover { box-shadow: 0 6px 32px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.1); }
+      #camera-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 6px 10px;
+        cursor: grab;
+        user-select: none;
+      }
+      #camera-header:active { cursor: grabbing; }
+      #camera-header span {
+        color: rgba(255,255,255,0.5);
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        font-weight: 500;
+      }
+      .cam-btn {
+        background: none; border: none; color: rgba(255,255,255,0.35); cursor: pointer;
+        padding: 2px; line-height: 1; display: flex; align-items: center;
+        transition: color 0.15s;
+      }
+      .cam-btn:hover { color: rgba(255,255,255,0.8); }
+      .cam-btn svg { width: 14px; height: 14px; }
+      #camera-actions { display: flex; gap: 4px; align-items: center; }
+      #camera-content {
+        transition: max-height 0.25s cubic-bezier(0.4,0,0.2,1), opacity 0.2s ease;
+        max-height: 500px; opacity: 1; overflow: hidden;
+      }
+      #camera-panel.collapsed #camera-content { max-height: 0; opacity: 0; }
+      #camera-panel.collapsed { width: 240px; }
+      #camera-feed {
+        width: 100%; display: block; background: #000;
+        border-radius: 0 0 12px 12px;
+        transition: transform 0.2s ease, margin 0.2s ease;
+      }
+
+      /* ======== Controls Panel (minimalist slide) ======== */
+      #ui-toggle-row {
+        display: flex; align-items: center; justify-content: center;
+        background: rgba(20,20,20,0.7);
+        padding: 4px 6px; border-radius: 8px;
+        cursor: pointer; user-select: none;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+        transition: background 0.15s;
+      }
+      #ui-toggle-row:hover { background: rgba(40,40,40,0.8); }
+      #ui-toggle-row svg {
+        width: 16px; height: 16px;
+        color: rgba(255,255,255,0.5);
+        transition: transform 0.25s cubic-bezier(0.4,0,0.2,1), color 0.15s;
+      }
+      #ui-toggle-row:hover svg { color: rgba(255,255,255,0.8); }
+      #ui.collapsed #ui-toggle-row svg { transform: rotate(180deg); }
+      #ui.collapsed .ui-collapsible {
+        max-height: 0; opacity: 0; margin: 0; padding: 0; overflow: hidden;
+        pointer-events: none;
+      }
+      .ui-collapsible {
+        transition: max-height 0.25s cubic-bezier(0.4,0,0.2,1), opacity 0.2s ease;
+        max-height: 200px; opacity: 1; overflow: hidden;
+      }
+    </style>
+    <script type="module" crossorigin src="/assets/index-87Jxob3Z.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-CnsZ1jie.css">
+  </head>
+  <body>
+    <div id="tab-bar">
+      <button class="tab-btn active" data-tab="3d">3D View</button>
+      <button class="tab-btn" data-tab="analytics">Analytics</button>
+      <div id="tab-spacer"></div>
+      <!-- Connection status + controls (right side of tab bar) -->
+      <div id="conn-controls">
+        <span id="conn-status" class="conn-dot disconnected" title="Disconnected"></span>
+        <button id="reconnect" class="conn-btn" title="Reconnect">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+        </button>
+        <button id="disconnect" class="conn-btn conn-btn-danger" title="Disconnect">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <div id="view-3d">
+    <div id="app"></div>
+
+    <div id="hud">Loading...</div>
+
+    <div id="ui">
+      <!-- Minimalist toggle: chevron icon (rotates when collapsed) -->
+      <div id="ui-toggle-row">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+      </div>
+
+      <!-- File loading -->
+      <div class="ui-row ui-collapsible">
+        <span class="section-label">PLY</span>
+        <input id="file" type="file" accept=".ply" />
+        <label for="file">Choose File</label>
+        <button id="load">Load</button>
+      </div>
+
+      <!-- Streaming controls -->
+      <div class="ui-row ui-collapsible">
+        <span class="section-label">Stream</span>
+        <button id="clearStream" class="warning">Clear</button>
+        <button id="savePly" class="success">Save PLY</button>
+      </div>
+
+      <!-- Objects overlay -->
+      <div class="ui-row ui-collapsible">
+        <span class="section-label">Objects</span>
+        <button id="toggleObj">Hide Objects</button>
+        <button id="filterConfirmed">All</button>
+      </div>
+
+      <!-- View controls -->
+      <div class="ui-row ui-collapsible">
+        <span class="section-label">View</span>
+        <button id="reset">Reset</button>
+        <button id="flipX">Flip X</button>
+        <button id="flipY">Flip Y</button>
+        <button id="flipZ">Flip Z</button>
+      </div>
+
+      <!-- RTSM Controls -->
+      <div class="ui-row ui-collapsible">
+        <span class="section-label">RTSM</span>
+        <button id="rtsmReset" class="warning">Reset WM</button>
+        <button id="rtsmStats">Stats</button>
+      </div>
+
+      <!-- Mode indicator -->
+      <div class="ui-row ui-collapsible">
+        <span id="mode">Mode: Free</span>
+      </div>
+    </div>
+
+    <!-- Camera Feed PiP (FaceTime-style, draggable) -->
+    <div id="camera-panel">
+      <div id="camera-header">
+        <span>Camera</span>
+        <div id="camera-actions">
+          <!-- Rotate landscape toggle (default: on for portrait iPhone) -->
+          <button class="cam-btn" id="camera-rotate" title="Toggle rotation">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="7" width="18" height="10" rx="2"/><path d="M7.5 3.5L12 7l-4.5 3.5"/></svg>
+          </button>
+          <!-- Expand/resize icon (arrows pointing outward) -->
+          <button class="cam-btn" id="camera-resize" title="Resize">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
+          </button>
+          <!-- Minimize icon (horizontal line) -->
+          <button class="cam-btn" id="camera-toggle" title="Minimize">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="6" y1="12" x2="18" y2="12"/></svg>
+          </button>
+        </div>
+      </div>
+      <div id="camera-content">
+        <img id="camera-feed" alt="" />
+      </div>
+    </div>
+
+    <!-- Object Inspector Panel -->
+    <div id="object-panel">
+      <div id="panel-header">
+        <span id="panel-title">Objects (0)</span>
+        <input type="text" id="object-search" placeholder="Semantic search (e.g. red cup, chair)..." />
+        <input type="number" id="search-threshold" value="0.0" min="0" max="1" step="0.01" style="width:52px; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.08); border-radius:6px; color:#ccc; padding:4px 6px; font-size:11px;" title="Similarity threshold (0=return all)" />
+        <button id="search-btn">Search</button>
+        <button id="show-all-btn">Show All</button>
+        <button id="panel-filter">All</button>
+        <button id="panel-toggle">▼</button>
+      </div>
+      <div id="panel-content">
+        <div id="object-list"></div>
+      </div>
+    </div>
+
+    <!-- Snapshot Gallery Panel -->
+    <div id="snapshot-gallery">
+      <div id="gallery-header">
+        <span id="gallery-title">Snapshots</span>
+        <select id="ss-rotate" title="Snapshot rotation">
+          <option value="0">0°</option>
+          <option value="90">90°</option>
+          <option value="-90">-90°</option>
+          <option value="180">180°</option>
+        </select>
+        <button id="gallery-close">&times;</button>
+      </div>
+      <div id="gallery-content">
+        <div id="gallery-loading">Select an object to view snapshots</div>
+        <div id="gallery-images"></div>
+        <div id="gallery-preview-wrap">
+          <img id="gallery-preview" alt="Selected snapshot" />
+        </div>
+        <div id="gallery-info"></div>
+      </div>
+    </div>
+    </div><!-- /view-3d -->
+
+    <div id="view-analytics">
+      <div id="analytics-panel">
+        <div id="analytics-header">
+          <span id="analytics-title">Runtime Analytics</span>
+          <button id="analytics-copy">Copy Data</button>
+        </div>
+        <div id="analytics-content">
+          <!-- Config bar (collapsible inline) -->
+          <div id="analytics-config-toggle">Config &#9662;</div>
+          <div id="analytics-config"></div>
+
+          <!-- KPI scorecards -->
+          <div class="kpi-row" id="analytics-kpi-row">
+            <div class="kpi-card" id="kpi-input-hz">
+              <div class="kpi-label">Input</div>
+              <div class="kpi-value">—</div>
+              <div class="kpi-sub">Hz (raw camera)</div>
+            </div>
+            <div class="kpi-card" id="kpi-proc-hz">
+              <div class="kpi-label">Processing</div>
+              <div class="kpi-value">—</div>
+              <div class="kpi-sub">Hz (pipeline)</div>
+            </div>
+            <div class="kpi-card" id="kpi-latency">
+              <div class="kpi-label">Latency</div>
+              <div class="kpi-value">—</div>
+              <div class="kpi-sub">ms (mean)</div>
+            </div>
+            <div class="kpi-card" id="kpi-queue">
+              <div class="kpi-label">Queue</div>
+              <div class="kpi-value">—</div>
+              <div class="kpi-sub">/ 512 cap</div>
+            </div>
+            <div class="kpi-card" id="kpi-masks">
+              <div class="kpi-label">Masks</div>
+              <div class="kpi-value">—</div>
+              <div class="kpi-sub">survival</div>
+            </div>
+            <div class="kpi-card" id="kpi-dual">
+              <div class="kpi-label">Dual Confirmed</div>
+              <div class="kpi-value">—</div>
+              <div class="kpi-sub">rate</div>
+            </div>
+            <div class="kpi-card" id="kpi-objects">
+              <div class="kpi-label">Objects</div>
+              <div class="kpi-value">—</div>
+              <div class="kpi-sub">confirmed / total</div>
+            </div>
+            <div class="kpi-card" id="kpi-assoc">
+              <div class="kpi-label">Association</div>
+              <div class="kpi-value">—</div>
+              <div class="kpi-sub">matched / created</div>
+            </div>
+          </div>
+
+          <!-- Throughput chart (full width) -->
+          <div class="chart-section">
+            <div class="chart-section-header">
+              <span class="chart-section-label">Throughput</span>
+              <span class="chart-section-detail" id="analytics-throughput-detail"></span>
+            </div>
+            <div class="chart-container" id="analytics-throughput-chart"></div>
+          </div>
+
+          <!-- Latency chart (full width) -->
+          <div class="chart-section">
+            <div class="chart-section-header">
+              <span class="chart-section-label">Latency</span>
+              <span class="chart-section-detail" id="analytics-latency-detail"></span>
+            </div>
+            <div id="analytics-latency-breakdown"></div>
+            <div class="chart-container" id="analytics-latency-chart"></div>
+          </div>
+
+          <!-- Segmentation chart (full width) -->
+          <div class="chart-section" id="analytics-seg-section">
+            <div class="chart-section-header">
+              <span class="chart-section-label">Segmentation</span>
+              <span class="chart-section-detail" id="analytics-seg-detail"></span>
+            </div>
+            <div class="chart-container" id="analytics-seg-chart"></div>
+          </div>
+        </div>
+      </div>
+    </div><!-- /view-analytics -->
+
+  </body>
+</html>

@@ -22,7 +22,12 @@ segmentation:
   #   fastsam        - class-agnostic (requires ultralytics, AGPL)
   #   yoloe          - open-vocab (requires ultralytics, AGPL)
   #   dual           - FastSAM + YOLOE IoU merge (requires ultralytics, AGPL)
-  backend: dual
+  # 2026-08-28: dual → grounded_sam2 for E1. The RC-mounted low camera
+  # angle starves FastSAM's generic proposals (retrieval rate unstable
+  # during baseline sweeps); GDINO is PROMPTED for the roster classes,
+  # so per-frame recall on targets is what the campaign needs. Same
+  # backend for BOTH conditions; vocabulary disclosed in the paper.
+  backend: grounded_sam2
   retina_masks: false                  # false = 640x640 masks (fast), true = original resolution (precise but slow)
 
   fastsam:
@@ -59,7 +64,9 @@ segmentation:
     device: cuda
     box_threshold: 0.20              # GDINO detection confidence threshold
     text_threshold: 0.15             # GDINO text matching threshold
-    vocab: null                      # null = use default indoor vocab (40+ classes)
+    # E1 roster vocabulary (2026-08-28, operator-set): the five venue
+    # objects. null would fall back to the 40-class indoor vocab.
+    vocab: [teddy bear, water bottle, scissors, tissue box, dumbbell]
 
   # Dual-confirmation settings (only used when backend: dual)
   dual:
