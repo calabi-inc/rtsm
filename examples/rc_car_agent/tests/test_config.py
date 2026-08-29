@@ -96,3 +96,41 @@ def test_low_drive_rate_starves_heartbeats_rejected():
 def test_poll_faster_than_tick_rejected():
     with pytest.raises(ValueError, match="poll_hz"):
         _bad(nav={"poll_hz": 1000.0})()               # 1 ms < tick_s 50 ms
+
+
+# ── round-search validators (2026-08-28) ─────────────────────────────────
+
+
+def _bad_other(**sections):
+    from config import _validate
+
+    cfg = load_config()
+    for name, fields in sections.items():
+        cfg = dataclasses.replace(
+            cfg, **{name: dataclasses.replace(getattr(cfg, name), **fields)})
+    return lambda: _validate(cfg)
+
+
+def test_zero_sweeps_per_round_rejected():
+    with pytest.raises(ValueError, match="sweeps_per_round"):
+        _bad_other(baseline={"sweeps_per_round": 0})()
+
+
+def test_search_cap_beyond_budget_rejected():
+    cap = load_config().nav.timeout_baseline_s + 1
+    with pytest.raises(ValueError, match="search_cap_s"):
+        _bad_other(baseline={"search_cap_s": cap})()
+
+
+def test_snapshot_budget_must_cover_candidate_list():
+    k = load_config().baseline.query_top_k
+    with pytest.raises(ValueError, match="snapshot_max_candidates"):
+        _bad_other(planner={"snapshot_max_candidates": k - 1})()
+
+
+def test_shipped_config_enforces_estop_gate():
+    """E1 live-fire rule: the SHIPPED default must be true. A temporary
+    local override (pad physically paused, operator managing) is expected
+    to turn this test red — that is the alarm working as designed, not a
+    bug: restore true before campaign trials."""
+    assert load_config().server.require_verified_estop is True

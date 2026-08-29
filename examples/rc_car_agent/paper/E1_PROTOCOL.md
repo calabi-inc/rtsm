@@ -8,8 +8,9 @@ this directory; this document is everything the *human* must do for the
 data to be valid.
 
 **Conditions.** (a) `rtsm` — memory: plan from the scanned map, drive.
-(b) `baseline` — memoryless: freshness-gated search (only observations
-< 2 s old are usable), then drive.
+(b) `baseline` — memoryless: observe-then-confirm search rounds (only
+observations made during the current standpoint's round are usable —
+see the 2026-08-28 amendment), then drive.
 
 > **AMENDMENT 2026-08-17 (pre-campaign, no trial data): steered
 > relocation.** The baseline's search sweep records the forward depth
@@ -37,6 +38,49 @@ controller, same target-selection rule; the ONLY masked capability is
 persistence. **Budgets are hard TOTAL clocks from command receipt** —
 planning/selection time counts in (a) exactly as search time counts in
 (b): **900 s (a) / 900 s (b)**.
+
+> **AMENDMENT 2026-08-28 (pre-campaign, no trial data): observe-then-
+> confirm rounds, batched selection, search cap.** Live shakedown
+> (t20260828-160929-001) exposed two failures of per-dwell confirmation
+> in a cluttered venue: (1) every visible object triggered its own 4-12 s
+> image-verified LLM rejection — 12 calls in 150 s with the car
+> effectively stalled mid-sweep; (2) the measured single-standpoint score
+> band is FLAT (top-15 for "tissue box": 0.028-0.045 with the true
+> target mid-pack at rank ~6), so no relevance floor can pre-filter junk
+> without filtering the target (a 0.05 floor briefly deployed that
+> morning would have removed even rank 1 — caught by the operator, never
+> used in a trial). The baseline search is therefore restructured into
+> ROUNDS: **3 full in-place 360° sweeps** (multi-view observation, no
+> queries), then ONE deep query whose candidates are the observations
+> made DURING the round (round-scoped freshness = the current
+> standpoint's observation episode; the old 4 s gate survives as the
+> upsert-lag margin), ranked **top-10**, judged in ONE batched
+> image-verified selection call (same shared rule; every candidate
+> carries its crop). No-match masks the judged ids and the searcher
+> relocates ~1 m toward the most open in-leash heading (stride = measured
+> clearance minus the 0.60 m wall-guard buffer, capped 1.0 m) before the
+> next round; a round with no candidates relocates without any LLM call.
+> **Search cap:** the acquisition phase of EITHER condition is capped at
+> **480 s** of the 900 s budget; exhausting it ends the trial as
+> `not_found` — an explicit, analyzable outcome that also keeps the
+> remaining budget sufficient for a completable drive at the calibrated
+> ~0.04 m/s (condition (a)'s acquisition is a single query + selection
+> call, so the cap only ever binds on (b)). `not_found` requires that at
+> least one round query actually succeeded (or a selection verdict was
+> rendered): a retrieval outage producing zero judged standpoints stays
+> a plain `timeout`, with `round_query_failed` events in the trial log —
+> an infrastructure fault is never coded as "target absent". Round
+> queries are retried (3 attempts) so one dropped request cannot
+> silently discard an observation round; the leash is anchored ONCE at
+> the trial's start pose and persists across no-match re-entries, so
+> cumulative relocation drift stays inside the venue; and every
+> relocation requires live pose evidence (a timestamp change) before
+> the car moves. The memoryless definition is
+> unchanged in spirit and stricter in mechanism: candidates never
+> persist across standpoints or trials; only what the round's sweeps
+> observed from the CURRENT position is actionable. This STRENGTHENS the
+> comparator (systematic coverage + multi-view evidence per standpoint)
+> and is conservative w.r.t. the memory-advantage claim.
 
 > **AMENDMENT 2026-08-10 (pre-campaign, no trial data collected under the
 > old budgets):** originally 60 s (a) / 180 s (b), set before Phase G

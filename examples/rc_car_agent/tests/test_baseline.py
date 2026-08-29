@@ -22,8 +22,13 @@ FAST = replace(
     BASE,
     nav=replace(BASE.nav, tick_s=0.01, stale_abort_s=0.5),
     baseline=replace(BASE.baseline, sweep_step_s=0.1, dwell_s=0.15,
-                     steps_per_sweep=3, walk_s=0.1, walk_speed=0.2,
-                     walk_min_m=0.01, walk_chunk_m=0.02, walk_max_m=0.03),
+                     steps_per_sweep=3, sweeps_per_round=2,
+                     walk_s=0.1, walk_speed=0.2,
+                     walk_min_m=0.01, walk_chunk_m=0.02, walk_max_m=0.03,
+                     # Tiny tick margin so the ROUND window (~1.5 s here)
+                     # is what admits candidates — distinguishes round-
+                     # scoped freshness from the old per-poll gate.
+                     freshness_gate_s=0.05),
     # Unit-speed calibration so strides take milliseconds, not the real
     # rig's 25 s/m.
     calibration=replace(BASE.calibration, speed_scale_mps=1.0),
@@ -48,10 +53,21 @@ class StubRtsm:
         self._ts = 100.0
         self.freeze_at = None
         self.bump_epoch_at = None
+        self.bump_epoch_at_query = None   # epoch bumps ONLY in the round
+                                          # query's pose (dwell polls keep
+                                          # the seeded epoch)
         # Depth wall-guard signal; None = no data (fail-closed, no walk).
         self.clearance = None
 
     def get_forward_clearance(self):
+        if self.clearance is None:
+            return None
+        if getattr(self, "clearance_live", True):
+            # Model a LIVE depth stream (re-stamp per read): with a
+            # one-shot stamp, every walk check made after a full round
+            # sat ~0.15 s from the 2.0 s staleness limit — flaky on a
+            # loaded machine. Staleness tests set clearance_live=False.
+            return dict(self.clearance, timestamp=time.time())
         return self.clearance
 
     def get_robot_pose(self):
@@ -69,7 +85,14 @@ class StubRtsm:
     def semantic_query(self, query, top_k=5):
         self.queries += 1
         self.top_ks.append(top_k)
-        return SemanticResult(query=query, robot_pose=self.get_robot_pose(),
+        pose = self.get_robot_pose()
+        if (self.bump_epoch_at_query is not None
+                and self.queries >= self.bump_epoch_at_query):
+            pose = PoseSample(xyz=pose.xyz,
+                              quaternion_xyzw=pose.quaternion_xyzw,
+                              timestamp=pose.timestamp,
+                              fetched_at_mono=0.0, frame_epoch=8)
+        return SemanticResult(query=query, robot_pose=pose,
                               results=self._results_fn(self.queries))
 
 
@@ -128,49 +151,129 @@ def test_derive_seed_deterministic():
 # ── acquisition loop ─────────────────────────────────────────────────────
 
 
-def test_visible_at_start_acquires_without_motion():
+def test_full_observation_round_precedes_any_confirm():
+    """The operator's rule: >= sweeps_per_round full spins, THEN one
+    confirm — a target in view from second one still waits for the whole
+    round (multi-view evidence), and exactly ONE query serves the round."""
     bridge = FakeBridge()
     rtsm = StubRtsm(lambda n: [mk_hit(age_s=0.1)])
-    acq = mk_searcher(FAST, bridge, rtsm).acquire("red mug", "t-1", budget_s=5.0)
+    acq = mk_searcher(FAST, bridge, rtsm).acquire("red mug", "t-1", budget_s=8.0)
     assert acq.status == "acquired"
-    assert acq.sweeps == 0 and "start" in acq.detail
+    assert acq.sweeps == FAST.baseline.sweeps_per_round
+    assert "round 1" in acq.detail
     assert acq.hits and acq.hits[0].id == "mug-1"
-    assert acq.hit_age_s == pytest.approx(0.1, abs=0.05)
     assert acq.pose is not None                      # pose from the same query
-    assert bridge.drive_calls == [], "no motion needed when already visible"
+    assert rtsm.queries == 1, "one batched confirm per round, not per dwell"
+    rotate = [c for c in bridge.drive_calls if (c[1] < 0 < c[2]) or (c[2] < 0 < c[1])]
+    assert len(rotate) > 0, "the round sweeps before confirming"
 
 
-def test_gated_poll_fetches_deep():
-    """Retrieval must fetch gate_fetch_k deep — top-5 over ALL memory
+def test_round_query_fetches_deep():
+    """Retrieval must fetch gate_fetch_k deep — top-k over ALL memory
     would let stale objects crowd a visible target out of the list."""
     bridge = FakeBridge()
     rtsm = StubRtsm(lambda n: [mk_hit(age_s=0.1)])
-    mk_searcher(FAST, bridge, rtsm).acquire("red mug", "t-1b", budget_s=5.0)
+    mk_searcher(FAST, bridge, rtsm).acquire("red mug", "t-1b", budget_s=8.0)
     assert rtsm.top_ks[0] == max(FAST.baseline.gate_fetch_k,
                                  FAST.baseline.query_top_k)
 
 
-def test_acquires_after_sweeping():
+def test_acquires_on_a_later_round_after_relocating():
     bridge = FakeBridge()
-    rtsm = StubRtsm(lambda n: [mk_hit(age_s=0.1)] if n >= 4 else [mk_hit(age_s=99)])
+    rtsm = StubRtsm(lambda n: [mk_hit(age_s=0.1)] if n >= 2 else [mk_hit(age_s=99)])
+    rtsm.clearance = _clear_now()
     acq = mk_searcher(FAST, bridge, rtsm).acquire("red mug", "t-2", budget_s=10.0)
     assert acq.status == "acquired"
     assert acq.hits
-    rotate = [c for c in bridge.drive_calls if (c[1] < 0 < c[2]) or (c[2] < 0 < c[1])]
-    assert rotate, "should have rotated while searching"
+    assert rtsm.queries == 2, "round 1 empty -> relocate -> round 2 acquires"
+    assert acq.sweeps == 2 * FAST.baseline.sweeps_per_round
+    walks = [c for c in bridge.drive_calls if c[1] == c[2] and c[1] > 0]
+    assert walks, "an empty round must relocate before the next round"
     assert bridge.stop_calls, "each step must end stopped"
-    assert rtsm.queries >= 4
+
+
+def test_round_window_admits_hits_seen_early_in_the_round():
+    """Round-scoped freshness: an object observed during the round's
+    FIRST sweep (stamp ~1 s old at confirm time, far beyond the 0.05 s
+    tick margin) is still a candidate — while anything last seen before
+    the round started stays invisible."""
+    bridge = FakeBridge()
+    rtsm = StubRtsm(lambda n: [mk_hit(age_s=1.0, hid="early-sweep"),
+                               mk_hit(age_s=99.0, hid="pre-round")])
+    acq = mk_searcher(FAST, bridge, rtsm).acquire("m", "t-rw", budget_s=8.0)
+    assert acq.status == "acquired"
+    ids = [h.id for h in acq.hits]
+    assert ids == ["early-sweep"]
+
+
+def test_round_candidates_capped_at_top_k_in_rank_order():
+    rtsm = StubRtsm(
+        lambda n: [mk_hit(age_s=0.1, hid=f"h-{i:02d}") for i in range(15)])
+    acq = mk_searcher(FAST, FakeBridge(), rtsm).acquire("m", "t-k", budget_s=8.0)
+    assert acq.status == "acquired"
+    assert len(acq.hits) == FAST.baseline.query_top_k
+    assert [h.id for h in acq.hits] == [f"h-{i:02d}"
+                                        for i in range(FAST.baseline.query_top_k)]
+
+
+def test_no_match_reentry_relocates_before_observing():
+    """After the caller's no-match verdict, the standpoint is fully
+    judged: the re-entered call must WALK first (steered by the judged
+    round's depth survey), and the masked id never reappears."""
+    rtsm = StubRtsm(lambda n: [mk_hit(age_s=0.1, hid="junk-1"),
+                               mk_hit(age_s=0.1, hid="mug-2")])
+    rtsm.clearance = _clear_now()
+    bridge = FakeBridge()
+    s = mk_searcher(FAST, bridge, rtsm)
+    acq1 = s.acquire("m", "t-re", budget_s=8.0)
+    assert acq1.status == "acquired"
+    assert [h.id for h in acq1.hits] == ["junk-1", "mug-2"]
+
+    bridge.drive_calls.clear()
+    forward_at_query = []
+    orig = rtsm.semantic_query
+
+    def spy(q, top_k=5):
+        forward_at_query.append(
+            len([c for c in bridge.drive_calls if c[1] == c[2] and c[1] > 0]))
+        return orig(q, top_k)
+
+    rtsm.semantic_query = spy
+    acq2 = s.acquire("m", "t-re", budget_s=8.0,
+                     exclude_ids=frozenset({"junk-1"}))
+    assert acq2.status == "acquired"
+    assert [h.id for h in acq2.hits] == ["mug-2"], "rejected id stays masked"
+    assert forward_at_query and forward_at_query[0] > 0, \
+        "relocation walk must precede the re-entered round's query"
+
+
+def test_leash_anchor_persists_across_reentries():
+    """REVIEW 2026-08-28: the leash must confine the TRIAL, not each
+    call — a per-call anchor let every no-match rejection re-anchor the
+    2 m radius at the just-judged standpoint, compounding the mandatory
+    relocate hop out of the venue ~1 m per rejection."""
+    rtsm = StubRtsm(lambda n: [mk_hit(age_s=0.1, hid="junk-a"),
+                               mk_hit(age_s=0.1, hid="mug-b")])
+    rtsm.clearance = _clear_now()
+    s = mk_searcher(FAST, FakeBridge(), rtsm)
+    assert s.acquire("m", "t-an", budget_s=8.0).status == "acquired"
+    anchor = s._start_xy
+    assert anchor is not None
+    acq2 = s.acquire("m", "t-an", budget_s=8.0,
+                     exclude_ids=frozenset({"junk-a"}))
+    assert acq2.status == "acquired"
+    assert s._start_xy == anchor, "re-entry must NOT re-anchor the leash"
 
 
 def test_epoch_change_at_acquisition_poll_aborts():
-    """The poll the searcher ACTS on is epoch-guarded too: a Lens restart
-    between dwells must not let a fresh-stamped, old-frame observation be
-    acquired (the drive would then adopt the NEW epoch and its own guard
-    could never fire)."""
+    """The query the searcher ACTS on is epoch-guarded too: a Lens
+    restart during the round must not let a fresh-stamped, old-frame
+    observation be acquired (the drive would then adopt the NEW epoch and
+    its own guard could never fire)."""
     bridge = FakeBridge()
     rtsm = StubRtsm(lambda n: [mk_hit(age_s=0.1)])   # always "fresh"
-    rtsm.bump_epoch_at = 2      # call 1 seeds epoch 7; the poll sees 8
-    acq = mk_searcher(FAST, bridge, rtsm).acquire("m", "t-2b", budget_s=5.0)
+    rtsm.bump_epoch_at_query = 1    # dwell polls keep epoch 7; the round
+    acq = mk_searcher(FAST, bridge, rtsm).acquire("m", "t-2b", budget_s=8.0)
     assert acq.status == "frame_reset"
     assert "acquisition poll" in acq.detail
 
@@ -272,32 +375,46 @@ def test_steer_full_circle_costs_zero():
     assert best_relocation_rotation(c, 12) == (0, 1.0)
 
 
-def test_low_score_fresh_hit_never_reaches_selection():
-    # Relevance floor (2026-08-28): junk in view (fresh but scoring ~0.02
-    # vs the goal) must not trigger acquisition/LLM calls; a real target
-    # scoring above the floor still acquires.
-    junk = mk_hit(age_s=0.1, hid="wall-1")
-    junk = type(junk)(id="wall-1", score=0.02, confirmed=True,
-                      stability=0.9, xyz_world=[1.0, 0.3, 1.0],
-                      last_seen_wall_utc=time.time() - 0.1)
-    rtsm = StubRtsm(lambda n: [junk])
-    rtsm.clearance = _clear_now()
+def _mk_scored(hid, score, age_s=0.1):
+    return SemanticHit(id=hid, score=score, confirmed=True, stability=0.9,
+                       xyz_world=[1.0, 0.3, 1.0],
+                       last_seen_wall_utc=time.time() - age_s)
+
+
+def test_score_floor_disabled_admits_the_flat_band_target():
+    """REGRESSION (2026-08-28, operator-caught): the measured single-
+    standpoint band is a flat 0.028-0.045 with the TRUE target mid-pack —
+    a 0.05 floor filtered the actual tissue box. Default floor must be
+    disabled: a 0.03-scoring candidate reaches the confirm call."""
+    assert FAST.baseline.min_candidate_score <= 0
+    rtsm = StubRtsm(lambda n: [_mk_scored("target-ish", 0.03)])
     acq = mk_searcher(FAST, FakeBridge(), rtsm).acquire("m", "t-fl",
-                                                        budget_s=1.5)
-    assert acq.status == "timeout"          # junk never acquired
-
-    real = mk_hit(age_s=0.1, hid="mug-1")   # score 0.8 >> floor
-    rtsm2 = StubRtsm(lambda n: [real])
-    acq2 = mk_searcher(FAST, FakeBridge(), rtsm2).acquire("m", "t-fl2",
-                                                          budget_s=5.0)
-    assert acq2.status == "acquired"
+                                                        budget_s=8.0)
+    assert acq.status == "acquired"
+    assert acq.hits[0].id == "target-ish"
 
 
-def test_stride_is_half_clearance_capped_and_floored():
-    assert relocation_stride_m(2.0, 0.12, 1.2) == 1.0     # half
-    assert relocation_stride_m(5.0, 0.12, 1.2) == 1.2     # cap
-    assert relocation_stride_m(0.1, 0.12, 1.2) == 0.12    # floor
-    assert relocation_stride_m(None, 0.12, 1.2) == 0.12   # no data -> floor
+def test_score_floor_when_enabled_trims_the_tail():
+    cfg = replace(FAST, baseline=replace(FAST.baseline,
+                                         min_candidate_score=0.05))
+    rtsm = StubRtsm(lambda n: [_mk_scored("band", 0.06),
+                               _mk_scored("tail", 0.01)])
+    acq = mk_searcher(cfg, FakeBridge(), rtsm).acquire("m", "t-fl2",
+                                                       budget_s=8.0)
+    assert acq.status == "acquired"
+    assert [h.id for h in acq.hits] == ["band"]
+
+
+def test_stride_aims_walk_max_into_free_depth_keeping_buffer():
+    # New rule (2026-08-28): stride = clearance - keep_clear, capped at
+    # walk_max (~the 1 m hop), floored; overrun protection lives in the
+    # chunked walk's live re-checks.
+    assert relocation_stride_m(1.3, 0.12, 1.0, keep_clear_m=0.6) == \
+        pytest.approx(0.7)                                # depth-limited
+    assert relocation_stride_m(2.0, 0.12, 1.0, keep_clear_m=0.6) == 1.0  # cap
+    assert relocation_stride_m(0.5, 0.12, 1.0, keep_clear_m=0.6) == 0.12  # floor
+    assert relocation_stride_m(None, 0.12, 1.0, keep_clear_m=0.6) == 0.12
+    assert relocation_stride_m(5.0, 0.12, 1.2) == 1.2     # no buffer -> cap
 
 
 # ── search leash (2026-08-17: depth sees past the venue; stay near start) ─
@@ -333,12 +450,12 @@ def test_leashed_choice_prefers_open_inside():
     # Step 1: modestly open, points inward. Choice must be step 1.
     samples = [
         (0.0, 1.9, 0.0, 5.0),          # near edge, heading further out
-        (0.0, 1.9, _math.pi, 1.6),     # heading back toward start
+        (0.0, 1.9, _math.pi, 1.3),     # heading back toward start
     ] + [None] * 10
     k, stride, mode = leashed_choice(samples, (0.0, 0.0), 2.0, 0.6,
                                      0.12, 1.0)
     assert (k, mode) == (1, "open")
-    assert abs(stride - 0.8) < 1e-9    # half of 1.6, inside leash room
+    assert abs(stride - 0.7) < 1e-9    # 1.3 depth minus the 0.6 buffer
 
 
 def test_inbound_open_heading_wins_even_from_outside():
@@ -375,7 +492,7 @@ def test_leashed_choice_none_without_samples():
 def test_no_clearance_data_blocks_walk_fail_closed():
     rtsm = StubRtsm(lambda n: [])                    # clearance stays None
     s, progress = _searcher_with_progress(FAST, rtsm)
-    acq = s.acquire("m", "t-9", budget_s=2.0)
+    acq = s.acquire("m", "t-9", budget_s=3.0)
     assert acq.status == "timeout"
     assert progress.get("walk_blocked_skips", 0) >= 1
     # never a straight-line walk command (equal positive wheels)
@@ -388,8 +505,9 @@ def test_stale_clearance_blocks_walk():
     rtsm = StubRtsm(lambda n: [])
     rtsm.clearance = {"clearance_m": 3.0, "valid_frac": 0.9,
                       "timestamp": time.time() - 30.0}   # ancient sample
+    rtsm.clearance_live = False                          # keep it ancient
     s, progress = _searcher_with_progress(FAST, rtsm)
-    acq = s.acquire("m", "t-10", budget_s=2.0)
+    acq = s.acquire("m", "t-10", budget_s=3.0)
     assert acq.status == "timeout"
     assert progress.get("walk_blocked_skips", 0) >= 1
 
@@ -398,7 +516,7 @@ def test_fresh_clearance_allows_walk():
     rtsm = StubRtsm(lambda n: [])
     rtsm.clearance = _clear_now()
     s, _ = _searcher_with_progress(FAST, rtsm)
-    acq = s.acquire("m", "t-11", budget_s=2.5)
+    acq = s.acquire("m", "t-11", budget_s=2.5)   # round 1 + relocate fit
     assert acq.status == "timeout"
     walks = [c for c in s._bridge.drive_calls
              if c[1] == c[2] and c[1] > 0]
@@ -415,9 +533,12 @@ def test_blocked_then_clear_rotates_and_walks():
 
     def clearance_script():
         calls["n"] += 1
-        if calls["n"] <= 2:                          # blocked twice...
+        # Blocked through the round's 6 dwell samples AND the steered
+        # walk's pre-check — the fallback loop's first re-check then
+        # finds open space: rotate-away-from-the-wall, then walk.
+        if calls["n"] <= 7:
             return dict(blocked, timestamp=time.time())
-        return _clear_now()                          # ...then open
+        return _clear_now()
 
     rtsm.get_forward_clearance = clearance_script
     s, progress = _searcher_with_progress(FAST, rtsm)

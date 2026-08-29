@@ -118,7 +118,11 @@ class PlannerCfg:
     # t20260811-200758-001). Best-effort — a missing crop degrades that
     # candidate to text-only, never blocks.
     include_snapshots: bool = True
-    snapshot_max_candidates: int = 8     # bounds tokens/latency per pick
+    # Must cover baseline.query_top_k (validated): a candidate without its
+    # crop degrades to text-only, and in the flat single-standpoint score
+    # band (0.028-0.045 measured 2026-08-28) labels+scores cannot carry a
+    # rejection on their own.
+    snapshot_max_candidates: int = 10
 
 
 @dataclass(frozen=True)
@@ -152,6 +156,18 @@ class BaselineCfg:
     walk_max_m: float = 1.0
     walk_min_m: float = 0.12
     walk_chunk_m: float = 0.30
+    # Observe-then-confirm rounds (2026-08-28): full in-place 360° sweeps
+    # per round BEFORE the single batched selection call — multiple passes
+    # give the pipeline multiple views (better crops, more view bins)
+    # before any LLM time is spent. Operator-set: >= 3 spins, then judge.
+    sweeps_per_round: int = 3
+    # Search cap (2026-08-28): the acquisition phase gets at most this
+    # much of the trial budget; exhausting it ends the trial as NOT FOUND
+    # — an explicit, analyzable outcome (every standpoint reached was
+    # observed and judged; none contained the target) instead of a
+    # generic timeout, and the remainder stays reserved for a drive the
+    # ~0.04 m/s rig could actually complete. <= 0 disables (cap=budget).
+    search_cap_s: float = 480.0
     # Search leash (2026-08-17): depth can see PAST the venue (the tape
     # boundary is not a wall), so open-space steering alone would walk
     # the car out of the experiment area. The searcher stays within this
@@ -160,14 +176,14 @@ class BaselineCfg:
     # start instead. Sized for a car starting centered in a ~4.9 x 3 m
     # venue (half-diagonal ~2.9 m). <= 0 disables.
     search_leash_m: float = 2.0
-    # Relevance floor (2026-08-28): a fresh observation must score at
-    # least this against the goal phrase before it is offered to the
-    # (slow, LLM) selection call. In a cluttered room the first sweep
-    # otherwise pays 4-12 s of image-verified rejection PER VISIBLE
-    # OBJECT (walls, chairs, doors — observed live: 12 calls in 150 s,
-    # sweep crawling). Verified roster targets score >= 0.10 vs their
-    # phrases post-color-fix; junk scores 0.01-0.03. <= 0 disables.
-    min_candidate_score: float = 0.05
+    # Relevance floor — DISABLED by default (0.0). Measured 2026-08-28:
+    # the single-standpoint score band is FLAT (top-15 for "tissue box"
+    # spanned 0.028-0.045 with the true target mid-pack), so ANY usable
+    # floor also kills the target; the 0.05 floor shipped that morning
+    # would have filtered even rank 1. Selection pressure is ranking
+    # (query_top_k) + ONE batched image-verified LLM call per round.
+    # The knob stays for venues with a measured separated band. <= 0 off.
+    min_candidate_score: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -265,3 +281,17 @@ def _validate(cfg: Config) -> None:
         )
     if cfg.nav.timeout_baseline_s < cfg.nav.timeout_rtsm_s:
         raise ValueError("baseline timeout must be >= rtsm timeout (censoring policy)")
+    if cfg.baseline.sweeps_per_round < 1:
+        raise ValueError("baseline.sweeps_per_round must be >= 1")
+    if cfg.baseline.search_cap_s > cfg.nav.timeout_baseline_s:
+        raise ValueError(
+            "baseline.search_cap_s cannot exceed the trial budget "
+            "(the cap carves the acquisition phase OUT of timeout_baseline_s)"
+        )
+    if (cfg.planner.include_snapshots
+            and cfg.planner.snapshot_max_candidates < cfg.baseline.query_top_k):
+        raise ValueError(
+            "planner.snapshot_max_candidates must cover baseline.query_top_k "
+            "— a batched candidate without its crop is judged by a label, "
+            "and labels lie (the teddy bear was captioned 'audio')"
+        )

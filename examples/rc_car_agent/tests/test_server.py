@@ -106,7 +106,13 @@ def env_car(monkeypatch, tmp_path):
         server=replace(base.server, require_verified_estop=False),
         nav=replace(base.nav, tick_s=0.02, poll_hz=20.0, stale_abort_s=1.0),
         baseline=replace(base.baseline, sweep_step_s=0.25, dwell_s=0.3,
-                         steps_per_sweep=8, walk_s=0.3, walk_speed=0.2),
+                         steps_per_sweep=8, sweeps_per_round=1,
+                         walk_s=0.3, walk_speed=0.5,
+                         # Real calibration (~0.04 m/s) makes a 1 m
+                         # relocation stride a 25 s walk — keep e2e hops
+                         # tiny so a relocate costs ~1 s of test time.
+                         walk_max_m=0.05, walk_chunk_m=0.05,
+                         walk_min_m=0.01),
     )
     rtsm = RtsmClient(f"http://127.0.0.1:{rtsm_srv.server_address[1]}", timeout_s=1.0)
     bridge = Esp32Bridge(f"http://127.0.0.1:{esp_srv.server_address[1]}",
@@ -474,8 +480,17 @@ def test_baseline_no_match_resumes_search_e2e(env_car, monkeypatch):
     import server as server_mod
     cfg, rtsm, bridge, rtsm_srv, esp_srv, car, tmp_path = env_car
     rtsm_srv.visibility = {"fov_deg": 70, "range_m": 8.0}
+    # The round-based search (2026-08-28) observes 360° BEFORE its one
+    # confirm call, so "behind the car" alone no longer hides the mug
+    # from round 1 — model it as unseeable from the first STANDPOINT:
+    # stampable only once the camera has actually relocated (>= 0.6 m
+    # from the origin; the camera orbits its ~0.26 m lever arm while
+    # rotating in place, so sweeps alone can never reveal it — only a
+    # real relocation walk does, which is exactly the behavior under
+    # test).
     mug = {"id": "mug-1", "score": 0.81, "confirmed": True, "stability": 0.9,
-           "xyz_world": [0.0, 0.3, -1.5]}                    # behind the car
+           "xyz_world": [0.0, 0.3, -1.5],                    # behind the car
+           "visible_after_car_moved_m": 0.6}
     junk = {"id": "phone-1", "score": 0.30, "confirmed": True,
             "stability": 1.0, "xyz_world": [0.0, 0.3, 1.5]}  # in view at start
     rtsm_srv.semantic_results = [mug, junk]
@@ -509,6 +524,45 @@ def test_baseline_no_match_resumes_search_e2e(env_car, monkeypatch):
         assert acq[0]["target_id"] == "mug-1"                # never the junk
         assert acq[0]["t"] > nm[0]["t"]                      # rejected, THEN found
         assert records[-1]["result"] == "arrived"
+
+
+def test_baseline_search_cap_concludes_not_found(env_car):
+    """Cap exhaustion AFTER at least one successfully queried round is
+    the substantive pre-registered outcome NOT FOUND (2026-08-28
+    amendment), not a generic timeout."""
+    cfg, rtsm, bridge, rtsm_srv, esp_srv, car, tmp_path = env_car
+    cfg = replace(cfg, baseline=replace(cfg.baseline, search_cap_s=8.0))
+    # Memory non-empty (preflight needs objects > 0) but the object is
+    # never observable from anywhere the car can reach.
+    rtsm_srv.visibility = {"fov_deg": 70, "range_m": 8.0}
+    rtsm_srv.semantic_results[0]["visible_after_car_moved_m"] = 999.0
+    with TestClient(create_app(cfg, rtsm, bridge)) as c:
+        c.post("/command", json={"goal": "go to the red mug",
+                                 "condition": "baseline"})
+        assert _wait(lambda: _result(c) is not None, timeout=30.0)
+        last = c.get("/status").json()["last_result"]
+        assert last["result"] == "not_found"
+        assert "search cap" in last["detail"]
+
+
+def test_baseline_retrieval_outage_stays_timeout(env_car):
+    """Zero successful round queries (retrieval outage) must NOT be coded
+    as the substantive 'not_found' — the trial stays a timeout and the
+    log carries round_query_failed events for the failure analysis."""
+    cfg, rtsm, bridge, rtsm_srv, esp_srv, car, tmp_path = env_car
+    cfg = replace(cfg, baseline=replace(cfg.baseline, search_cap_s=8.0))
+    rtsm_srv.fail_semantic = True
+    with TestClient(create_app(cfg, rtsm, bridge)) as c:
+        r = c.post("/command", json={"goal": "go to the red mug",
+                                     "condition": "baseline"}).json()
+        assert _wait(lambda: _result(c) is not None, timeout=30.0)
+        last = c.get("/status").json()["last_result"]
+        assert last["result"] == "timeout"
+        records = [json.loads(l) for l in
+                   (tmp_path / f"{r['task_id']}.jsonl").read_text().splitlines()]
+        assert any(rec.get("type") == "event"
+                   and rec.get("name") == "round_query_failed"
+                   for rec in records)
 
 
 def test_preempt_during_real_nav(env_car):

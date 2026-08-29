@@ -143,6 +143,13 @@ class FakeRtsmHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         path = self.path.split("?")[0]
         car: FakeCar = self.server.car
+        # The real pipeline stamps observations CONTINUOUSLY while frames
+        # stream — not only when someone queries. The pose polls that
+        # arrive throughout every dwell are our clock proxy: refresh the
+        # visibility stamps on every request (2026-08-28, round-based
+        # search queries only once per round, so query-time stamping
+        # would blind the whole sweep).
+        self._refresh_seen(car)
         if path == "/healthz":
             return self._json({"status": "ok"})
         if path == "/stats":
@@ -150,8 +157,21 @@ class FakeRtsmHandler(BaseHTTPRequestHandler):
                 "objects": len(self.server.semantic_results),
                 "confirmed": len(self.server.semantic_results),
                 "robot_pose": car.pose_payload(),
+                # Open floor unless a test says otherwise — the searcher's
+                # wall guard fail-closes without it and every relocation
+                # would grind a full blocked circle.
+                "forward_clearance": {
+                    "clearance_m": getattr(self.server,
+                                           "forward_clearance_m", 3.0),
+                    "valid_frac": 0.9,
+                    "timestamp": time.time(),
+                },
             })
         if path == "/search/semantic":
+            if getattr(self.server, "fail_semantic", False):
+                self.send_response(500)
+                self.end_headers()
+                return
             return self._json({
                 "query": "q",
                 "robot_pose": car.pose_payload(),
@@ -164,32 +184,48 @@ class FakeRtsmHandler(BaseHTTPRequestHandler):
         self.send_response(404)
         self.end_headers()
 
+    def _refresh_seen(self, car: FakeCar) -> None:
+        """Advance each object's last-seen stamp while the camera is
+        actually pointed at it (visibility model {fov_deg, range_m} on
+        the server). An entry may carry "visible_after_car_moved_m": it
+        is never stamped until the camera has moved at least that far
+        from the origin — models a target that CANNOT be seen from the
+        trial's first standpoint and is revealed only by an actual
+        relocation (position-gated, so a no-op relocation fails the test
+        instead of the clock quietly rescuing it). No visibility model:
+        all stamping happens in _results_with_freshness (always fresh)."""
+        vis = getattr(self.server, "visibility", None)
+        if not hasattr(self.server, "obj_last_seen"):
+            self.server.obj_last_seen = {}
+        if vis is None:
+            return
+        now = time.time()
+        cx, cz, cyaw = car.camera_xz_yaw()
+        for entry in self.server.semantic_results:
+            moved = entry.get("visible_after_car_moved_m")
+            if moved is not None and math.hypot(cx, cz) < moved:
+                continue
+            tx, tz = entry["xyz_world"][0], entry["xyz_world"][2]
+            bearing = math.atan2(tx - cx, tz - cz)
+            off = math.atan2(math.sin(bearing - cyaw),
+                             math.cos(bearing - cyaw))
+            dist = math.hypot(tx - cx, tz - cz)
+            if (abs(off) <= math.radians(vis["fov_deg"]) / 2
+                    and dist <= vis["range_m"]):
+                self.server.obj_last_seen[entry["id"]] = now
+
     def _results_with_freshness(self, car: FakeCar) -> list:
-        """Stamp last_seen_wall_utc on each result. Without a visibility
-        model (server.visibility is None/absent): always fresh — memory-
-        condition tests behave exactly as before. WITH one ({fov_deg,
-        range_m}): an object's last-seen only advances while the camera is
-        actually pointed at it — which is what makes the baseline sweep
-        meaningful in tests."""
+        """Serve last_seen_wall_utc from the continuously refreshed
+        stamps. Without a visibility model: always fresh — memory-
+        condition tests behave exactly as before."""
         vis = getattr(self.server, "visibility", None)
         now = time.time()
         out = []
-        if not hasattr(self.server, "obj_last_seen"):
-            self.server.obj_last_seen = {}
         for entry in self.server.semantic_results:
             e = dict(entry)
             if vis is None:
                 e["last_seen_wall_utc"] = now
             else:
-                cx, cz, cyaw = car.camera_xz_yaw()
-                tx, tz = e["xyz_world"][0], e["xyz_world"][2]
-                bearing = math.atan2(tx - cx, tz - cz)
-                off = math.atan2(math.sin(bearing - cyaw),
-                                 math.cos(bearing - cyaw))
-                dist = math.hypot(tx - cx, tz - cz)
-                if (abs(off) <= math.radians(vis["fov_deg"]) / 2
-                        and dist <= vis["range_m"]):
-                    self.server.obj_last_seen[e["id"]] = now
                 e["last_seen_wall_utc"] = self.server.obj_last_seen.get(
                     e["id"], 0.0)
             out.append(e)

@@ -2,20 +2,24 @@
 Baseline target acquisition — E1 condition (b), the memoryless comparator.
 
 The baseline agent is FORBIDDEN to act on anything it is not currently
-seeing. Mechanism: the freshness gate — a semantic hit counts only if its
-last observation is younger than `baseline.freshness_gate_s` (2 s).
-Everything older sits invisible in memory. Same RTSM, same perception,
-same pose stream, same nav/monitor/safety, and (via the server) the SAME
-target-selection rule as condition (a); the ONLY masked capability is
-persistence.
+observing. Mechanism: the freshness gate — a semantic hit counts only if
+it was last observed DURING the current observation round (the in-place
+sweeps at the current standpoint; `freshness_gate_s` survives as the
+upsert-lag margin on the round window). Everything older sits invisible
+in memory: no persistence across standpoints, no persistence across
+trials. Same RTSM, same perception, same pose stream, same nav/monitor/
+safety, and (via the server) the SAME target-selection rule as condition
+(a); the ONLY masked capability is persistence.
 
 Gate fine print (audited 2026-08-03):
   * `last_seen_wall_utc` is stamped at pipeline UPSERT time, not frame-
     capture time — the physical age of an observation is stamp age PLUS
     the ~0.5 s processing lag, so the effective window is gate + lag
     (~2.5 s of history, about one sweep step). Conservative for the
-    memory-faster claim; the accepted hit's stamp age is logged per
-    acquisition so it is auditable.
+    memory-faster claim; the top candidate's stamp age (hit_age_s) AND
+    the picked candidate's stamp age (target_last_seen_age_s — under the
+    round window the two can differ by minutes) are logged per
+    acquisition so staleness is auditable.
   * The gate is two-sided: a stamp AHEAD of our clock by more than
     `clock_skew_tol_s` is rejected — a backward wall-clock step (NTP,
     resume from sleep) must never turn stale memory "fresh".
@@ -29,20 +33,39 @@ Gate fine print (audited 2026-08-03):
     so time.time() comparisons are valid up to step events, which the
     two-sided gate handles.
 
-Search policy (v1, deliberately near-deterministic for the paper — no
-seed-sensitivity questions):
+Search policy (v2, 2026-08-28 — observe-then-confirm rounds; v1's
+per-dwell confirmation is gone):
 
-    repeat until fresh hit / timeout / interrupt:
-        rotate one step (~35°), sweep direction chosen by the seeded RNG
-        dwell ~1.2 s (let frames arrive and the pipeline process)
-        poll the freshness-gated query
-        after a full sweep with no hit: drive forward ~1.2 s (relocate),
-        then sweep again
+    round (repeat until candidates / interrupt / caller's budget):
+        sweeps_per_round (3) full 360° sweeps in place — rotate ~30°,
+        dwell ~1.2 s, NO queries: pure observation. The pipeline
+        accumulates every heading's objects over multiple passes
+        (multiple views -> better crops) while the sweep doubles as a
+        depth survey (pose + clearance recorded per heading).
+        then ONE deep query: candidates = hits observed DURING this
+        round (round-scoped freshness), masked ids removed, ranked
+        top query_top_k -> returned for ONE batched image-verified
+        selection call (the server's shared rule).
+    no candidates at all -> relocate immediately (no LLM call).
+    caller re-enters after a no-match verdict -> relocate FIRST (this
+    standpoint is fully judged), then run the next round.
+    relocation: shortest rotation to the most open in-leash heading;
+    stride aims walk_max_m (~1 m) into measured free depth while
+    keeping the wall-guard buffer; leash-trimmed; chunked with live
+    clearance re-checks.
+
+Why rounds (measured 2026-08-28, t20260828-160929-001): per-dwell
+confirmation cost one 4-12 s LLM call PER visible object (12 calls in
+150 s — the car looked stuck spinning), and the single-standpoint score
+band is FLAT (top-15 for "tissue box": 0.028-0.045, true target mid-
+pack), so no score floor can pre-filter junk — ranking plus one batched
+image-verified call per round is the only defensible selection pressure.
 
 The searcher shares the mission's safety obligations: interrupts every
 tick, drive() every tick while moving (watchdog), bounded pose staleness,
-frame_epoch guard. It consumes trial budget; the drive phase afterwards
-gets the REMAINDER of timeout_baseline_s.
+frame_epoch guard. It consumes trial budget; the server caps the whole
+acquisition phase at baseline.search_cap_s (exhaustion = NOT FOUND) and
+the drive phase gets the remainder of timeout_baseline_s.
 """
 
 from __future__ import annotations
@@ -68,12 +91,20 @@ class AcquireResult:
                                       # frame_reset | estopped | preempted |
                                       # cancelled | shutdown
     detail: str = ""
-    hits: tuple = ()                  # ALL fresh hits, ranked (selection is
-                                      # the server's job — same rule as (a))
+    hits: tuple = ()                  # the round's candidates, ranked
+                                      # (selection is the server's job —
+                                      # same rule as (a))
     pose: Optional[PoseSample] = None  # robot pose from the acquiring query
     hit_age_s: Optional[float] = None  # stamp age of the top fresh hit
     elapsed_s: float = 0.0
     sweeps: int = 0
+    # Audit counters for the caller's outcome coding (2026-08-28): a
+    # trial may only conclude NOT FOUND if standpoints were actually
+    # queried/judged — a retrieval outage that produced zero successful
+    # round queries must stay a plain timeout, not a substantive
+    # search conclusion.
+    rounds_queried: int = 0            # round queries that SUCCEEDED
+    query_failures: int = 0            # rounds lost to query errors
 
 
 def derive_seed(cfg_seed: int, trial_id: str) -> int:
@@ -130,7 +161,8 @@ def leashed_choice(samples, start_xy, leash_m, min_clear_m,
         x, z, yaw, c = s
         if c is None or c < min_clear_m:
             continue
-        stride = min(c / 2.0, walk_max_m,
+        stride = min(relocation_stride_m(c, walk_min_m, walk_max_m,
+                                         keep_clear_m=min_clear_m),
                      leash_limited_stride(x, z, yaw, start_xy, leash_m))
         if stride < walk_min_m:
             continue
@@ -152,9 +184,14 @@ def leashed_choice(samples, start_xy, leash_m, min_clear_m,
         dist_home = math.hypot(dx, dz)
         if dist_home < walk_min_m:
             continue               # effectively at start already
+        if c is not None and c < min_clear_m:
+            continue               # measured BLOCKED heading — never the
+                                   # return pick (the floored stride rule
+                                   # no longer filters these implicitly)
         inward = (math.sin(yaw) * dx + math.cos(yaw) * dz) / dist_home
         stride = min(dist_home, walk_max_m,
-                     (c / 2.0) if c is not None else walk_min_m)
+                     relocation_stride_m(c, walk_min_m, walk_max_m,
+                                         keep_clear_m=min_clear_m))
         if stride < walk_min_m or inward <= 0.0:
             continue
         cand = (inward, k, stride)
@@ -165,14 +202,19 @@ def leashed_choice(samples, start_xy, leash_m, min_clear_m,
     return None
 
 
-def relocation_stride_m(clearance_m, walk_min_m: float, walk_max_m: float):
-    """Steered stride (2026-08-17): half the measured open depth, floored
-    and capped — the next sweep happens mid-open-area, and the stride can
-    never overrun because it commits only half the free space the sweep
-    just measured. None clearance -> the floor (old fixed-hop behavior)."""
+def relocation_stride_m(clearance_m, walk_min_m: float, walk_max_m: float,
+                        keep_clear_m: float = 0.0):
+    """Relocation stride (2026-08-28, superseding the half-depth rule):
+    aim walk_max_m (~the operator's 1 m hop) into the measured open
+    depth, but never consume the last keep_clear_m of it — the stride
+    stops at least the wall-guard buffer short of the measured obstacle.
+    Floored and capped; overrun is separately prevented by the chunked
+    walk's live clearance re-checks. None clearance -> the floor (blind
+    minimal hop)."""
     if clearance_m is None:
         return walk_min_m
-    return max(walk_min_m, min(walk_max_m, float(clearance_m) / 2.0))
+    return max(walk_min_m,
+               min(walk_max_m, float(clearance_m) - float(keep_clear_m)))
 
 
 def best_relocation_rotation(clearances, steps_per_sweep: int):
@@ -243,15 +285,30 @@ class BaselineSearcher:
         self._logger = logger
         self._progress = progress if progress is not None else {}
         self._now_wall = now_wall
+        # Depth survey from the most recently completed round — steers
+        # the relocate-first on a no-match re-entry (the server re-calls
+        # acquire() on the SAME instance after its selection verdict).
+        self._last_samples = None
+        # TRIAL-lifetime leash anchor (2026-08-28 review finding: a
+        # per-call anchor re-anchored the leash at every no-match
+        # re-entry, so each rejection granted a fresh 2 m radius and the
+        # mandatory relocate hop compounded out of the venue). The
+        # searcher instance lives exactly one trial (the server builds a
+        # new one per mission), so the anchor set on the FIRST call with
+        # a live pose confines the WHOLE trial's search to the start.
+        self._start_xy = None
+        self._rounds_queried = 0
+        self._query_failures = 0
 
     # ── the acquisition loop ─────────────────────────────────────────────
 
     def acquire(self, query: str, trial_id: str, budget_s: float,
                 exclude_ids: frozenset = frozenset()) -> AcquireResult:
         """`exclude_ids`: objects the shared selection rule already judged
-        no-match THIS trial — invisible to further polls, so the search
-        resumes instead of re-acquiring the same wrong object every dwell
-        (and burning an LLM call each time)."""
+        no-match THIS trial — masked from every candidate list. A
+        non-empty set also means the CURRENT standpoint was fully
+        observed and judged, so this call relocates BEFORE observing
+        again (steered by the samples the judged round recorded)."""
         b = self._cfg.baseline
         self._exclude = exclude_ids
         rng = random.Random(derive_seed(b.rng_seed, trial_id))
@@ -259,167 +316,240 @@ class BaselineSearcher:
         t0 = time.monotonic()
         deadline = t0 + budget_s
         # Shared per-mission pose/epoch state, seen by BOTH the dwell
-        # watcher and the acquisition polls (a Lens restart between the
-        # two must not slip through).
+        # watcher and the round query (a Lens restart between the two
+        # must not slip through).
         self._st = {"last_ts": None, "ref_epoch": None, "last_fresh_mono": t0}
         self._seed_epoch()
         sweeps = 0
-        # Leash anchor (2026-08-17): the trial's start position. Depth can
+        rounds = 0
+        # Leash anchor (2026-08-17): the TRIAL's start position — set once
+        # per searcher instance (= once per trial) and reused across
+        # no-match re-entries, so cumulative relocation drift stays
+        # bounded by the leash around where the trial began. Depth can
         # see past the venue boundary, so steering is confined to a
-        # radius around HERE; unknown start pose disables the leash.
-        start_xy = self._car_xy_yaw()
-        start_xy = (start_xy[0], start_xy[1]) if start_xy else None
+        # radius around THERE; a pose that is still unavailable leaves
+        # the leash off until one arrives (walks are separately gated on
+        # a live pose by _require_live_pose).
+        if self._start_xy is None:
+            p = self._car_xy_yaw()
+            if p is not None:
+                self._start_xy = (p[0], p[1])
+        start_xy = self._start_xy
 
-        # Try before moving at all — the target might already be in view.
-        first = self._gated_poll(query)
-        if isinstance(first, AcquireResult):
-            return self._stamp(first, t0, 0)
-        if first is not None:
-            hits, pose, age = first
-            return AcquireResult(status="acquired", hits=tuple(hits), pose=pose,
-                                 hit_age_s=age, detail="visible at start",
-                                 elapsed_s=time.monotonic() - t0, sweeps=0)
+        if exclude_ids:
+            r = self._relocate(self._last_samples, start_xy, sweep_sign,
+                               deadline, t0, sweeps)
+            if r is not None:
+                return r
 
         while True:
-            step_in_sweep = 0
+            # ── observe: sweeps_per_round full 360° passes, no queries ──
+            round_start_wall = self._now_wall()
             # Pose + clearance sampled at each dwell heading — the sweep
             # doubles as a free 360° depth survey that steers the
-            # relocation, leashed to the start position.
+            # relocation, leashed to the start position. Later passes
+            # overwrite a heading's sample only when they bring a live
+            # clearance reading (freshest usable data wins).
             samples = [None] * b.steps_per_sweep
-            heading_clearance = [None] * b.steps_per_sweep
-            while step_in_sweep < b.steps_per_sweep:
-                # one rotate step, then dwell + poll
-                r = self._move(sweep_sign * -b.sweep_step_turn,
-                               sweep_sign * b.sweep_step_turn,
-                               b.sweep_step_s, deadline)
-                if r is not None:
-                    return self._interrupted(r, t0, sweeps)
-                r = self._dwell_and_watch_pose(b.dwell_s, deadline)
-                if r is not None:
-                    return self._stamp(r, t0, sweeps)
-                c_now = self._clearance_now()
-                heading_clearance[step_in_sweep] = c_now
-                xyz_yaw = self._car_xy_yaw()
-                if xyz_yaw is not None:
-                    samples[step_in_sweep] = (xyz_yaw[0], xyz_yaw[1],
-                                              xyz_yaw[2], c_now)
-
-                found = self._gated_poll(query)
-                if isinstance(found, AcquireResult):
-                    return self._stamp(found, t0, sweeps)
-                if found is not None:
-                    hits, pose, age = found
-                    return AcquireResult(status="acquired", hits=tuple(hits),
-                                         pose=pose, hit_age_s=age,
-                                         detail=f"sweep {sweeps} step {step_in_sweep}",
-                                         elapsed_s=time.monotonic() - t0,
-                                         sweeps=sweeps)
-                step_in_sweep += 1
-                self._progress["phase"] = "searching"
-                self._progress["ticks"] = self._progress.get("ticks", 0) + 1
-
-            sweeps += 1
-            # Full sweep, nothing fresh — relocate to a new viewpoint.
-            # STEERED + LEASHED (2026-08-17): rotate the shortest way to
-            # the most open heading whose stride stays within the leash
-            # around the start pose; when every open heading leads out of
-            # bounds, turn back toward the start instead. The stride is
-            # half the measured open depth (leash-trimmed, capped), so
-            # the next sweep happens mid-open-area INSIDE the venue.
-            chosen = None
-            if start_xy is not None:
-                chosen = leashed_choice(samples, start_xy,
-                                        b.search_leash_m,
-                                        b.min_walk_clearance_m,
-                                        b.walk_min_m, b.walk_max_m)
-            if chosen is not None:
-                k, stride, mode = chosen
-                n_steps, sign = rotation_to_step(k, b.steps_per_sweep)
-            else:
-                # No pose data (or nothing eligible): legacy clearance-
-                # only steer with the default stride rule.
-                steer = best_relocation_rotation(heading_clearance,
-                                                b.steps_per_sweep)
-                if steer is not None:
-                    n_steps, sign = steer
-                    valid = [c for c in heading_clearance if c is not None]
-                    stride = relocation_stride_m(max(valid), b.walk_min_m,
-                                                 b.walk_max_m)
-                    mode = "open_unleashed"
-                    chosen = True
-            if chosen is not None:
-                if self._logger is not None:
-                    self._logger.log_event(
-                        "relocate_steered", time.monotonic() - t0,
-                        rotate_steps=int(n_steps * sign), mode=mode,
-                        stride_m=round(stride, 3), sweeps=sweeps)
-                for _ in range(int(n_steps)):
-                    r = self._move(sweep_sign * sign * -b.sweep_step_turn,
-                                   sweep_sign * sign * b.sweep_step_turn,
+            for _ in range(b.sweeps_per_round):
+                step_in_sweep = 0
+                while step_in_sweep < b.steps_per_sweep:
+                    r = self._move(sweep_sign * -b.sweep_step_turn,
+                                   sweep_sign * b.sweep_step_turn,
                                    b.sweep_step_s, deadline)
                     if r is not None:
                         return self._interrupted(r, t0, sweeps)
-                r = self._dwell_and_watch_pose(min(b.dwell_s, 0.6), deadline)
+                    r = self._dwell_and_watch_pose(b.dwell_s, deadline)
+                    if r is not None:
+                        return self._stamp(r, t0, sweeps)
+                    c_now = self._clearance_now()
+                    xyz_yaw = self._car_xy_yaw()
+                    if xyz_yaw is not None and (
+                            c_now is not None
+                            or samples[step_in_sweep] is None):
+                        samples[step_in_sweep] = (xyz_yaw[0], xyz_yaw[1],
+                                                  xyz_yaw[2], c_now)
+                    step_in_sweep += 1
+                    self._progress["phase"] = "searching"
+                    self._progress["ticks"] = self._progress.get("ticks", 0) + 1
+                sweeps += 1
+            rounds += 1
+            self._last_samples = samples
+
+            # ── confirm: ONE deep query over this round's observations ──
+            # Retried on transient errors (2026-08-28 review finding: a
+            # single dropped HTTP request must not silently discard a
+            # ~2 min observation round and walk the car off the
+            # standpoint). Each retry waits under the pose watcher.
+            found = "error"
+            for _attempt in range(3):
+                found = self._round_query(query, round_start_wall)
+                if found != "error":
+                    break
+                # Logged at the FIRST failed attempt — the evidence that
+                # this standpoint was observed but not judged must reach
+                # the trial log even if the budget dies mid-retry (an
+                # analysis must never read a query fault as an empty
+                # standpoint).
+                if _attempt == 0 and self._logger is not None:
+                    self._logger.log_event("round_query_failed",
+                                           time.monotonic() - t0,
+                                           rounds=rounds, sweeps=sweeps)
+                r = self._dwell_and_watch_pose(1.0, deadline)
                 if r is not None:
                     return self._stamp(r, t0, sweeps)
-                if self._walk_is_clear():
-                    r = self._walk_stride(stride, deadline)
-                    if r is not None:
-                        return self._interrupted(r, t0, sweeps)
-                    self._progress["phase"] = "searching"
-                    continue                     # next sweep from here
-            # Wall guard (2026-08-16): the walk needs measured open space
-            # ahead (live depth clearance served by RTSM). When blocked
-            # (or the steer target went stale), rotate one step at a time
-            # and walk the FIRST open direction — the car turns away from
-            # walls instead of grinding them. A full circle with no open
-            # direction -> stay put, keep sweeping (logged; budget keeps
-            # running). Stride = half the clearance measured at the walk
-            # heading (2026-08-17): the next sweep happens mid-open-area.
-            walked = False
-            for _ in range(b.steps_per_sweep):
-                c_now = self._clearance_now()
-                if (b.min_walk_clearance_m <= 0
-                        or (c_now is not None
-                            and c_now >= b.min_walk_clearance_m)):
-                    stride = relocation_stride_m(c_now, b.walk_min_m,
-                                                 b.walk_max_m)
-                    xyz_yaw = self._car_xy_yaw()
-                    if start_xy is not None and xyz_yaw is not None:
-                        stride = min(stride, leash_limited_stride(
-                            xyz_yaw[0], xyz_yaw[1], xyz_yaw[2],
-                            start_xy, b.search_leash_m))
-                        if stride < b.walk_min_m:
-                            # open but out of bounds — keep rotating
-                            r = self._move(
-                                sweep_sign * -b.sweep_step_turn,
-                                sweep_sign * b.sweep_step_turn,
-                                b.sweep_step_s, deadline)
-                            if r is not None:
-                                return self._interrupted(r, t0, sweeps)
-                            continue
-                    r = self._walk_stride(stride, deadline)
-                    if r is not None:
-                        return self._interrupted(r, t0, sweeps)
-                    walked = True
-                    break
-                r = self._move(sweep_sign * -b.sweep_step_turn,
-                               sweep_sign * b.sweep_step_turn,
+            if found == "error":
+                # Persistent failure: RE-OBSERVE from here instead of
+                # relocating off a standpoint that was never judged.
+                self._query_failures += 1
+                continue
+            self._rounds_queried += 1
+            if isinstance(found, AcquireResult):
+                return self._stamp(found, t0, sweeps)
+            if found is not None:
+                hits, pose, age = found
+                return AcquireResult(status="acquired", hits=tuple(hits),
+                                     pose=pose, hit_age_s=age,
+                                     detail=f"round {rounds} ({sweeps} sweeps)",
+                                     elapsed_s=time.monotonic() - t0,
+                                     sweeps=sweeps,
+                                     rounds_queried=self._rounds_queried,
+                                     query_failures=self._query_failures)
+            # Nothing rankable observed from this standpoint — move on
+            # without spending any LLM time.
+            if self._logger is not None:
+                self._logger.log_event("round_no_candidates",
+                                       time.monotonic() - t0,
+                                       rounds=rounds, sweeps=sweeps)
+            r = self._relocate(samples, start_xy, sweep_sign,
+                               deadline, t0, sweeps)
+            if r is not None:
+                return r
+
+    def _relocate(self, samples, start_xy, sweep_sign, deadline,
+                  t0: float, sweeps: int) -> Optional[AcquireResult]:
+        """Move ~walk_max_m to a new standpoint. STEERED + LEASHED
+        (2026-08-17): rotate the shortest way to the most open heading
+        whose stride stays within the leash around the start pose; when
+        every open heading leads out of bounds, turn back toward the
+        start instead. The stride aims walk_max_m into the measured open
+        depth, keeping the wall-guard buffer (leash-trimmed, chunked with
+        live re-checks). `samples` is the depth survey recorded by the
+        judged round's sweeps (None entries where a heading had no data;
+        None entirely when no survey exists — falls through to the
+        rotate-until-open loop). Returns None when done (walked, or
+        blocked in every direction and staying put), or a terminal
+        AcquireResult on interrupt/fault."""
+        b = self._cfg.baseline
+        # No motion without EVIDENCE the pose feed is alive NOW
+        # (2026-08-28 review finding: the re-entry relocate is the only
+        # walk not preceded by a full dwell history, and the dwell
+        # watcher's first-poll rule counts even a FROZEN pose as fresh —
+        # a feed that died during the server's selection call could
+        # otherwise commit ~25 s of blind driving).
+        r = self._require_live_pose(deadline)
+        if r is not None:
+            return self._stamp(r, t0, sweeps)
+        if samples is None:
+            samples = [None] * b.steps_per_sweep
+        heading_clearance = [(s[3] if s is not None else None)
+                             for s in samples]
+        chosen = None
+        if start_xy is not None:
+            chosen = leashed_choice(samples, start_xy,
+                                    b.search_leash_m,
+                                    b.min_walk_clearance_m,
+                                    b.walk_min_m, b.walk_max_m)
+        if chosen is not None:
+            k, stride, mode = chosen
+            n_steps, sign = rotation_to_step(k, b.steps_per_sweep)
+        else:
+            # No pose data (or nothing eligible): legacy clearance-
+            # only steer with the default stride rule.
+            steer = best_relocation_rotation(heading_clearance,
+                                             b.steps_per_sweep)
+            if steer is not None:
+                n_steps, sign = steer
+                valid = [c for c in heading_clearance if c is not None]
+                stride = relocation_stride_m(
+                    max(valid), b.walk_min_m, b.walk_max_m,
+                    keep_clear_m=b.min_walk_clearance_m)
+                mode = "open_unleashed"
+                chosen = True
+        if chosen is not None:
+            if self._logger is not None:
+                self._logger.log_event(
+                    "relocate_steered", time.monotonic() - t0,
+                    rotate_steps=int(n_steps * sign), mode=mode,
+                    stride_m=round(stride, 3), sweeps=sweeps)
+            for _ in range(int(n_steps)):
+                r = self._move(sweep_sign * sign * -b.sweep_step_turn,
+                               sweep_sign * sign * b.sweep_step_turn,
                                b.sweep_step_s, deadline)
                 if r is not None:
                     return self._interrupted(r, t0, sweeps)
-                # Short settle so the clearance sample refreshes at the
-                # new heading before re-checking.
-                r = self._dwell_and_watch_pose(min(b.dwell_s, 0.6), deadline)
+            r = self._dwell_and_watch_pose(min(b.dwell_s, 0.6), deadline)
+            if r is not None:
+                return self._stamp(r, t0, sweeps)
+            if self._walk_is_clear():
+                r = self._walk_stride(stride, deadline)
                 if r is not None:
-                    return self._stamp(r, t0, sweeps)
-            if not walked:
-                self._progress["walk_blocked_skips"] = (
-                    self._progress.get("walk_blocked_skips", 0) + 1)
-                if self._logger is not None:
-                    self._logger.log_event(
-                        "walk_blocked_all_directions",
-                        time.monotonic() - t0, sweeps=sweeps)
+                    return self._interrupted(r, t0, sweeps)
+                self._progress["phase"] = "searching"
+                return None                  # next round from here
+        # Wall guard (2026-08-16): the walk needs measured open space
+        # ahead (live depth clearance served by RTSM). When blocked
+        # (or the steer target went stale), rotate one step at a time
+        # and walk the FIRST open direction — the car turns away from
+        # walls instead of grinding them. A full circle with no open
+        # direction -> stay put, keep observing from here (logged;
+        # budget keeps running).
+        walked = False
+        for _ in range(b.steps_per_sweep):
+            c_now = self._clearance_now()
+            if (b.min_walk_clearance_m <= 0
+                    or (c_now is not None
+                        and c_now >= b.min_walk_clearance_m)):
+                stride = relocation_stride_m(
+                    c_now, b.walk_min_m, b.walk_max_m,
+                    keep_clear_m=b.min_walk_clearance_m)
+                xyz_yaw = self._car_xy_yaw()
+                if start_xy is not None and xyz_yaw is not None:
+                    stride = min(stride, leash_limited_stride(
+                        xyz_yaw[0], xyz_yaw[1], xyz_yaw[2],
+                        start_xy, b.search_leash_m))
+                    if stride < b.walk_min_m:
+                        # open but out of bounds — keep rotating
+                        r = self._move(
+                            sweep_sign * -b.sweep_step_turn,
+                            sweep_sign * b.sweep_step_turn,
+                            b.sweep_step_s, deadline)
+                        if r is not None:
+                            return self._interrupted(r, t0, sweeps)
+                        continue
+                r = self._walk_stride(stride, deadline)
+                if r is not None:
+                    return self._interrupted(r, t0, sweeps)
+                walked = True
+                break
+            r = self._move(sweep_sign * -b.sweep_step_turn,
+                           sweep_sign * b.sweep_step_turn,
+                           b.sweep_step_s, deadline)
+            if r is not None:
+                return self._interrupted(r, t0, sweeps)
+            # Short settle so the clearance sample refreshes at the
+            # new heading before re-checking.
+            r = self._dwell_and_watch_pose(min(b.dwell_s, 0.6), deadline)
+            if r is not None:
+                return self._stamp(r, t0, sweeps)
+        if not walked:
+            self._progress["walk_blocked_skips"] = (
+                self._progress.get("walk_blocked_skips", 0) + 1)
+            if self._logger is not None:
+                self._logger.log_event(
+                    "walk_blocked_all_directions",
+                    time.monotonic() - t0, sweeps=sweeps)
+        return None
 
     # ── helpers ──────────────────────────────────────────────────────────
 
@@ -507,34 +637,41 @@ class BaselineSearcher:
             return f"frame_epoch {self._st['ref_epoch']} -> {epoch}"
         return None
 
-    def _gated_poll(self, query):
-        """One freshness-gated query, fetched DEEP so stale memory cannot
-        crowd a visible target out of the candidate list. Returns:
-        (fresh_hits, pose, top_age_s) on success, an AcquireResult(status=
-        frame_reset) if the query's pose reveals a new sender session, or
-        None for a miss."""
+    def _round_query(self, query, round_start_wall: float):
+        """The round's ONE deep query — fetched DEEP so stale memory
+        cannot crowd a visible target out of the candidate list, gated to
+        the ROUND WINDOW: candidates are hits last observed during this
+        round's sweeps (freshness_gate_s survives as the upsert-lag
+        margin — an observation made in the first dwell may carry a stamp
+        from just before round start). Masked ids removed, optional tail
+        floor applied, ranked top query_top_k returned for the caller's
+        single batched image-verified selection call. Returns:
+        (candidates, pose, top_age_s), an AcquireResult(status=
+        frame_reset) if the query's pose reveals a new sender session,
+        None when nothing rankable was observed from this standpoint, or
+        the string "error" on a query exception (caller retries)."""
         b = self._cfg.baseline
         try:
             res = self._rtsm.semantic_query(query,
                                             top_k=max(b.gate_fetch_k,
                                                       b.query_top_k))
-        except Exception:  # noqa: BLE001 — an RTSM hiccup is a missed poll
-            return None
+        except Exception:  # noqa: BLE001 — retried by the caller; a round
+            return "error"  # must never be silently coded as "empty"
         if res.robot_pose is not None:
             bad = self._note_epoch(res.robot_pose.frame_epoch)
             if bad is not None:
                 return AcquireResult(status="frame_reset",
                                      detail=f"{bad} at acquisition poll")
         now = self._now_wall()
-        fresh = fresh_hits(res.results, now, b.freshness_gate_s,
-                           b.clock_skew_tol_s)
+        window_s = (now - round_start_wall) + b.freshness_gate_s
+        fresh = fresh_hits(res.results, now, window_s, b.clock_skew_tol_s)
         fresh = [h for h in fresh
                  if h.id not in getattr(self, "_exclude", frozenset())]
-        # Relevance floor (2026-08-28): don't wake the LLM for objects
-        # that don't even vaguely match the goal — in a cluttered room
-        # the junk tax was 4-12 s per visible object on the first sweep.
+        # Tail floor — disabled by default (the measured single-standpoint
+        # band is flat; see BaselineCfg.min_candidate_score).
         if b.min_candidate_score > 0:
             fresh = [h for h in fresh if h.score >= b.min_candidate_score]
+        fresh = fresh[:b.query_top_k]
         if not fresh:
             return None
         age = now - fresh[0].last_seen_wall_utc
@@ -606,12 +743,51 @@ class BaselineSearcher:
             time.sleep(self._cfg.nav.tick_s * 2)
         return None
 
+    def _require_live_pose(self, deadline: float) -> Optional[AcquireResult]:
+        """Wait (bounded by nav.stale_abort_s) for a pose TIMESTAMP CHANGE
+        before any relocation motion — a frozen feed repeats its last
+        stamp, which the dwell watcher's first-poll rule would wrongly
+        count as fresh when the per-mission state was just re-seeded.
+        Returns None once a live pose is seen (and folds it into the
+        shared watcher state), or a terminal AcquireResult."""
+        t_end = time.monotonic() + self._cfg.nav.stale_abort_s
+        try:
+            p0 = self._rtsm.get_robot_pose()
+        except Exception:  # noqa: BLE001
+            p0 = None
+        ts0 = p0.timestamp if p0 is not None else None
+        while time.monotonic() < t_end:
+            if time.monotonic() >= deadline:
+                return AcquireResult(status="timeout",
+                                     detail="budget exhausted in search")
+            r = self._check_interrupts()
+            if r is not None:
+                return AcquireResult(status=r)
+            try:
+                p = self._rtsm.get_robot_pose()
+            except Exception:  # noqa: BLE001
+                p = None
+            if p is not None and p.timestamp != ts0:
+                bad = self._note_epoch(p.frame_epoch)
+                if bad is not None:
+                    return AcquireResult(status="frame_reset",
+                                         detail=f"{bad} before relocation")
+                self._st["last_ts"] = p.timestamp
+                self._st["last_fresh_mono"] = time.monotonic()
+                return None
+            time.sleep(self._cfg.nav.tick_s * 2)
+        return AcquireResult(status="stale_stop",
+                             detail="no live pose before relocation walk")
+
     def _interrupted(self, name: str, t0: float, sweeps: int) -> AcquireResult:
         return AcquireResult(status=name, elapsed_s=time.monotonic() - t0,
-                             sweeps=sweeps)
+                             sweeps=sweeps,
+                             rounds_queried=self._rounds_queried,
+                             query_failures=self._query_failures)
 
-    @staticmethod
-    def _stamp(r: AcquireResult, t0: float, sweeps: int) -> AcquireResult:
+    def _stamp(self, r: AcquireResult, t0: float, sweeps: int) -> AcquireResult:
         return AcquireResult(status=r.status, detail=r.detail, hits=r.hits,
                              pose=r.pose, hit_age_s=r.hit_age_s,
-                             elapsed_s=time.monotonic() - t0, sweeps=sweeps)
+                             elapsed_s=time.monotonic() - t0, sweeps=sweeps,
+                             rounds_queried=self._rounds_queried,
+                             query_failures=self._query_failures)

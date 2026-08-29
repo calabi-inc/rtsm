@@ -569,6 +569,18 @@ class AgentServer:
                             rng_seed=seed, rtsm_stats=self._safe_stats())
 
         budget = self.cfg.nav.timeout_baseline_s
+        # Search cap (2026-08-28): the acquisition phase gets AT MOST
+        # search_cap_s of the trial budget; exhausting it concludes NOT
+        # FOUND — an explicit, analyzable outcome (every standpoint the
+        # observe-then-confirm agent reached was judged; none contained
+        # the target) instead of a generic timeout — and the remainder
+        # stays reserved for a drive the ~0.04 m/s rig could actually
+        # complete. Formally the cap bounds the acquisition phase of BOTH
+        # conditions; condition (a)'s acquisition is a single query +
+        # selection call, so it only ever binds here.
+        cap = budget
+        if self.cfg.baseline.search_cap_s > 0:
+            cap = min(budget, self.cfg.baseline.search_cap_s)
         task["phase"] = "searching"
         searcher = BaselineSearcher(
             self.cfg, self.bridge, self.rtsm,
@@ -589,7 +601,7 @@ class AgentServer:
                 # The searcher's deadline must coincide with the mission
                 # clock: logger/plan/selection overhead already spent budget.
                 acq = searcher.acquire(query, task["task_id"],
-                                       max(0.0, budget - (time.monotonic() - t0)),
+                                       max(0.0, cap - (time.monotonic() - t0)),
                                        exclude_ids=frozenset(rejected))
             except Exception as e:  # noqa: BLE001 — a search crash must stop the car
                 self.bridge.stop()
@@ -602,6 +614,19 @@ class AgentServer:
             if acq.status != "acquired":
                 result = acq.status
                 detail = acq.detail or f"search ended after {acq.sweeps} sweeps"
+                # NOT FOUND is a substantive conclusion — it requires that
+                # standpoints were actually queried/judged. A retrieval
+                # outage that produced zero successful round queries must
+                # stay a plain timeout (round_query_failed events in the
+                # trial log carry the fault), or the aggregate would code
+                # an infrastructure failure as "target absent".
+                if (acq.status == "timeout" and cap < budget
+                        and (acq.rounds_queried > 0 or rejected)):
+                    result = "not_found"
+                    detail = (f"search cap {cap:.0f}s exhausted -> concluded "
+                              f"not found ({acq.sweeps} sweeps, "
+                              f"{acq.rounds_queried} rounds queried, "
+                              f"{acq.query_failures} query failures)")
                 break
             # SAME selection rule as condition (a), applied over the
             # freshness-gated (currently visible) set — the comparison
@@ -625,10 +650,15 @@ class AgentServer:
                         rejected_ids=ids, reason=sel_reason,
                         sweeps=acq.sweeps,
                         search_time_s=round(acq.elapsed_s, 3))
-                if time.monotonic() - t0 >= budget:
-                    result, detail = "timeout", "budget exhausted in search"
+                if time.monotonic() - t0 >= cap:
+                    if cap < budget:
+                        result, detail = "not_found", (
+                            f"search cap {cap:.0f}s exhausted -> concluded "
+                            "not found (last standpoint judged no-match)")
+                    else:
+                        result, detail = "timeout", "budget exhausted in search"
                     break
-                continue                             # resume the sweep
+                continue                             # relocate + next round
             break                                    # real pick -> drive
 
         if picked is not None:
@@ -647,6 +677,12 @@ class AgentServer:
                     pose=TrialLogger._pose_dict(acq.pose),
                     hit_age_s=(round(acq.hit_age_s, 3)
                                if acq.hit_age_s is not None else None),
+                    # The staleness audit must describe the PICKED
+                    # candidate, not the top-ranked one — under the round
+                    # window they can differ by minutes (2026-08-28).
+                    target_last_seen_age_s=(
+                        round(time.time() - picked.last_seen_wall_utc, 3)
+                        if picked.last_seen_wall_utc is not None else None),
                     n_fresh=len(acq.hits), planner_path=planner_path,
                     reason=sel_reason, sweeps=acq.sweeps,
                     search_time_s=round(acq.elapsed_s, 3))
