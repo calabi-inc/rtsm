@@ -163,10 +163,12 @@ class BaselineCfg:
     walk_min_m: float = 0.12
     walk_chunk_m: float = 0.30
     # Observe-then-confirm rounds (2026-08-28): full in-place 360° sweeps
-    # per round BEFORE the single batched selection call — multiple passes
-    # give the pipeline multiple views (better crops, more view bins)
-    # before any LLM time is spent. Operator-set: >= 3 spins, then judge.
-    sweeps_per_round: int = 3
+    # per round BEFORE the single batched selection call. Was 3 (multi-
+    # view accumulation for semantic-only retrieval); reduced to 1 the
+    # same day once label-first retrieval reached protos — one sweep per
+    # decision point: spin, pause, agent decides found-vs-relocate
+    # (operator-directed after watching the 3-spin version run).
+    sweeps_per_round: int = 1
     # Search cap (2026-08-28): the acquisition phase gets at most this
     # much of the trial budget; exhausting it ends the trial as NOT FOUND
     # — an explicit, analyzable outcome (every standpoint reached was

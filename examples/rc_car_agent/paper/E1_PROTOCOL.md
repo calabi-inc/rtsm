@@ -96,7 +96,13 @@ planning/selection time counts in (a) exactly as search time counts in
 > A fall-back-on-miss variant was reviewed out the same day: one stale
 > or masked label hit could suppress the embedding candidates entirely.
 > A label-side error alone (older server) degrades to pure embedding
-> search; the served sources are logged per plan/round. The freshness/
+> search; the served sources are logged per plan/round. **Sweeps per
+> round reduced 3 → 1** (operator, same day, after watching the 3-spin
+> version): label retrieval reaches protos within seconds of first
+> sight, so multi-view accumulation buys no candidate recall — each
+> round is ONE 360° observation sweep followed by the decision point
+> (candidates → one batched image call → drive or mask-and-relocate;
+> none → relocate ~1 m). The freshness/
 > round window, rejected-id masking, and the single batched
 > image-verified selection call are unchanged — the detector label
 > GENERATES candidates; the image check remains the arbiter (GDINO

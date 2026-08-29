@@ -85,9 +85,10 @@ baseline:
   # image-verified call per round is the selection pressure. <=0 off.
   min_candidate_score: 0.0
   # Observe-then-confirm rounds (2026-08-28): full 360° sweeps per round
-  # BEFORE the single batched selection call — >=3 spins accumulate
-  # multi-view evidence, then judge once; no-match -> relocate ~1 m.
-  sweeps_per_round: 3
+  # BEFORE the single batched selection call. Reduced 3 -> 1 (operator):
+  # label search reaches protos within seconds, so one spin per decision
+  # point — spin, pause, agent decides found-vs-relocate ~1 m.
+  sweeps_per_round: 1
   # Acquisition-phase cap (2026-08-28): search exceeding this concludes
   # NOT FOUND (explicit outcome; remainder of the 900 s stays reserved
   # for a completable drive at the rig's ~0.04 m/s). 8 min, operator-set.

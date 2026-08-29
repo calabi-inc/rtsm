@@ -947,37 +947,57 @@ const searchBtn = document.getElementById('search-btn')
 const showAllBtn = document.getElementById('show-all-btn')
 const searchThresholdInput = document.getElementById('search-threshold') as HTMLInputElement
 
-// Perform semantic search via CLIP + FAISS
+// Perform search: UNION of detector-label search and semantic (CLIP +
+// FAISS) search, label hits ranked first, deduped — mirrors the agent's
+// retrieval policy (2026-08-28). Label search reaches PROTOS (objects
+// the detector sees right now that semantic search can't surface until
+// confirmation + indexing), so the viz shows what the robot can act on.
 async function performSemanticSearch() {
   const query = objectSearch?.value.trim()
   if (!query) {
-    console.log('[semantic-search] Empty query, showing all objects')
+    console.log('[search] Empty query, showing all objects')
     showAllObjects()
     return
   }
 
   const threshold = parseFloat(searchThresholdInput?.value || '0.0') || 0.0
   searchQuery = query
-  console.log(`[semantic-search] Searching for: "${query}" (threshold=${threshold})`)
+  console.log(`[search] Searching for: "${query}" (threshold=${threshold})`)
 
   try {
-    const resp = await fetch(`${RTSM_API_BASE}/search/semantic?query=${encodeURIComponent(query)}&top_k=10&threshold=${threshold}`)
-    const data = await resp.json()
-    console.log('[semantic-search] API response:', data)
+    const [labelRes, semRes] = await Promise.allSettled([
+      fetch(`${RTSM_API_BASE}/search/label?query=${encodeURIComponent(query)}&top_k=10`),
+      fetch(`${RTSM_API_BASE}/search/semantic?query=${encodeURIComponent(query)}&top_k=10&threshold=${threshold}`),
+    ])
 
     semanticSearchResults.clear()
-    if (data.results) {
-      for (const r of data.results) {
+    let labelCount = 0
+    if (labelRes.status === 'fulfilled' && labelRes.value.ok) {
+      const data = await labelRes.value.json()
+      console.log('[search] label API response:', data)
+      for (const r of data.results ?? []) {
         semanticSearchResults.set(r.id, r.score)
+        labelCount++
       }
+    }
+    if (semRes.status === 'fulfilled' && semRes.value.ok) {
+      const data = await semRes.value.json()
+      console.log('[search] semantic API response:', data)
+      for (const r of data.results ?? []) {
+        if (!semanticSearchResults.has(r.id)) {
+          semanticSearchResults.set(r.id, r.score)
+        }
+      }
+    } else if (labelCount === 0) {
+      throw new Error('both search endpoints failed')
     }
     isSearchMode = true
     updateObjectList()
     updateObjectMarkers()  // Update 3D view to show only matches
-    console.log(`[semantic-search] Found ${semanticSearchResults.size} matches`)
+    console.log(`[search] ${semanticSearchResults.size} matches (${labelCount} by label)`)
   } catch (e) {
-    console.error('[semantic-search] API call failed:', e)
-    alert('Semantic search failed. Is RTSM running?')
+    console.error('[search] API call failed:', e)
+    alert('Search failed. Is RTSM running?')
   }
 }
 
