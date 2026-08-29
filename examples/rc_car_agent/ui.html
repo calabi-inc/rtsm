@@ -160,6 +160,10 @@
         <dt>planner</dt><dd id="m-path" class="mono">—</dd>
         <dt>target</dt><dd id="m-target">—</dd>
         <dt>Haiku says</dt><dd id="m-reason" class="mut">—</dd>
+        <dt>locked crop</dt><dd><img id="m-snap" alt="locked target crop"
+          style="display:none; max-width:170px; max-height:170px;
+                 border-radius:6px; border:1px solid #445; margin:2px 0;"
+          onerror="this.style.display='none'"></dd>
         <dt>ticks</dt><dd id="m-ticks" class="mono">—</dd>
       </dl>
       <div style="text-align:right">
@@ -340,6 +344,21 @@ function renderStatus(s) {
       ? `${t.target_label} (${t.target_id}, score ${fmt(t.target_score, 3)})`
       : (t.target_id || "—");
     $("m-reason").textContent = t.planner_reason || "—";
+    // Locked-target crop (2026-08-28): the operator eyeballs WHAT the
+    // planner actually locked onto — a lookalike pick is visible the
+    // moment it happens, not after the drive.
+    const snap = $("m-snap");
+    if (t.target_id) {
+      if (snap.dataset.oid !== t.target_id) {
+        snap.dataset.oid = t.target_id;
+        snap.src = "target_snapshot?id=" + encodeURIComponent(t.target_id)
+                 + "&ts=" + Date.now();
+      }
+      snap.style.display = "block";
+    } else {
+      snap.style.display = "none";
+      snap.dataset.oid = "";
+    }
     $("m-ticks").textContent = t.ticks ?? "—";
     $("m-dist").textContent = fmt(t.ground_dist_m) + (t.ground_dist_m != null ? " m" : "");
     const budget = t.condition === "baseline"
@@ -359,6 +378,8 @@ function renderStatus(s) {
     for (const id of ["m-id", "m-goal", "m-cond", "m-phase", "m-path",
                       "m-target", "m-reason", "m-ticks"])
       $(id).textContent = "—";
+    $("m-snap").style.display = "none";
+    $("m-snap").dataset.oid = "";
     $("m-phase").className = "mono";
     $("m-dist").textContent = "—";
     $("m-elapsed").textContent = "—";

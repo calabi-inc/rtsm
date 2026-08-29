@@ -62,7 +62,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 
 from baseline_search import BaselineSearcher, derive_seed
@@ -819,6 +819,31 @@ def create_app(cfg: Optional[Config] = None,
     @app.get("/trial_log")
     def trial_log(tail: int = 200):
         return srv.trial_log_tail(tail)
+
+    @app.get("/target_snapshot")
+    def target_snapshot(id: Optional[str] = None):
+        """The locked target's latest observation crop (JPEG) — operator
+        eyeball-debug for "what did it actually lock onto" (2026-08-28,
+        after the search image-confirmed a tissue-box lookalike). With
+        ?id= it serves ANY object's crop. Proxied through the agent
+        because the console laptop may not reach RTSM directly. 404 when
+        there is no target yet or RTSM has no crop for it."""
+        oid = id
+        if oid is None:
+            for t in (srv.current, srv.last_result):
+                if t and t.get("target_id"):
+                    oid = t["target_id"]
+                    break
+        if not oid:
+            raise HTTPException(404, "no locked target yet")
+        b64 = srv.rtsm.get_object_snapshot_b64(oid)
+        if not b64:
+            raise HTTPException(404, f"no snapshot for {oid}")
+        import base64 as _b64
+        return Response(content=_b64.b64decode(b64),
+                        media_type="image/jpeg",
+                        headers={"Cache-Control": "no-store",
+                                 "X-Object-Id": oid})
 
     ui_path = Path(__file__).resolve().parent / "ui.html"
 
