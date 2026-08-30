@@ -6,8 +6,9 @@ follow-along version.
 
 **The plan: 5 evenings. Each evening = 1 layout = 12 trials. 60 total.**
 
-Objects (same 5 all campaign, locked 2026-08-15 after Check A): **teddy
-bear, water bottle, dumbbell, tissue box, scissors**.
+Objects (same 5 all campaign, locked 2026-08-30, matches the detector
+vocabulary): **teddy bear, water bottle, dumbbell, tissue box,
+scissors**.
 
 ---
 
