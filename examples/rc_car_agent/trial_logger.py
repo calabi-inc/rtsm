@@ -82,6 +82,10 @@ class TrialLogger:
             "planner": {
                 "status": plan.status,
                 "planner_path": plan.planner_path,
+                # The actual selection model (2026-08-30: swapped mid-
+                # project; planner_path's "haiku" token is a historical
+                # label for the LLM path, not the model).
+                "model": self._cfg.planner.model,
                 "target_id": plan.target_id,
                 "label": plan.label,
                 "score": plan.score,

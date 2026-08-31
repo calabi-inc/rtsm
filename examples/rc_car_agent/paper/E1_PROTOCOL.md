@@ -124,6 +124,19 @@ planning/selection time counts in (a) exactly as search time counts in
 > comparator (systematic coverage + multi-view evidence per standpoint)
 > and is conservative w.r.t. the memory-advantage claim.
 
+> **AMENDMENT 2026-08-30 (post-pilot, pre-campaign; the 2026-08-30 L1
+> session is a SHAKEDOWN excluded from analysis): selection model
+> claude-haiku-4-5 → claude-opus-5, assertion tightened.** The pilot's
+> four wrong-object failures all shared one mechanism: the arbiter
+> confirmed marginal 224 px crops that matched the label's story (a
+> thermos as "water bottle", round metal as "dumbbell"). The selection
+> prompt now requires POSITIVE visual evidence of distinguishing
+> features and declares no_match on small/blurry/ambiguous crops (the
+> search simply looks again; the memory arm re-plans), and the
+> selection model is upgraded — identical call, identical rule, BOTH
+> arms (the model is now logged per trial). Verified on pilot crops:
+> the upgraded arbiter rejects the exact blur the pilot confirmed.
+
 > **AMENDMENT 2026-08-10 (pre-campaign, no trial data collected under the
 > old budgets):** originally 60 s (a) / 180 s (b), set before Phase G
 > measured the real rig. Calibration showed 0.08 m/s at full command

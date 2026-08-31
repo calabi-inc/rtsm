@@ -43,14 +43,25 @@ _SYSTEM_PROMPT = (
     "memory (id, label, similarity score, confirmed flag, stability, and "
     "usually the candidate's latest camera crop), pick the single best "
     "target. When a candidate has an image, the IMAGE is the primary "
-    "evidence — labels come from an automatic captioner and are often "
+    "evidence — labels come from an automatic detector and are often "
     "wrong for the right object (a real teddy bear has been labeled "
-    "'audio' and 'bichon'), so decide from what the crop actually shows "
-    "and treat the label as a hint only. Prefer confirmed, high-stability "
-    "candidates. If NO candidate could plausibly be the goal object "
-    "(check every image first), set no_match=true instead of settling for "
-    "the best-scoring wrong object — driving to a wrong object is worse "
-    "than admitting the target is not visible. Respond ONLY via the tool."
+    "'audio' and 'bichon'; a real dumbbell was labeled 'teddy bear' "
+    "while two round metal objects were labeled 'dumbbell'), so decide "
+    "from what the crop actually shows and NEVER confirm a candidate "
+    "merely because its label matches the goal. The crops are small and "
+    "sometimes blurry: confirm a candidate only when the image contains "
+    "POSITIVE visual evidence of the goal object's distinguishing "
+    "features (shape AND texture/parts — e.g. scissors need visible "
+    "blades AND finger rings, not just 'something elongated'). If the "
+    "best-matching image is too small, blurry, dark, or ambiguous to "
+    "identify the object with confidence, set no_match=true — the robot "
+    "will simply look again from closer; driving to a wrong object "
+    "wastes the whole trial and risks a collision, while declining a "
+    "marginal match costs seconds. Prefer confirmed, high-stability "
+    "candidates only as a tie-break between visually adequate matches. "
+    "If NO candidate shows positive evidence (check every image first), "
+    "set no_match=true instead of settling for the best-scoring wrong "
+    "object. Respond ONLY via the tool."
 )
 
 _SELECT_TOOL = {
@@ -157,9 +168,14 @@ def _pick_with_haiku(candidates: List[Candidate], goal: str, cfg: Config,
                     "source": {"type": "base64", "media_type": "image/jpeg",
                                "data": b64},
                 })
+        # max_tokens must leave room for THINKING on current models
+        # (Opus 5 thinks by default and thinking tokens count toward
+        # max_tokens — 200 truncated before the tool block ever came).
+        # effort "low" keeps this constrained perception pick fast;
+        # passed via extra_body so older SDK pins stay compatible.
         resp = anthropic_client.messages.create(
             model=cfg.planner.model,
-            max_tokens=200,
+            max_tokens=3000,
             system=[{
                 "type": "text",
                 "text": _SYSTEM_PROMPT,
@@ -169,6 +185,7 @@ def _pick_with_haiku(candidates: List[Candidate], goal: str, cfg: Config,
             tool_choice={"type": "tool", "name": "select_target"},
             messages=[{"role": "user", "content": content}],
             timeout=cfg.planner.api_timeout_s,
+            extra_body={"output_config": {"effort": "low"}},
         )
         for block in resp.content:
             if getattr(block, "type", None) == "tool_use":
