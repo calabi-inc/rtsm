@@ -287,6 +287,13 @@ class Associator:
                             best_cos = cos
                             best_dist = dist
 
+            # Snapshot gallery prefers the judgment crop (native-res,
+            # unmasked, padded — 2026-08-30); the 224 masked embedding
+            # crop is the fallback for backends that don't produce one.
+            gallery_crop = getattr(c, 'crop_hires', None)
+            if gallery_crop is None:
+                gallery_crop = getattr(c, 'crop', None)
+
             if best_id is not None:
                 # matched → update WM
                 assoc_update = AssocUpdate(
@@ -299,7 +306,7 @@ class Associator:
                     cos_sim=best_cos,
                     dist_m=best_dist,
                     label_topk=getattr(c, 'label_topk', None),
-                    crop=getattr(c, 'crop', None),
+                    crop=gallery_crop,
                     is_keyframe=is_keyframe,
                     frame_id=frame_id,
                 )
@@ -322,7 +329,7 @@ class Associator:
                 label_topk=getattr(c, 'label_topk', None),
                 view_dir_cam=(p_cam.astype(np.float32) / (np.linalg.norm(p_cam) + 1e-12)),
                 centroid_px=getattr(c.stats, 'centroid_px', None),
-                crop=getattr(c, 'crop', None),
+                crop=gallery_crop,
                 frame_id=frame_id,
             )
             # No promote here; will happen after subsequent matches

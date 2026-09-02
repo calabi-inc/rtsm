@@ -188,6 +188,41 @@ def _fresh_clearance(meters):
                     "timestamp": time.time()}
 
 
+def test_slow_zone_scales_final_approach_with_stall_floors():
+    """Gentle end-game (2026-08-30): inside slow_zone_m commands scale
+    by slow_zone_scale but are FLOORED at the calibration-proven moving
+    commands — an unfloored scale put commands below the ~0.4 motor
+    stall and would have stalled the car 0.75 m from every target
+    (review finding)."""
+    from config import load_config
+    nav_cfg = load_config().nav
+    full_l, full_r, _ = drive_command(0.0, nav_cfg, dist_m=2.0)
+    slow_l, slow_r, _ = drive_command(0.0, nav_cfg,
+                                      dist_m=nav_cfg.slow_zone_m / 2)
+    exp_base = min(nav_cfg.max_speed,
+                   max(nav_cfg.slow_zone_min_speed,
+                       nav_cfg.max_speed * nav_cfg.slow_zone_scale))
+    assert slow_l == pytest.approx(exp_base)
+    assert slow_r == pytest.approx(exp_base)
+    assert slow_l <= full_l                      # never faster than normal
+    assert exp_base >= nav_cfg.slow_zone_min_speed   # never below stall
+    _l, rot_r, mode = drive_command(3.0, nav_cfg,
+                                    dist_m=nav_cfg.slow_zone_m / 2)
+    assert mode == "rotate"
+    exp_turn = min(nav_cfg.max_turn,
+                   max(nav_cfg.slow_zone_min_turn,
+                       nav_cfg.max_turn * nav_cfg.slow_zone_scale))
+    assert rot_r == pytest.approx(exp_turn)
+    assert exp_turn >= nav_cfg.slow_zone_min_turn
+
+
+def test_no_dist_means_no_scaling():
+    from config import load_config
+    nav_cfg = load_config().nav
+    assert drive_command(0.2, nav_cfg) == drive_command(0.2, nav_cfg,
+                                                        dist_m=None)
+
+
 def test_blocked_when_obstacle_near_and_target_far():
     bridge = FakeBridge()
     # Target 3 m away, something 0.15 m in front of the camera.
@@ -199,10 +234,13 @@ def test_blocked_when_obstacle_near_and_target_far():
     assert bridge.stop_calls, "blocked verdict must safe-stop the car"
 
 
-def test_low_clearance_near_target_never_trips():
-    # 0.45 m from the target (inside blocked_min_target_dist_m): the
-    # target itself fills the camera — low clearance is EXPECTED and the
-    # guard must stay quiet. The drive runs on (here to hold-timeout).
+def test_near_target_wall_reading_cannot_trip_geometrically():
+    """Geometric truth on this camera-forward rig (sign review
+    2026-08-30): at ground_dist ≈ 0.71 the camera is only ~0.45 from
+    the target plane — a 0.15 m return could be a wall OR the target's
+    own face, and the consistency bound (0.71 − 0.26 − 0.35 = 0.10)
+    correctly refuses to guess. The guard stays quiet; near-target
+    contact severity is the slow zone's job."""
     bridge = FakeBridge()
     rtsm = ScriptedRtsm(_advancing_pose_at(2.55),
                         clearance=_fresh_clearance(0.15))
@@ -210,6 +248,48 @@ def test_low_clearance_near_target_never_trips():
         replace(FAST_CFG, nav=replace(FAST_CFG.nav, timeout_rtsm_s=1.0)),
         bridge, rtsm, mk_plan())
     assert result == "timeout"                     # NOT blocked
+
+
+def test_targets_own_face_reading_never_trips_nonvacuous():
+    """NON-VACUOUS quiet case (review 2026-08-30: the previous version
+    scripted 0.55 m clearance, which never even passed the < 0.30 gate).
+    Here ground_dist ≈ 0.51, the target's own face reads ≈ 0.25 — BELOW
+    the gate — and the bound (0.51 − 0.26 − 0.35 < 0) must still refuse
+    to trip. A bound that trips on everything fails this test."""
+    bridge = FakeBridge()
+    rtsm = ScriptedRtsm(_advancing_pose_at(2.75),
+                        clearance=_fresh_clearance(0.25))
+    result, _ = run_nav(
+        replace(FAST_CFG, nav=replace(FAST_CFG.nav, timeout_rtsm_s=1.0)),
+        bridge, rtsm, mk_plan())
+    assert result == "timeout"                     # NOT blocked
+
+
+def test_midrange_wall_trips_with_correct_sign():
+    # ground_dist ≈ 1.76, wall at 0.25: bound = 1.76 − 0.26 − 0.35 =
+    # 1.15 — a quarter-meter return cannot be a target 1.76 m away.
+    bridge = FakeBridge()
+    rtsm = ScriptedRtsm(_advancing_pose_at(1.5),
+                        clearance=_fresh_clearance(0.25))
+    result, detail = run_nav(FAST_CFG, bridge, rtsm, mk_plan())
+    assert result == "blocked"
+    assert bridge.stop_calls
+
+
+def test_practically_on_target_low_reading_never_trips():
+    # Believed 0.10 m from the target (deep inside arrival): the
+    # consistency bound collapses below zero, so even a 0.15 m reading
+    # cannot trip — the guard never fights the arrival itself.
+    bridge = FakeBridge()
+    # ground_dist here ≈ (3.0 − pose_z) + lever (the camera→drive-center
+    # transform); 3.16 puts the believed distance at ~0.10 m.
+    rtsm = ScriptedRtsm(_advancing_pose_at(3.16),
+                        clearance=_fresh_clearance(0.15))
+    result, _ = run_nav(
+        replace(FAST_CFG, nav=replace(FAST_CFG.nav, timeout_rtsm_s=1.0,
+                                      arrival_threshold_m=0.05)),
+        bridge, rtsm, mk_plan())
+    assert result != "blocked"
 
 
 def test_stale_clearance_sample_is_ignored():
@@ -360,6 +440,7 @@ def test_logged_cmd_pairs_with_same_ticks_heading_err():
              if t.status == "ongoing" and t.pose_fresh and t.heading_err is not None]
     assert len(fresh) >= 5
     for tick, left, right in fresh:
-        exp_l, exp_r, _mode = drive_command(tick.heading_err, FAST_CFG.nav)
+        exp_l, exp_r, _mode = drive_command(tick.heading_err, FAST_CFG.nav,
+                                            dist_m=tick.ground_dist)
         assert left == pytest.approx(exp_l), "logged cmd lags its heading_err"
         assert right == pytest.approx(exp_r)

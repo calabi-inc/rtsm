@@ -41,6 +41,48 @@ class Candidate:
     priority: float               # computed priority score
     crop: Optional[np.ndarray] = None    # 224x224x3 uint8 after pre-clip
     emb_vis: Optional[np.ndarray] = None # CLIP visual embedding (L2-normalized)
+    # Judgment crop (2026-08-30): native-resolution, UNMASKED, generously
+    # padded cut of the same detection — for the stored snapshot gallery
+    # that VLM selection and operator eyeballing consume. The 224 masked
+    # `crop` above is an EMBEDDING input (background suppressed so CLIP
+    # focuses on the object) and was never fit for judgment: the L1 pilot
+    # showed the arbiter rubber-stamping wrong objects it could not
+    # actually identify at that size, with the mean-fill background
+    # destroying all context.
+    crop_hires: Optional[np.ndarray] = None
+
+
+def cut_judgment_crop(rgb: np.ndarray, x0: int, y0: int, x1: int, y1: int,
+                      pad_frac: float, max_px: int) -> Optional[np.ndarray]:
+    """Unmasked judgment crop (2026-08-30): pure function, unit-tested.
+
+    Cuts the bbox (already in RGB pixel space) from the full frame with
+    context padding of pad_frac × the box's own size on every side,
+    clamped to the frame; downscales with INTER_AREA only when the long
+    side exceeds max_px. Returns None for degenerate boxes. The result
+    is what the snapshot gallery stores — the crop VLM selection and
+    operator eyeballing consume (the masked 224 embedding crop was never
+    fit for judgment)."""
+    H, W = rgb.shape[:2]
+    bw, bh = x1 - x0, y1 - y0
+    if bw <= 0 or bh <= 0:
+        return None
+    jx0 = max(0, int(x0 - bw * pad_frac))
+    jy0 = max(0, int(y0 - bh * pad_frac))
+    jx1 = min(W, int(x1 + bw * pad_frac))
+    jy1 = min(H, int(y1 + bh * pad_frac))
+    if jx1 <= jx0 or jy1 <= jy0:
+        return None
+    hires = rgb[jy0:jy1, jx0:jx1].copy()
+    long_side = max(hires.shape[0], hires.shape[1])
+    if long_side > max_px:
+        scale = max_px / float(long_side)
+        hires = cv2.resize(
+            hires,
+            (max(1, int(hires.shape[1] * scale)),
+             max(1, int(hires.shape[0] * scale))),
+            interpolation=cv2.INTER_AREA)
+    return hires
 
 
 @dataclass
@@ -845,7 +887,8 @@ class Pipeline:
         return final
 
     def _make_crops_inplace(self, cands: List[Candidate], rgb: np.ndarray,
-                            mask_to_rgb_sx: float = 1.0, mask_to_rgb_sy: float = 1.0):
+                            mask_to_rgb_sx: float = 1.0,
+                            mask_to_rgb_sy: float = 1.0):
         pad = int(self.cfg.get("staging",{}).get("crop_pad_px", 6))
         size = int(self.cfg.get("staging",{}).get("clip_input", 224))
         H, W, _ = rgb.shape
@@ -867,6 +910,15 @@ class Pipeline:
             if x1 <= x0 or y1 <= y0:
                 c.crop = None
                 continue
+
+            # Judgment crop FIRST, before any masking (2026-08-30): the
+            # snapshot gallery needs real pixels with context.
+            pad_frac = float(self.cfg.get("staging", {})
+                             .get("judge_crop_pad_frac", 0.20))
+            max_px = int(self.cfg.get("staging", {})
+                         .get("judge_crop_max_px", 640))
+            c.crop_hires = cut_judgment_crop(rgb, x0, y0, x1, y1,
+                                             pad_frac, max_px)
 
             crop = rgb[y0:y1, x0:x1].copy()    # copy needed for masking
             if crop.size == 0:

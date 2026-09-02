@@ -44,7 +44,8 @@ def _now_wall_utc() -> float:
 
 
 def _compress_crop_jpeg(crop: np.ndarray, quality: int = 75) -> bytes:
-    """Compress 224x224x3 uint8 crop to JPEG bytes.
+    """Compress an HxWx3 uint8 crop to JPEG bytes (224 embedding crops
+    or native-res judgment crops alike).
 
     Args:
         crop: BGR image array (H, W, 3) uint8 — crops come straight from

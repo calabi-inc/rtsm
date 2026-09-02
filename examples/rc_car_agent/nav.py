@@ -57,22 +57,44 @@ from rtsm_client import RtsmClient
 from trial_logger import TrialLogger
 
 
-def drive_command(heading_err: float, nav_cfg) -> Tuple[float, float, str]:
+def drive_command(heading_err: float, nav_cfg,
+                  dist_m: Optional[float] = None) -> Tuple[float, float, str]:
     """Heading error (rad, +=CCW/left) → (left, right, mode) in [-1, 1].
 
     Pure and deterministic — the whole steering policy, unit-tested in
     isolation (test_nav.py pins both signs and both modes).
-    """
+
+    Gentle end-game (2026-08-30, after two believed-arrivals physically
+    nudged their targets/walls; STALL FLOORS added same day on review —
+    a plain 0.6 scale put commands at 0.30, below this rig's measured
+    ~0.4 motor stall floor, which would have stalled the car 0.75 m
+    from every target): inside slow_zone_m of the believed target,
+    commands scale by slow_zone_scale but never below the calibration-
+    proven moving floors (slow_zone_min_speed / slow_zone_min_turn) —
+    on this rig that means a modest, honest slowdown rather than a
+    dramatic one. dist_m None = no scaling (sweep steps, relocation
+    walks)."""
     import math
+
+    in_slow = (dist_m is not None and nav_cfg.slow_zone_m > 0
+               and dist_m < nav_cfg.slow_zone_m)
 
     rotate_rad = math.radians(nav_cfg.rotate_in_place_deg)
     if abs(heading_err) > rotate_rad:
         t = nav_cfg.max_turn
+        if in_slow:
+            t = max(nav_cfg.slow_zone_min_turn,
+                    nav_cfg.max_turn * nav_cfg.slow_zone_scale)
+            t = min(t, nav_cfg.max_turn)
         if heading_err > 0.0:            # target LEFT → rotate CCW
             return -t, t, "rotate"
         return t, -t, "rotate"           # target RIGHT → rotate CW
 
     base = nav_cfg.max_speed
+    if in_slow:
+        base = max(nav_cfg.slow_zone_min_speed,
+                   nav_cfg.max_speed * nav_cfg.slow_zone_scale)
+        base = min(base, nav_cfg.max_speed)
     d = max(-nav_cfg.max_turn, min(nav_cfg.max_turn,
                                    nav_cfg.kp_steer * heading_err))
     left = max(-1.0, min(1.0, base - d))
@@ -176,7 +198,8 @@ class NavRunner:
                 self._note_progress(tick)
                 if (tick.status == "ongoing" and tick.pose_fresh
                         and tick.heading_err is not None):
-                    left, right, _mode = drive_command(tick.heading_err, nav)
+                    left, right, _mode = drive_command(tick.heading_err, nav,
+                                                       dist_m=tick.ground_dist)
                     have_cmd = True
                 elif tick.status == "ongoing" and not tick.pose_fresh:
                     # Blind-hold refinement (2026-08-16, after a live wall
@@ -196,17 +219,28 @@ class NavRunner:
                 if tick.status != "ongoing":
                     self._bridge.stop()
                     return tick.status, tick.detail
-                # Drive-phase obstacle guard (2026-08-16): something is
-                # measurably close ahead while the believed target is
-                # still far — the route is blocked (bad coordinate, or a
-                # wall between us and the goal). Debounced over
-                # consecutive fresh polls; the target itself filling the
-                # camera never trips this (dist gate).
+                # Drive-phase obstacle guard (2026-08-16; consistency
+                # bound 2026-08-30, SIGN reviewed same day): trip when
+                # the measured surface is nearer than the believed
+                # target could possibly read. Geometry on THIS rig: the
+                # calibrated lever_arm_forward_m is the camera→drive-
+                # center forward component (−0.259: the camera LEADS the
+                # drive center), so camera→target ≈ ground_dist + lever
+                # (i.e. ground_dist − 0.259). A reading below that minus
+                # the margin (target half-depth + map error) cannot be
+                # the target. Consequence, stated honestly: the bound
+                # collapses below zero inside ~0.6 m — at final-approach
+                # range a wall return is geometrically indistinguishable
+                # from the target's own face, so near-target contact is
+                # mitigated by the slow zone (speed floor above stall),
+                # not by this trip.
+                lever = self._cfg.calibration.lever_arm_forward_m
                 if (nav.blocked_clearance_m > 0 and tick.pose_fresh
                         and c_m is not None
                         and c_m < nav.blocked_clearance_m
                         and tick.ground_dist is not None
-                        and tick.ground_dist > nav.blocked_min_target_dist_m):
+                        and c_m < (tick.ground_dist + lever
+                                   - nav.blocked_target_margin_m)):
                     blocked_polls += 1
                     if blocked_polls >= nav.blocked_debounce_polls:
                         self._bridge.stop()

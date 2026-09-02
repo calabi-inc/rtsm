@@ -90,16 +90,32 @@ class NavCfg:
     discontinuity_rate_mps: float
     timeout_rtsm_s: float
     timeout_baseline_s: float
-    # Drive-phase obstacle guard (2026-08-16, after a live wall hit during
-    # a search trial's DRIVE: the acquired coordinate routed through a
-    # wall and blind-hold pushed into it). Applies to BOTH conditions.
-    # Trip rule: fresh clearance below blocked_clearance_m while the
-    # believed target is still farther than blocked_min_target_dist_m
-    # (so the target itself filling the camera never trips it), for
-    # blocked_debounce_polls consecutive fresh polls -> verdict "blocked".
+    # Drive-phase obstacle guard (2026-08-16; target-consistency bound
+    # 2026-08-30, sign corrected same day on review). Trip rule: fresh
+    # clearance below blocked_clearance_m AND below the bound
+    # ground_dist + lever_arm_forward_m − blocked_target_margin_m
+    # (SIGNED lever: the camera LEADS the drive center on this rig, so
+    # camera→target ≈ ground_dist − 0.26 — a reading below that minus
+    # the margin cannot be the target). Honest scope: the bound
+    # collapses below zero inside ~0.6 m, where a wall return is
+    # geometrically indistinguishable from the target's own face — the
+    # guard protects at range; near-target contact severity is
+    # mitigated by the slow zone below. Debounced over
+    # blocked_debounce_polls consecutive fresh polls -> "blocked".
     blocked_clearance_m: float = 0.30    # <=0 disables the drive guard
-    blocked_min_target_dist_m: float = 0.75
+    # Margin covers target half-depth + mapped-centroid error.
+    blocked_target_margin_m: float = 0.35
     blocked_debounce_polls: int = 3
+    # Gentle end-game (2026-08-30): inside slow_zone_m, commands scale
+    # by slow_zone_scale but are FLOORED at the calibration-proven
+    # moving commands (review 2026-08-30: an unfloored 0.6 scale gave
+    # 0.30 — below this rig's ~0.4 stall — the car would have stalled
+    # 0.75 m from every target). Straight 0.5 works / 0.3 stalls;
+    # rotate 0.5 works / 0.4 stalls (measured). <=0 zone disables.
+    slow_zone_m: float = 0.75
+    slow_zone_scale: float = 0.6
+    slow_zone_min_speed: float = 0.45
+    slow_zone_min_turn: float = 0.5
     # Blind-hold refinement: if the pose feed goes stale while last-known
     # clearance was below this, hold ZERO (stop) instead of holding the
     # last drive command — never push blind toward a known-near obstacle.
