@@ -62,7 +62,7 @@ segmentation:
     gdino_model_id: IDEA-Research/grounding-dino-tiny
     sam2_model_id: null              # null = use sam2.model_id above
     device: cuda
-    box_threshold: 0.20              # GDINO detection confidence threshold
+    box_threshold: 0.30              # GDINO detection confidence (2026-08-30: 0.20 minted 4 fake "dumbbells" + a thermos-as-bottle from round/metal clutter in the L1 pilot; real roster peaks measured 0.55-0.88. Verify all 5 objects still fire at scan check before trials)
     text_threshold: 0.15             # GDINO text matching threshold
     # E1 roster vocabulary (2026-08-28, operator-set): the five venue
     # objects. null would fall back to the 40-class indoor vocab.
@@ -159,6 +159,14 @@ staging:
   crop_pad_px: 6
   clip_input: 224
   bg_fill: mean                   # Background fill for masked crops: mean | white | black | blur
+  # Judgment crops (2026-08-30): the snapshot gallery stores a SECOND,
+  # unmasked, native-resolution cut of each detection (box padded by
+  # judge_crop_pad_frac of its own size, long side capped) — the crop
+  # the VLM selection arbiter and operator eyeball consume. The 224
+  # masked crop above remains the CLIP embedding input only; feeding it
+  # to a judge caused the L1 pilot's wrong-object confirmations.
+  judge_crop_pad_frac: 0.20
+  judge_crop_max_px: 640
 
   # Priority weights
   w_coverage: 1.0

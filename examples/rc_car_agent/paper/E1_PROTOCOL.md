@@ -136,6 +136,20 @@ planning/selection time counts in (a) exactly as search time counts in
 > selection model is upgraded — identical call, identical rule, BOTH
 > arms (the model is now logged per trial). Verified on pilot crops:
 > the upgraded arbiter rejects the exact blur the pilot confirmed.
+> **Same amendment, perception package:** (a) stored snapshots are now
+> judgment-grade — unmasked native-resolution cuts (box + 20% context,
+> long side ≤ 640 px) replacing the background-masked 224 px embedding
+> crops the arbiter was previously judging; (b) detector confidence
+> threshold 0.20 → 0.30 (the pilot's false roster detections lived in
+> 0.19–0.30; real-object peaks measured 0.55–0.88; the scan check must
+> re-verify all five objects fire before any trial); (c) the drive
+> guard's flat 0.75 m near-target disarm is replaced by a signed
+> target-consistency bound (trips at range when a return is provably
+> nearer than the target; stated honestly, it cannot distinguish wall
+> from target inside ~0.6 m on this camera-forward rig), and final
+> approaches inside 0.75 m slow to the calibration-proven minimum
+> moving commands — contact severity mitigation, not prevention. Both
+> arms share all of it.
 
 > **AMENDMENT 2026-08-10 (pre-campaign, no trial data collected under the
 > old budgets):** originally 60 s (a) / 180 s (b), set before Phase G
