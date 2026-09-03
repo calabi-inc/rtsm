@@ -20,7 +20,7 @@ L3 sheet order is MEMORY-FIRST (matches printed counterbalancing).
 | 9 | memory | water bottle | t20260902-220203-011 | not_found | — | — | VALID MEMORY FAILURE (first of campaign): arbiter refused dark/ambiguous stored crop from rushed scan-#3 bottle look; car never moved (0 ticks). Memory quality = scan quality. Not redone. |
 | 10 | search | water bottle | t20260902-220317-012 | arrived | 30.7 | ___ | baseline beat memory on this pair — fresh close-range crop accepted instantly; honest asymmetry, reported as-is |
 | 11 | memory | dumbbell (repeat) | t20260902-220821-013 | drift | — | — | VALID MEMORY FAILURE: association drift under approach — re-observations swept in adjacent furniture (snapshots 1–2 show dumbbell as corner sliver), centroid dragged to Y=-0.50; operator grab prevented hard crash into furniture; monitor issued drift. |
-| 12 | search | dumbbell (repeat) | t20260902-221901-015 | drift | — | — | 2nd attempt (void below). VALID BASELINE FAILURE: live observation, correct object, same corrupted-centroid divergence (best 0.47 → 1.29 m). Proves the dumbbell failure is in the SHARED perception layer. |
+| 12 | search | dumbbell (repeat) | t20260902-221901-015 | drift | — | — | 2nd attempt (void below). VALID BASELINE FAILURE: live observation, correct object, same corrupted-centroid divergence (best 0.47 → 1.29 m); operator-witnessed IDENTICAL trajectory to row 11 — same crash site (adjacent furniture), operator grab before hard impact. Proves the dumbbell failure is in the SHARED perception layer (detector box spill on partial views + sparse depth on black plates → centroid in the furniture), not the memory layer. |
 
 Voided / non-sheet runs (excluded from rows):
 
