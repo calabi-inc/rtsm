@@ -9,18 +9,25 @@ box, on furniture) was hidden after trial row 7's two blocked attempts.
 
 | Row | Cond | Goal | Trial file | Result | TTA (s) | Tape (cm) | Notes |
 |----|------|------|-----------|--------|---------|-----------|-------|
-| 1 | memory | teddy bear | t20260901-192904-001 | arrived | 38.9 | ___ | |
-| 2 | search | teddy bear | t20260901-193125-002 | arrived | 37.9 | ___ | early-exit step 3 |
-| 3 | memory | water bottle | t20260901-193406-003 | arrived | 33.8 | ___ | |
-| 4 | search | water bottle | t20260901-193526-004 | arrived | 55.8 | ___ | 2 no-match rejections then correct pick |
-| 5 | memory | dumbbell | t20260901-193729-005 | arrived | 25.1 | ___ | found via CLIP label; GDINO silent; image-confirmed |
-| 6 | search | dumbbell | t20260901-193831-006 | arrived | 34.5 | ___ | early-exit step 5 |
-| 7 | memory | tissue box | t20260901-195220-002 | arrived | 30.1 | ___ | THIRD attempt; see deviations D1–D3 |
-| 8 | search | tissue box | t20260901-195410-003 | arrived | 55.5 | ___ | 1 rejection then correct pick |
-| 9 | memory | scissors | t20260901-195737-004 | arrived | 26.3 | ___ | label_primary wrong ("water bottle"); image won |
-| 10 | search | scissors | t20260901-200333-006 | arrived | 252.8 | ___ | no-match @ standpoint 1 → relocate → found; see D4 |
-| 11 | memory | teddy bear (repeat) | t20260902-004117-002 | arrived | 34.8 | ___ | ran on scan #2 (fresh map, see D6); pick verified pre-fire |
-| 12 | search | teddy bear (repeat) | t20260902-004235-003 | arrived | 40.5 | ___ | early-exit step 3; fresh detection 0.67 |
+| 1 | memory | teddy bear | t20260901-192904-001 | arrived | 38.9 | 18 (0) | |
+| 2 | search | teddy bear | t20260901-193125-002 | arrived | 37.9 | 37 (19) | early-exit step 3 |
+| 3 | memory | water bottle | t20260901-193406-003 | arrived | 33.8 | 18 (0) | |
+| 4 | search | water bottle | t20260901-193526-004 | arrived | 55.8 | 18 (0) | 2 no-match rejections then correct pick |
+| 5 | memory | dumbbell | t20260901-193729-005 | arrived | 25.1 | 18 (0) | found via CLIP label; GDINO silent; image-confirmed |
+| 6 | search | dumbbell | t20260901-193831-006 | arrived | 34.5 | 18 (0) | early-exit step 5 |
+| 7 | memory | tissue box | t20260901-195220-002 | arrived | 30.1 | 18 (0) | THIRD attempt; see deviations D1–D3 |
+| 8 | search | tissue box | t20260901-195410-003 | arrived | 55.5 | 19 (1) | 1 rejection then correct pick |
+| 9 | memory | scissors | t20260901-195737-004 | arrived | 26.3 | 18 (0) | label_primary wrong ("water bottle"); image won |
+| 10 | search | scissors | t20260901-200333-006 | arrived | 252.8 | 18 (0) | no-match @ standpoint 1 → relocate → found; see D4 |
+| 11 | memory | teddy bear (repeat) | t20260902-004117-002 | arrived | 34.8 | 18 (0) | ran on scan #2 (fresh map, see D6); pick verified pre-fire |
+| 12 | search | teddy bear (repeat) | t20260902-004235-003 | arrived | 40.5 | 18 (0) | early-exit step 3; fresh detection 0.67 |
+
+Tape column = converted protocol metric `gap + 18` cm (raw gap in
+parentheses; 0 = nose contact). Rig constant C = 18 cm measured
+2026-09-02 (drive-center sticker → bumper tip). 12/12 rows within the
+pre-registered 50 cm — and within the 40 cm sensitivity band too
+(max 37 cm). Worst case with the face-vs-floor-cross slop bound
+(≤ ~12 cm): 37 + 12 = 49 cm, still under 50.
 
 Voided / non-sheet runs (kept for failure analysis, excluded from rows):
 
@@ -95,10 +102,10 @@ and recorded here. Applied uniformly to all rows and all layouts.
 Gap readings by row: 1: 0 · 2: 19 · 3: 0 · 4: 0 · 5: 0 · 6: 0 ·
 7: 0 · 8: 1 · 9: 0 · 10: 0 · 11: 0 · 12: 0 (cm).
 
-Rig constant: ___ cm (PENDING — one measurement). Success under the
-pre-registered 50 cm threshold requires converted tape ≤ 50, i.e.
-constant ≤ 31 cm for the worst row (row 2, gap 19). Any plausible
-RC-car nose length (~15–25 cm) passes all 12 rows.
+Rig constant: **18 cm** (measured 2026-09-02, drive-center sticker →
+bumper tip). Converted tape = gap + 18, written into each trial
+JSONL's `tape_cm` (raw gap kept as `tape_gap_cm`). All 12 rows pass
+the pre-registered 50 cm threshold; max converted = 37 cm (row 2).
 
 Note: contact stops can nudge the object a few cm; subsequent trials
 target the object where it then sits (re-observed/rescanned), so this
