@@ -1,4 +1,4 @@
-# Session 2026-09-02 — Layout L2 — trial manifest (IN PROGRESS: 7/12 rows)
+# Session 2026-09-02 — Layout L2 — trial manifest (COMPLETE: 12/12 rows)
 
 Operator: solo. Same roster, objects repositioned from L1. Session ran
 2026-09-02 ~00:50–01:30, ended early on phone degradation (Lens
@@ -15,12 +15,12 @@ spun in place). Resume plan at bottom.
 | 4 | memory | dumbbell | t20260902-005532-006 | arrived | 33.4 | ___ | |
 | 5 | search | tissue box | t20260902-010250-009 | arrived | 57.5 | ___ | |
 | 6 | memory | tissue box | t20260902-010138-008 | arrived | 26.5 | ___ | |
-| 7 | search | scissors | PENDING (redo) | — | — | — | 3 infra voids below |
+| 7 | search | scissors | t20260902-204701-001 | arrived | 196.8 | ___ | redo after 3 infra voids (below); ran on scan #3, rested phone; 184 s searching before lock |
 | 8 | memory | scissors | t20260902-010440-010 | arrived | 33.2 | ___ | |
-| 9 | search | teddy bear | PENDING | — | — | — | |
-| 10 | memory | teddy bear | PENDING | — | — | — | |
-| 11 | search | water bottle (repeat) | PENDING | — | — | — | |
-| 12 | memory | water bottle (repeat) | PENDING | — | — | — | |
+| 9 | search | teddy bear | t20260902-205349-003 | arrived | 49.3 | ___ | scan #3; found during sweep (~32 s search), ran after row 10 |
+| 10 | memory | teddy bear | t20260902-205204-002 | arrived | 24.1 | ___ | scan #3; locked in ~4 s; ran before row 9 (memory-first kept for all of L2, see L2-D1) |
+| 11 | search | water bottle (repeat) | t20260902-205701-005 | arrived | 53.7 | ___ | scan #3; ran after row 12; live re-sight of the scan record during sweep (see masking note below) |
+| 12 | memory | water bottle (repeat) | t20260902-205530-004 | arrived | 38.9 | ___ | scan #3; ran before row 11; repeat consistency: row 2 (scan #1, prev. day) also 38.9 s |
 
 Voided / non-sheet runs (excluded from rows):
 
@@ -44,6 +44,32 @@ Voided / non-sheet runs (excluded from rows):
 - **L2-D3 — three row-7 infra voids** (table above): phone thermal/
   uptime degradation, not a search-algorithm failure. Fix = phone rest
   + charge; pose age verified < 2.0 s before every fire at resume.
+  Resume (2026-09-02 evening) confirmed the diagnosis: same trial on a
+  rested phone arrived cleanly (row 7, 196.8 s).
+- **L2-D4 — resume rows ran on scan #3** (2026-09-02 ~20:40): fresh
+  RTSM process, persisted stale index cleared via /reset before scan
+  (52 old vectors from scan #2's frame). Scan #3 verified scissors /
+  teddy bear / water bottle (the only objects remaining rows target);
+  dumbbell and tissue box were not re-verified — their rows completed
+  on scan #1. Same disclosure pattern as L1-D6.
+- **L2-D5 — e-stop waived for the resume session by operator
+  instruction:** no PS4 controller detected, wired pad not restored;
+  `require_verified_estop: false` (local). Operator's kill = physical
+  power cut, standing within reach. Rig speed ≤ 0.08 m/s. Recorded
+  for the paper's deviations note.
+
+## Masking audit note (rows 9, 11)
+
+Both baseline trials locked the SAME record ids the memory arm used
+(bear b92819a1, bottle 0488f12d). This is not a masking violation:
+the freshness window admits only records upserted during the current
+round, so these entered as LIVE re-sightings during the sweep — the
+object was physically observed from the current standpoint, which is
+exactly what a memoryless agent gets. The one asymmetry (the record's
+consolidated multi-view coordinate) ASSISTS the baseline arm, i.e. it
+is conservative w.r.t. the memory-advantage claim. Row 7's search
+locked a fresh record (3d647131), showing the mechanism takes fresh
+mints when the old record is not re-sighted first.
 
 ## Tape + photos for rows 1–6, 8
 
