@@ -61,14 +61,27 @@ Voided / non-sheet runs (kept for failure analysis, excluded from rows):
 
 ## Photos
 
-Drop photos into `photos/` in this folder, named by row:
-`row01_wide.jpg`, `row01_close.jpg` (close-up only where taken),
-plus `layout_L1_wide.jpg` for the room shot. If filenames follow the
-phone's defaults instead, list the mapping in a text note and I will
-rename them.
+Operator folder: `C:\Users\konam\Desktop\E1_data` — 12 stop photos +
+1 layout wide shot (HEIC; convert to JPEG + STRIP EXIF/GPS before any
+publication). Row mapping (photo timestamps corroborate trial logs):
 
-## Tape numbers
+row 1 L1_bear_mem · row 2 L1_bear_search · row 3 L1_water_bottle_mem ·
+row 4 L1_water_bottle_search · row 5 L1_dumbbell_mem ·
+row 6 L1_dumbbelll_search (sic) · row 7 L1_tissue_box_mem ·
+row 8 L1_tissue_box_search · row 9 L1_scissors_mem ·
+row 10 L1_scissors_search · row 11 L1_bear_mem_repeat ·
+row 12 L1_bear_search_repeat · layout L1_layout.
 
-Read the cm values off the paper sheet into the Tape column above (or
-dictate them in chat in row order) — the digital record is incomplete
-until they land here.
+## Tape numbers — PROVISIONAL (operator-dictated 2026-09-02)
+
+Readings appear to be BUMPER-TO-OBJECT GAP, not the protocol's
+wheel-center-to-base (ten zeros are impossible for the latter given
+the 0.40 m believed stop radius). PENDING: operator confirms
+measurement origin + one-time rig constant (wheel-center → front
+bumper, measure once on the parked car). Protocol tape = gap +
+constant, applied uniformly and documented here.
+
+Gap readings by row: 1: 0 · 2: 19 · 3: 0 · 4: 0 · 5: 0 · 6: 0 ·
+7: 0 · 8: 1 · 9: 0 · 10: 0 · 11: 0 · 12: 0 (cm).
+All rows pass the 50 cm success threshold under any plausible
+constant (max = 19 + const).
