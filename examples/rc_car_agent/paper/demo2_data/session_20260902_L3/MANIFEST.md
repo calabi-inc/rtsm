@@ -1,4 +1,4 @@
-# Session 2026-09-02 (evening) — Layout L3 — trial manifest (IN PROGRESS: 6/12 rows)
+# Session 2026-09-02 (evening) — Layout L3 — trial manifest (COMPLETE: 12/12 rows)
 
 Operator: solo. Objects repositioned from L2, tape crosses laid.
 Session ~21:00–22:00, paused on accelerating Lens delivery stalls
@@ -15,12 +15,12 @@ L3 sheet order is MEMORY-FIRST (matches printed counterbalancing).
 | 4 | search | tissue box | t20260902-213132-004 | arrived | 152.5 | ___ | ~131 s search w/ relocation |
 | 5 | memory | scissors | t20260902-213550-005 | arrived | 40.0 | ___ | rank-1 ghost ("blurry wall") rejected on image |
 | 6 | search | scissors | t20260902-214503-007 | arrived | 365.1 | ___ | 2nd attempt (void below); longest successful search of campaign; 1 blocked-walk skip |
-| 7 | memory | teddy bear | PENDING (redo) | — | — | — | 1st attempt infra void below |
-| 8 | search | teddy bear | PENDING | — | — | — | |
-| 9 | memory | water bottle | PENDING | — | — | — | |
-| 10 | search | water bottle | PENDING | — | — | — | |
-| 11 | memory | dumbbell (repeat) | PENDING | — | — | — | dumbbell restored to its cross after row-2 crash |
-| 12 | search | dumbbell (repeat) | PENDING | — | — | — | |
+| 7 | memory | teddy bear | t20260902-215836-009 | arrived | 33.9 | ___ | 2nd attempt (void below); rows 7–12 on scan #3 (post-cooldown) |
+| 8 | search | teddy bear | t20260902-215948-010 | arrived | 60.4 | ___ | ~36 s sweep; live re-sight of same record (conservative masking mechanic) |
+| 9 | memory | water bottle | t20260902-220203-011 | not_found | — | — | VALID MEMORY FAILURE (first of campaign): arbiter refused dark/ambiguous stored crop from rushed scan-#3 bottle look; car never moved (0 ticks). Memory quality = scan quality. Not redone. |
+| 10 | search | water bottle | t20260902-220317-012 | arrived | 30.7 | ___ | baseline beat memory on this pair — fresh close-range crop accepted instantly; honest asymmetry, reported as-is |
+| 11 | memory | dumbbell (repeat) | t20260902-220821-013 | drift | — | — | VALID MEMORY FAILURE: association drift under approach — re-observations swept in adjacent furniture (snapshots 1–2 show dumbbell as corner sliver), centroid dragged to Y=-0.50; operator grab prevented hard crash into furniture; monitor issued drift. |
+| 12 | search | dumbbell (repeat) | t20260902-221901-015 | drift | — | — | 2nd attempt (void below). VALID BASELINE FAILURE: live observation, correct object, same corrupted-centroid divergence (best 0.47 → 1.29 m). Proves the dumbbell failure is in the SHARED perception layer. |
 
 Voided / non-sheet runs (excluded from rows):
 
@@ -29,6 +29,7 @@ Voided / non-sheet runs (excluded from rows):
 | t20260902-211258-001 | memory/dumbbell → stale_stop at believed 1.04 m: Lens froze mid-drive, ARKit session lost (frame_epoch 1→2) → full rescan. Correct pick ("black weight plates on a bar"). |
 | t20260902-213718-006 | search/scissors → stale_stop 75 s into search: ~3 s pose-delivery stall (Lens app alive, same epoch; likely WiFi/throttle, operator confirmed app never froze). |
 | t20260902-215221-008 | memory/bear → stale_stop at believed 1.99 m: blind 2.8 s; feed then died fully (Lens death, session paused). Correct pick. |
+| t20260902-221439-014 | search/dumbbell repeat → stale_stop 6 ticks into sweep: pose-delivery stall (warm phone, post-cooldown degradation band 2.2–2.5 s); same epoch, map survived. |
 
 ## Protocol deviations this session (so far)
 
@@ -60,6 +61,23 @@ Voided / non-sheet runs (excluded from rows):
   these (all fired healthy); the stalls hit mid-trial.
 - **L3-D5 — e-stop waiver continues** (see L2-D5): no PS4, no wired
   pad, operator physical power-cut only, ≤0.08 m/s rig.
+
+- **L3-D6 — dumbbell = depth/association-adversarial object (both
+  arms):** four dumbbell failures share one mechanism — black
+  IR-absorbing plates + adjacent wooden furniture → partial-object
+  observations associate in background structure → corrupted centroid
+  (recorded Y up to ~1 m above floor) → drift/overrun. Failures: L2
+  search (drift), L3 row 2 search (crash), L3 row 11 memory (drift,
+  operator grab), L3 row 12 search (drift). Arrivals (L2 memory, L3
+  row 1 memory) came from records minted off deliberate stationary
+  dwells. Symmetric across arms — a shared-perception-layer
+  limitation, not a memory-layer one. Also: the pre-trial gate can
+  verify a record's crop but NOT its depth/coordinate quality —
+  honest scope limit.
+- **L3-D7 — L3 ran across three scans** (#1 pre-Lens-death aborted
+  after row 1's first attempt; #2 rows 1–6; #3 rows 7–12 after
+  cooldown). Row 9's memory failure traces to scan #3's rushed bottle
+  look. frame_epoch logged per trial.
 
 ## Resume checklist
 
