@@ -51,6 +51,15 @@ Voided / non-sheet runs (kept for failure analysis, excluded from rows):
 - **D5 — row 11's first attempt voided** (wrong direction: drifted
   duplicate coordinate ~1 m off; believed-arrived 0.40 m; map had
   accumulated 5 bear records across ~18 drives).
+- **D7 — tape convention + evidence deviation:** readings were taken
+  bumper-to-object gap (0 = contact) instead of the pre-registered
+  drive-center → floor-cross, dictated next day rather than logged
+  per-trial, and the protocol's laid-tape evidence photo
+  (`<task_id>_tape.jpg`) was not taken — stop photos only (contact
+  rows are self-evidencing in the stop photo; row 2's 19 cm standoff
+  relies on the dictated reading + stop photo). Standardized going
+  forward by protocol amendment 2026-09-02: gap convention kept for
+  the whole campaign, converted via the once-measured rig constant C.
 - **D6 — rows 11–12 ran on a SECOND scan** (map reset after D5 + an
   iPhone charge break, session resumed 2026-09-02 ~00:40). Scan #2 was
   bear-complete but thin elsewhere (scissors unscanned — irrelevant to
@@ -72,16 +81,27 @@ row 8 L1_tissue_box_search · row 9 L1_scissors_mem ·
 row 10 L1_scissors_search · row 11 L1_bear_mem_repeat ·
 row 12 L1_bear_search_repeat · layout L1_layout.
 
-## Tape numbers — PROVISIONAL (operator-dictated 2026-09-02)
+## Tape numbers (operator-dictated 2026-09-02; convention CONFIRMED)
 
-Readings appear to be BUMPER-TO-OBJECT GAP, not the protocol's
-wheel-center-to-base (ten zeros are impossible for the latter given
-the 0.40 m believed stop radius). PENDING: operator confirms
-measurement origin + one-time rig constant (wheel-center → front
-bumper, measure once on the parked car). Protocol tape = gap +
-constant, applied uniformly and documented here.
+Measurement convention (operator-confirmed): readings are the FINAL
+GAP from the car's front bumper to the object; **0 cm = the nose
+gently contacted the object and the car stopped there** (10 of 12
+rows ended in contact). This differs from the pre-registered
+wheel-center-to-object-base tape; conversion to the protocol metric
+is `gap + rig constant` where the rig constant = wheel-center →
+front-bumper distance, to be tape-measured ONCE on the parked car
+and recorded here. Applied uniformly to all rows and all layouts.
 
 Gap readings by row: 1: 0 · 2: 19 · 3: 0 · 4: 0 · 5: 0 · 6: 0 ·
 7: 0 · 8: 1 · 9: 0 · 10: 0 · 11: 0 · 12: 0 (cm).
-All rows pass the 50 cm success threshold under any plausible
-constant (max = 19 + const).
+
+Rig constant: ___ cm (PENDING — one measurement). Success under the
+pre-registered 50 cm threshold requires converted tape ≤ 50, i.e.
+constant ≤ 31 cm for the worst row (row 2, gap 19). Any plausible
+RC-car nose length (~15–25 cm) passes all 12 rows.
+
+Note: contact stops can nudge the object a few cm; subsequent trials
+target the object where it then sits (re-observed/rescanned), so this
+does not corrupt later rows. Believed stop radius was ~0.40 m
+(camera-to-centroid telemetry); physical outcomes ranged from contact
+to 19 cm standoff — the tape column is ground truth, telemetry is not.

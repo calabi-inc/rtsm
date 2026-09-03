@@ -160,6 +160,30 @@ planning/selection time counts in (a) exactly as search time counts in
 > asymmetric-budget critique; the MW comparison horizon becomes 900 s.
 > The timeout only binds on failures — arrivals end trials early.
 
+> **AMENDMENT 2026-09-02 (post-L1 measurement; applies to all layouts):
+> tape convention standardized to the operator's actual procedure.**
+> L1's readings were taken as the FINAL GAP from the front bumper to
+> the object, written 0 on contact (10/12 L1 rows ended with the nose
+> gently touching the object) — not drive-center → floor-cross. Rather
+> than mix conventions mid-campaign, the recorded value is now:
+> bumper tip → object floor cross, 0 = contact. Conversion to the
+> pre-registered metric: `tape_cm = gap + C`, where C = drive-center
+> chassis sticker → bumper tip, tape-measured ONCE on the parked rig
+> and recorded in the L1 manifest. The 50 cm threshold applies to the
+> CONVERTED value — the pre-registered criterion is not loosened.
+> Honesty notes: (a) L1 gaps were read bumper → nearest object face
+> rather than floor cross, understating the converted metric by up to
+> ~half the object footprint (≤ ~12 cm, bounded by the tissue box);
+> the 40/50/60 sensitivity sweep brackets this, and from L2 on
+> no-contact readings go bumper tip → floor cross. (b) The per-trial
+> tape-evidence photo (`<task_id>_tape.jpg`) was not taken in L1 —
+> stop photos only, readings dictated (deviation D7 in the L1
+> manifest). From L2 on: contact rows need no tape photo (the stop
+> photo shows contact); non-contact rows get the laid-tape photo.
+> (c) Contact stops can nudge an object a few cm; later trials target
+> the object where it then sits. Raw gaps are preserved per trial as
+> `tape_gap_cm`; `tape_cm` is filled once C is measured.
+
 **Ground truth & success (pre-registered, fixed before any data):**
 tape-measured distance, drive center → object floor cross. HEADLINE
 completion = monitor verdict `arrived` AND tape ≤ 50 cm. Rationale for

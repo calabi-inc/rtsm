@@ -46,8 +46,11 @@ scissors**.
 - [ ] 4. HANDS OFF. Watch. Only touch the car if it's about to break
       something (that voids the trial — we redo it, no big deal)
 - [ ] 5. Car stops → wait for Claude's verdict message
-- [ ] 6. TAPE MEASURE: from the point between the car's wheels to the
-      bottom of the target object. Say the number in cm.
+- [ ] 6. TAPE MEASURE: from the car's front bumper tip to the tape
+      cross under the object. Nose touching the object = say "0,
+      contact" (no tape photo needed — the stop photo shows it).
+      Not touching = say the cm number AND snap one photo of the laid
+      tape with the reading legible.
       Do this EVERY trial where the car ended anywhere near the object.
 - [ ] 7. One photo of where the car stopped
 - [ ] 8. Put car back on the X. Next trial.
