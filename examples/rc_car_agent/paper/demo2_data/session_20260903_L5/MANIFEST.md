@@ -51,4 +51,4 @@ Voided / non-sheet runs (excluded from rows):
 
 ## Tape + photos
 
-RESOLVED 2026-09-04: full set dictated (contact everywhere except row 2 = 26 direct, row 5 = 23 direct, row 10 = 22 direct). All 12 rows pass the 50 cm threshold. Photos pending transfer. **Row 12 has NO stop photo** (operator missed it at ~00:15 after the void/redo cycle) — the only arrival of the campaign without one; result rests on the trial log + dictated contact tape, disclosed in the paper's deviations note.
+RESOLVED 2026-09-04: full set dictated (contact everywhere except row 2 = 26 direct, row 5 = 23 direct, row 10 = 22 direct). All 12 rows pass the 50 cm threshold. Photo archive TRANSFERRED (E1_data/L5/, 13 files: 12 stops + layout; row 12's photo initially appeared missing due to iPhone sync lag — recovered and verified, wide shot showing car at scissors, retraction of the earlier missing-photo note). Full campaign photo archive now on disk: 60 files across L1–L5.
