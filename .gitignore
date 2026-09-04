@@ -143,3 +143,7 @@ config
 site/
 !examples/rc_car_agent/.env.example
 
+
+# E1 campaign photo archive: home photos with EXIF/GPS - NEVER commit to the public repo.
+# Published form = selected, EXIF-stripped JPEGs in the anonymous artifact only.
+examples/rc_car_agent/paper/demo2_data/session_*/photos/
