@@ -1,0 +1,48 @@
+{"type": "trial_start", "schema_version": 1, "trial_id": "t20260903-170714-011", "goal": "go to the tissue box", "condition": "baseline", "started_at": "2026-09-03T17:07:14", "planner": {"status": "searching", "planner_path": "baseline_fresh", "model": "claude-opus-5", "target_id": null, "label": null, "score": 0.0, "confirmed": false, "stability": 0.0, "xyz_world": null, "target_last_seen_wall_utc": null, "target_age_at_plan_s": null, "reason": null, "retrieval": null}, "rtsm_stats": {"objects": 13, "confirmed": 13, "upserts_total": 446}, "frame_epoch": null, "plan_pose": null, "config": {"arrival_threshold_m": 0.4, "max_speed": 0.5, "max_turn": 0.5, "kp_steer": 1.2, "tick_s": 0.05, "poll_hz": 10, "stale_abort_s": 2.5, "drift_margin_m": 0.8, "timeout_rtsm_s": 900, "timeout_baseline_s": 900, "heartbeat_s": 0.25, "is_calibrated": true, "yaw_offset_rad": -0.003085, "rig_id": "hiwonder4wd-iphone-tray-v1"}, "provenance": {"git_commit": "601a458", "config_path": "C:\\Users\\konam\\Desktop\\calabi-repo\\rtsm\\examples\\rc_car_agent\\config.yaml"}, "rng_seed": 1392556810, "layout_id": null, "start_pose_id": null, "session_id": null, "tape_cm": null, "video_file": null, "notes": null}
+{"type": "event", "name": "label_early_exit", "t": 3.812, "rounds": 1, "sweeps": 0, "step": 1}
+{"type": "event", "name": "baseline_no_match", "t": 6.297, "rejected_ids": ["596988c67ccb423b", "1b1a05060be64aba"], "reason": "Neither crop shows a tissue box; first is dark fabric/carpet, second is a toy vehicle.", "sweeps": 0, "search_time_s": 3.843}
+{"type": "event", "name": "label_early_exit", "t": 4.938, "rounds": 1, "sweeps": 0, "step": 1}
+{"type": "event", "name": "baseline_no_match", "t": 14.032, "rejected_ids": ["4cb745e22812408b"], "reason": "Blurry crop shows a wooden box/shelf, no identifiable tissue box.", "sweeps": 0, "search_time_s": 4.969}
+{"type": "event", "name": "label_early_exit", "t": 20.031, "rounds": 1, "sweeps": 0, "step": 5}
+{"type": "event", "name": "baseline_no_match", "t": 37.032, "rejected_ids": ["a75df11d14644c4c"], "reason": "Crop shows dark fabric/cushion, no visible tissue box features.", "sweeps": 0, "search_time_s": 20.047}
+{"type": "event", "name": "label_early_exit", "t": 3.922, "rounds": 1, "sweeps": 0, "step": 1}
+{"type": "event", "name": "baseline_no_match", "t": 43.297, "rejected_ids": ["32b8f35a87f8415f"], "reason": "The only candidate is clearly a plastic water bottle, not a tissue box.", "sweeps": 0, "search_time_s": 4.234}
+{"type": "event", "name": "label_early_exit", "t": 19.688, "rounds": 1, "sweeps": 0, "step": 5}
+{"type": "event", "name": "baseline_no_match", "t": 66.079, "rejected_ids": ["b0bc84b7177b455e"], "reason": "Crop shows a large plastic bin/cooler, no tissue box visible.", "sweeps": 0, "search_time_s": 19.703}
+{"type": "event", "name": "label_early_exit", "t": 27.312, "rounds": 1, "sweeps": 0, "step": 7}
+{"type": "event", "name": "baseline_no_match", "t": 95.797, "rejected_ids": ["72f14b28260d4944", "2a0ae6f884974022"], "reason": "Neither crop shows a tissue box; one is a blue appliance, other a dark cloth.", "sweeps": 0, "search_time_s": 27.328}
+{"type": "event", "name": "label_early_exit", "t": 31.719, "rounds": 1, "sweeps": 0, "step": 8}
+{"type": "event", "name": "baseline_no_match", "t": 129.969, "rejected_ids": ["1b4f73bba68643ac", "22da9e2b1d444715"], "reason": "Neither crop shows a tissue box; one is a teddy bear, other a wooden furniture panel.", "sweeps": 0, "search_time_s": 31.735}
+{"type": "event", "name": "label_early_exit", "t": 19.235, "rounds": 1, "sweeps": 0, "step": 5}
+{"type": "event", "name": "baseline_no_match", "t": 151.391, "rejected_ids": ["568e85438ee34a86"], "reason": "Crop shows a dark mat/fabric, no visible tissue box.", "sweeps": 0, "search_time_s": 19.25}
+{"type": "event", "name": "label_early_exit", "t": 3.813, "rounds": 1, "sweeps": 0, "step": 1}
+{"type": "event", "name": "baseline_no_match", "t": 157.438, "rejected_ids": ["796fa1eb43b740be"], "reason": "The crop shows a wooden shelf edge with unclear contents; no identifiable tissue box.", "sweeps": 0, "search_time_s": 3.844}
+{"type": "event", "name": "label_early_exit", "t": 23.625, "rounds": 1, "sweeps": 0, "step": 6}
+{"type": "event", "name": "baseline_no_match", "t": 183.407, "rejected_ids": ["76cbb69fe15a4f63"], "reason": "Crop shows a gray fabric/carpet surface, no tissue box features visible.", "sweeps": 0, "search_time_s": 23.672}
+{"type": "event", "name": "label_early_exit", "t": 4.047, "rounds": 1, "sweeps": 0, "step": 1}
+{"type": "event", "name": "baseline_no_match", "t": 189.5, "rejected_ids": ["81733837ae364a4a"], "reason": "Blurry crop shows furniture, no identifiable tissue box.", "sweeps": 0, "search_time_s": 4.062}
+{"type": "event", "name": "label_early_exit", "t": 23.985, "rounds": 1, "sweeps": 0, "step": 6}
+{"type": "event", "name": "baseline_no_match", "t": 216.235, "rejected_ids": ["62fff976d7684cd5"], "reason": "Blurry crop shows a wooden shelf; no identifiable tissue box.", "sweeps": 0, "search_time_s": 24.016}
+{"type": "event", "name": "label_early_exit", "t": 31.812, "rounds": 1, "sweeps": 0, "step": 8}
+{"type": "event", "name": "baseline_no_match", "t": 250.532, "rejected_ids": ["7046fcdefd18423a"], "reason": "Blurry shelf scene with no identifiable tissue box.", "sweeps": 0, "search_time_s": 31.812}
+{"type": "event", "name": "label_early_exit", "t": 16.125, "rounds": 1, "sweeps": 0, "step": 4}
+{"type": "event", "name": "baseline_no_match", "t": 269.188, "rejected_ids": ["72196f15786340bb"], "reason": "Dark blurry crop shows a blue container/lid, no visible tissue box features.", "sweeps": 0, "search_time_s": 16.125}
+{"type": "event", "name": "label_early_exit", "t": 3.891, "rounds": 1, "sweeps": 0, "step": 1}
+{"type": "event", "name": "baseline_no_match", "t": 275.657, "rejected_ids": ["f72d47da5a354ae0", "45116cb76b3143e1"], "reason": "Both crops show dark fabric/cushion material with no visible tissue box features.", "sweeps": 0, "search_time_s": 3.922}
+{"type": "event", "name": "round_no_candidates", "t": 47.562, "rounds": 1, "sweeps": 1, "retrieval": "semantic"}
+{"type": "event", "name": "relocate_steered", "t": 47.797, "rotate_steps": 5, "mode": "open", "stride_m": 0.397, "sweeps": 1}
+{"type": "event", "name": "label_early_exit", "t": 80.734, "rounds": 2, "sweeps": 1, "step": 2}
+{"type": "event", "name": "baseline_no_match", "t": 358.954, "rejected_ids": ["74ca14d031e8491a", "8b9ced6583dd4119"], "reason": "Neither crop shows a tissue box; they show plastic storage bins/cooler.", "sweeps": 1, "search_time_s": 80.765}
+{"type": "event", "name": "label_early_exit", "t": 3.828, "rounds": 1, "sweeps": 0, "step": 1}
+{"type": "event", "name": "baseline_no_match", "t": 365.469, "rejected_ids": ["8835db6f3d3d472b", "c5bc0f7f732a4aa7", "f7c5592e871b4a5a"], "reason": "No crop clearly shows a tissue box; images show appliances and a wooden bin with vague white items.", "sweeps": 0, "search_time_s": 3.859}
+{"type": "event", "name": "label_early_exit", "t": 19.922, "rounds": 1, "sweeps": 0, "step": 5}
+{"type": "event", "name": "baseline_no_match", "t": 387.672, "rejected_ids": ["f824abb4e1084704"], "reason": "Crop is blurry and dark, showing no identifiable tissue box features.", "sweeps": 0, "search_time_s": 19.953}
+{"type": "event", "name": "label_early_exit", "t": 23.688, "rounds": 1, "sweeps": 0, "step": 6}
+{"type": "event", "name": "baseline_no_match", "t": 414.079, "rejected_ids": ["897334773dab4304", "1010f010456c435c"], "reason": "Neither crop shows a tissue box; one is a red tool, the other a blue cooler/bin.", "sweeps": 0, "search_time_s": 23.703}
+{"type": "event", "name": "label_early_exit", "t": 23.812, "rounds": 1, "sweeps": 0, "step": 6}
+{"type": "event", "name": "baseline_no_match", "t": 439.985, "rejected_ids": ["f1438c86154240be"], "reason": "Crop shows a clear plastic storage bin, not a tissue box.", "sweeps": 0, "search_time_s": 23.843}
+{"type": "event", "name": "label_early_exit", "t": 23.39, "rounds": 1, "sweeps": 0, "step": 6}
+{"type": "event", "name": "baseline_no_match", "t": 466.157, "rejected_ids": ["d43f83381a224957", "b1b2de327b1c4443"], "reason": "Neither crop shows a tissue box; one is a blue cooler, the other a dark bag.", "sweeps": 0, "search_time_s": 23.422}
+{"type": "event", "name": "label_early_exit", "t": 11.922, "rounds": 1, "sweeps": 0, "step": 3}
+{"type": "event", "name": "baseline_no_match", "t": 480.329, "rejected_ids": ["ac5c6203a4bb4a33"], "reason": "The only candidate is an ambiguous patterned box-like object, not clearly a tissue box.", "sweeps": 0, "search_time_s": 11.937}
+{"type": "trial_end", "trial_id": "t20260903-170714-011", "result": "not_found", "detail": "search cap 480s exhausted -> concluded not found (last standpoint judged no-match)", "elapsed_s": 480.329, "ticks": 0, "final_dist_m": null, "tta_s": null, "censored": false, "rtsm_stats": {"objects": 16, "confirmed": 15, "upserts_total": 1017}, "ended_at": "2026-09-03T17:15:15"}
