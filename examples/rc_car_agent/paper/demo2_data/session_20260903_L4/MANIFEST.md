@@ -9,18 +9,18 @@ pairs, campaign-wide (sheet printed search-first; see L4-D1).
 
 | Row | Cond | Goal | Trial file | Result | TTA (s) | Tape (cm) | Notes |
 |----|------|------|-----------|--------|---------|-----------|-------|
-| (2) | memory | tissue box | t20260903-152321-001 | arrived | 40.7 | ___ | arbiter skipped ghost record, picked real box |
-| (1) | search | tissue box | t20260903-153951-003 | arrived | 87.2 | ___ | 2nd attempt (livelock void below) |
-| (4) | memory | scissors | t20260903-154311-004 | arrived | 29.2 | ___ | |
-| (3) | search | scissors | t20260903-154518-005 | arrived | 120.2 | ___ | fastest scissors search of campaign |
-| (6) | memory | teddy bear | t20260903-154926-006 | arrived | 31.8 | ___ | |
-| (5) | search | teddy bear | t20260903-160622-001 | arrived | 58.0 | ___ | post-reset scan #2; operator observed enlarged standoff (pose drift) — tape decides |
+| (2) | memory | tissue box | t20260903-152321-001 | arrived | 40.7 | 48 direct | arbiter skipped ghost record, picked real box |
+| (1) | search | tissue box | t20260903-153951-003 | arrived | 87.2 | 18 (0) | 2nd attempt (livelock void below) |
+| (4) | memory | scissors | t20260903-154311-004 | arrived | 29.2 | 66 direct — OVER 50: the campaign's only believed-arrived-but-tape-failed row (pose-spike coordinate); headline FAILURE | |
+| (3) | search | scissors | t20260903-154518-005 | arrived | 120.2 | 26 direct | fastest scissors search of campaign |
+| (6) | memory | teddy bear | t20260903-154926-006 | arrived | 31.8 | 50 direct — exactly at threshold (pass @50, fail @40 band) | |
+| (5) | search | teddy bear | t20260903-160622-001 | arrived | 58.0 | 18 (0) | post-reset scan #2; operator observed enlarged standoff (pose drift) — tape decides |
 | (8) | memory | water bottle | t20260903-161105-002 | not_found | — | — | VALID MEMORY FAILURE (2nd of campaign, replicates L3): thin 3-hit bottle record, arbiter refused all crops; 0 ticks. Operator requested redo; REFUSED per symmetry rule. |
-| (7) | search | water bottle | t20260903-161429-003 | arrived | 71.3 | ___ | live crop accepted instantly — L3 bottle asymmetry replicated in full |
-| (10) | memory | dumbbell | t20260903-161635-004 | arrived | 43.2 | ___ | first GDINO-native dumbbell record of campaign (6 hits, 0.93); open-floor placement |
-| (9) | search | dumbbell | t20260903-162431-006 | arrived | 87.8 | ___ | 2nd attempt (void below). FIRST successful dumbbell search of campaign (was 0-for-3) — open floor fixed the centroid corruption for BOTH arms |
+| (7) | search | water bottle | t20260903-161429-003 | arrived | 71.3 | 18 (0) | live crop accepted instantly — L3 bottle asymmetry replicated in full |
+| (10) | memory | dumbbell | t20260903-161635-004 | arrived | 43.2 | 18 (0) | first GDINO-native dumbbell record of campaign (6 hits, 0.93); open-floor placement |
+| (9) | search | dumbbell | t20260903-162431-006 | arrived | 87.8 | 38 direct | 2nd attempt (void below). FIRST successful dumbbell search of campaign (was 0-for-3) — open floor fixed the centroid corruption for BOTH arms |
 | (12) | memory | tissue box (repeat) | t20260903-163005-007 | not_found | — | — | VALID MEMORY FAILURE (3rd): GHOST DOMINANCE — mat+trash-bag corner minted 41-hit stab-1.00 "tissue box" record (crop = gray mat, operator-confirmed); real box unminted; arbiter correctly refused to drive to a mat. |
-| (11) | search | tissue box (repeat) | t20260903-170714-011 | not_found | — | — | 4th attempt (3 voids below). FIRST GENUINE SEARCH-CAP TIMEOUT of campaign: full 480 s exhausted, last standpoint judged no-match; feed healthy throughout. VALID BASELINE FAILURE. Repeat pair failed in BOTH arms (mem: ghost dominance; search: cap). |
+| (11) | search | tissue box (repeat) | t20260903-170714-011 | not_found | — | — | 4th attempt (3 voids below). Ended 72 cm direct from box (secondary-only tape). FIRST GENUINE SEARCH-CAP TIMEOUT of campaign: full 480 s exhausted, last standpoint judged no-match; feed healthy throughout. VALID BASELINE FAILURE. Repeat pair failed in BOTH arms (mem: ghost dominance; search: cap). |
 
 Voided / non-sheet runs (excluded from rows):
 
@@ -69,8 +69,13 @@ Voided / non-sheet runs (excluded from rows):
 
 ## Tape + photos
 
-PENDING operator batch: tapes for the 9 arrivals (gap convention,
-0 = contact, +18 cm; failures need none) + stop photos + today's
-layout shot. Note for sheet-row (5) search bear: operator observed
-enlarged standoff (pose drift) — tape number decides pass/fail
-honestly (believed-arrived-but-tape-failed bucket exists for this).
+RESOLVED 2026-09-04: full set dictated. Convention: "18 (0)" = nose
+contact under the bumper-gap convention (+18 rig constant); "N direct"
+= drive-center → object ground-center measured DIRECTLY (no +18) —
+operator's convention for non-contact stops from L4 onward, flagged
+per-trial in the JSONLs. Operator attributes the large direct values
+(48/66/50/72) to pose-spike-delayed coordinates during the jittery
+afternoon windows. Note: the operator's earlier in-session recollection
+placed the enlarged standoff on search bear; the final tape shows
+search bear at contact and MEM bear/scissors carrying the standoffs —
+dictated tape supersedes recollection. Photos pending transfer.
