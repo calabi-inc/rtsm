@@ -22,7 +22,7 @@ settings that currently have no effect. Choose from `missing`, `duplicates`,
 `pollution`, `latency`, and `search`, or omit `--symptom` for the full guide.
 
 Older configuration files may still carry keys the pipeline never read:
-`gates`, `masks`, `staging.min_area_px`, `filters.depth.valid_min_pct`,
+`masks`, `staging.min_area_px`, `filters.depth.valid_min_pct`,
 `filters.aspect_ratio`, `filters.solidity_min`, `filters.border_touch_max_pct`,
 and the `filters.border` subsection. They are reported as advisories. The live
 mask-area cutoff is `filters.min_area_px` and the live depth rejection
@@ -233,6 +233,28 @@ units:
   depth_m_per_unit: 0.001     # mm → meters
   pose_m_per_unit: 1.0        # RTABMap poses are already in meters
 ```
+
+---
+
+## Frame-Quality Gate
+
+Runs before segmentation on a strided subsample of each frame, so it costs well
+under a millisecond and saves a full segmentation pass on unusable frames:
+
+```yaml
+gates:
+  enable: true
+  min_brightness: 5.0            # mean grey level (0-255); below = dark or covered lens
+  min_std: 5.0                   # grey standard deviation; below = blank, uniform frame
+  min_depth_valid: 0.02          # fraction of finite, positive depth pixels; below = depth failure
+  sample_stride: 4               # pixel subsampling for the statistics
+```
+
+The defaults are deliberately conservative: they catch black, blank, and
+depth-less frames only. Skipped frames are counted as `frame_rejections` in the
+latency analytics and summarised in the log at most every ten seconds. Raise the
+thresholds only with replay evidence, since a frame-level gate that is too
+strict silently starves the map.
 
 ---
 

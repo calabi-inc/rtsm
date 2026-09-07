@@ -141,7 +141,6 @@ def test_guide_exposes_effective_controls_and_inactive_ones():
 
 def test_legacy_keys_in_user_config_are_advisories_not_overrides(tmp_path):
     legacy = load_config()
-    legacy["gates"] = {"min_brightness": 5, "min_std": 5, "min_depth_valid": .35}
     legacy["masks"] = {"min_coverage": .005, "max_coverage": .8, "max_border_fraction": .15}
     legacy["staging"]["min_area_px"] = 120
     legacy["filters"].update(aspect_ratio=[.2, 5.], solidity_min=.3, border_touch_max_pct=.15)
@@ -151,15 +150,23 @@ def test_legacy_keys_in_user_config_are_advisories_not_overrides(tmp_path):
     path.write_text(yaml.safe_dump(legacy), encoding="utf-8")
     cfg = load_config(path)
     warnings = validate_tuning(cfg)
-    for needle in ("gates section", "masks section", "staging.min_area_px",
+    for needle in ("masks section", "staging.min_area_px",
                    "filters.depth.valid_min_pct", "filters.aspect_ratio",
                    "filters.solidity_min", "filters.border_touch_max_pct",
                    "filters.border section"):
         assert any(needle in warning for warning in warnings), needle
-    assert "gates section is not consumed" in explain_tuning(cfg, "pollution")
+    assert "masks section is not consumed" in explain_tuning(cfg, "pollution")
     # The legacy keys no longer exist in any packaged base, so they are not valid overrides.
     with pytest.raises(ConfigError, match="Unknown or malformed override"):
-        load_config(set_values=["gates.min_brightness=5"])
+        load_config(set_values=["masks.max_coverage=0.8"])
+
+
+def test_frame_gate_controls_follow_gates_enable():
+    assert "gates.min_brightness = 5.0" in explain_tuning(load_config(), "latency")
+    off = load_config(set_values=["gates.enable=false"])
+    assert "gates.min_brightness" not in explain_tuning(off, "latency")
+    with pytest.raises(ConfigError, match="gates.min_brightness"):
+        validate_tuning(load_config(set_values=["gates.min_brightness=300"]))
 
 
 def test_upsert_mismatch_is_advisory_not_unsupported_constraint():
