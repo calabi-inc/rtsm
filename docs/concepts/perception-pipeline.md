@@ -46,6 +46,14 @@ Dual-confirmed masks receive a priority boost and are 1.5x more likely to be sel
 | `fastsam` | FastSAM only (class-agnostic, fast) | ~50 ms |
 | `yoloe` | YOLOE only (open-vocab, prompt-free) | ~60 ms |
 
+### Frame-quality gate
+
+Before any segmentation pass, the frame-quality gate (`gates.*`) measures grey
+level, contrast, and the valid-depth fraction on a strided subsample of the
+frame and skips black, blank, or depth-less frames. Skips are counted as
+`frame_rejections` in the latency analytics. See
+[Configuration](../getting-started/configuration.md#frame-quality-gate).
+
 ---
 
 ## 2. Mask Heuristics

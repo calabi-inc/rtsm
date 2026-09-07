@@ -117,6 +117,16 @@ time_sync:
   buffer_ttl_sec: 3
 
 # -------------------- Perception Pipeline --------------------
+gates:
+  # Frame-quality gate: skip frames that cannot yield usable masks before
+  # paying for a segmentation pass. Conservative defaults catch black, blank,
+  # and depth-less frames only. Raise them with replay evidence, not intuition.
+  enable: true
+  min_brightness: 5.0             # mean grey level (0-255); below = dark or covered lens
+  min_std: 5.0                    # grey standard deviation; below = blank, uniform frame
+  min_depth_valid: 0.02           # fraction of finite, positive depth pixels; below = depth failure
+  sample_stride: 4                # pixel subsampling for the statistics (<1 ms)
+
 filters:
   # Hard mask rejects. Coverage and border contact are scored softly through
   # staging.w_* below rather than rejected here; shape gates are not implemented.

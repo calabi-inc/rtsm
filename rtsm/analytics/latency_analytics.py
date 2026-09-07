@@ -48,6 +48,7 @@ class LatencySecondBucket:
     # Drop counters (per second)
     queue_drops: int = 0
     gate_rejections: int = 0
+    frame_rejections: int = 0   # frame-quality gate (gates.*)
     throttle_skips: int = 0
     tracking_drops: int = 0
     # Queue pressure
@@ -111,6 +112,7 @@ class PipelineLatencyBuffer:
 
         # Drop counters (all monotonically increasing, diffed at rollup)
         self._gate_rejections: int = 0
+        self._frame_rejections: int = 0
         self._queue_drops: int = 0
         self._throttle_skips: int = 0
         self._tracking_drops: int = 0
@@ -122,6 +124,7 @@ class PipelineLatencyBuffer:
         self._last_rollup_ts: float = time.monotonic()
         self._last_rollup_received: int = 0
         self._last_rollup_rejections: int = 0
+        self._last_rollup_frame_rejections: int = 0
         self._last_rollup_queue_drops: int = 0
         self._last_rollup_throttle_skips: int = 0
         self._last_rollup_tracking_drops: int = 0
@@ -152,6 +155,11 @@ class PipelineLatencyBuffer:
         """Called when the ingest gate rejects a frame."""
         with self._lock:
             self._gate_rejections += 1
+
+    def record_frame_rejection(self) -> None:
+        """Called when the frame-quality gate skips a frame."""
+        with self._lock:
+            self._frame_rejections += 1
 
     def record_queue_drop(self) -> None:
         """Called when IngestQueue.put() returns False (queue full)."""
@@ -195,6 +203,7 @@ class PipelineLatencyBuffer:
                 self._last_rollup_ts = now_mono
                 self._last_rollup_received = self._received_count
                 self._last_rollup_rejections = self._gate_rejections
+                self._last_rollup_frame_rejections = self._frame_rejections
                 self._last_rollup_queue_drops = self._queue_drops
                 self._last_rollup_throttle_skips = self._throttle_skips
                 self._last_rollup_tracking_drops = self._tracking_drops
@@ -216,6 +225,7 @@ class PipelineLatencyBuffer:
 
             # Drop deltas since last rollup
             gate_rej = self._gate_rejections - self._last_rollup_rejections
+            frame_rej = self._frame_rejections - self._last_rollup_frame_rejections
             q_drops = self._queue_drops - self._last_rollup_queue_drops
             throttle = self._throttle_skips - self._last_rollup_throttle_skips
             tracking = self._tracking_drops - self._last_rollup_tracking_drops
@@ -234,6 +244,7 @@ class PipelineLatencyBuffer:
                 effective_ratio=round(processing_hz / max(0.001, input_hz), 3),
                 queue_drops=q_drops,
                 gate_rejections=gate_rej,
+                frame_rejections=frame_rej,
                 throttle_skips=throttle,
                 tracking_drops=tracking,
                 queue_depth_mean=q_mean,
@@ -259,6 +270,7 @@ class PipelineLatencyBuffer:
             self._last_rollup_ts = now_mono
             self._last_rollup_received = self._received_count
             self._last_rollup_rejections = self._gate_rejections
+            self._last_rollup_frame_rejections = self._frame_rejections
             self._last_rollup_queue_drops = self._queue_drops
             self._last_rollup_throttle_skips = self._throttle_skips
             self._last_rollup_tracking_drops = self._tracking_drops
@@ -359,6 +371,7 @@ class PipelineLatencyBuffer:
             self._second_buckets.clear()
             self._received_count = 0
             self._gate_rejections = 0
+            self._frame_rejections = 0
             self._queue_drops = 0
             self._throttle_skips = 0
             self._tracking_drops = 0
@@ -366,6 +379,7 @@ class PipelineLatencyBuffer:
             self._last_rollup_ts = time.monotonic()
             self._last_rollup_received = 0
             self._last_rollup_rejections = 0
+            self._last_rollup_frame_rejections = 0
             self._last_rollup_queue_drops = 0
             self._last_rollup_throttle_skips = 0
             self._last_rollup_tracking_drops = 0

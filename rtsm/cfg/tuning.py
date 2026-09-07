@@ -21,7 +21,8 @@ class Control:
 
 
 # Defaults trace to segmentation/__init__.py, utils/mask_staging.py,
-# core/pipeline.py, core/association.py, stores/working_memory.py and run.py.
+# core/pipeline.py, core/frame_gate.py, core/association.py,
+# stores/working_memory.py and run.py.
 # None denotes a required setting whose consumer has no fallback.
 CONTROLS = (
     Control("segmentation.grounded_sam2.box_threshold", .25, ("missing", "pollution"),
@@ -39,6 +40,15 @@ CONTROLS = (
     Control("segmentation.sam2.pred_iou_thresh", .7, ("missing", "pollution"),
             "Auto-mask quality cutoff; this is not used by the grounded_sam2 factory.",
             maximum=1, backends=("sam2",)),
+    Control("gates.min_brightness", 5., ("missing", "latency"),
+            "Frame-quality gate: mean grey level below this skips the frame before segmentation.",
+            maximum=255),
+    Control("gates.min_std", 5., ("missing", "latency"),
+            "Frame-quality gate: grey standard deviation below this marks a blank frame. Plain walls at close range can trip it.",
+            maximum=255),
+    Control("gates.min_depth_valid", .02, ("missing", "pollution"),
+            "Frame-quality gate: fraction of finite, positive depth pixels below this skips the frame. Large halls and windows lower it.",
+            maximum=1),
     Control("filters.min_area_px", None, ("missing",),
             "Actual mask area cutoff in pixels. Lower for small objects; fragments may increase.",
             minimum=1, integer=True),
@@ -113,6 +123,8 @@ def active_controls(cfg: dict):
             continue
         if control.path == "assoc.cos_min" and not _get(cfg, "assoc.use_embeddings", True):
             continue
+        if control.path.startswith("gates.") and not _get(cfg, "gates.enable", True):
+            continue
         if control.path.startswith("io.websocket.") and _get(cfg, "io.receiver", "zeromq") != "websocket":
             continue
         yield control
@@ -142,7 +154,6 @@ def validate_tuning(cfg: dict) -> list[str]:
 
     warnings = []
     ineffective = (
-        ("gates", "The gates section is not consumed by the current pipeline."),
         ("masks", "The masks section is not consumed by the current pipeline."),
         ("staging.min_area_px", "staging.min_area_px has no effect; use filters.min_area_px."),
         ("filters.depth.valid_min_pct", "filters.depth.valid_min_pct has no effect; use staging.depth_valid_min."),
