@@ -134,7 +134,9 @@ def test_guide_exposes_effective_controls_and_inactive_ones():
     assert "gates section is not consumed" in report
     assert "segmentation.fastsam.conf =" not in report
     assert "not a probability of correctness" in report
-    assert "teddy bear" in report
+    assert "Detection vocabulary:" in report
+    custom = load_config(set_values=["segmentation.grounded_sam2.vocab=[teddy bear]"])
+    assert "Detection vocabulary: ['teddy bear']" in explain_tuning(custom, "pollution")
 
 
 def test_upsert_mismatch_is_advisory_not_unsupported_constraint():
