@@ -93,6 +93,7 @@ class Pipeline:
             while self._running:
                 self.run_one_step()
         except KeyboardInterrupt:
+            # Ctrl+C is a normal stop request; the finally block releases models.
             pass
         finally:
             self.shutdown()
@@ -178,7 +179,7 @@ class Pipeline:
                 try:
                     self._latency_analytics.record_gate_rejection()
                 except Exception:
-                    pass
+                    logger.debug("Failed to record ingest-gate rejection", exc_info=True)
             return
 
         t_step_start = time.perf_counter()
@@ -307,7 +308,7 @@ class Pipeline:
                     c = int(stats_assoc.get("created", 0))
                     logger.debug(f"assoc: matched={m} created={c}")
             except Exception:
-                pass
+                logger.debug("Failed to summarize association statistics", exc_info=True)
 
         t_assoc_end = time.perf_counter()
 
@@ -418,7 +419,7 @@ class Pipeline:
                 timestamp = float(pkt.time.t_wall_utc_s or pkt.time.t_mono_s or 0.0)
                 self.working_mem.update_robot_pose(twc, q, timestamp)
         except Exception:
-            pass
+            logger.warning("Post-processing ingest bookkeeping or robot-pose update failed", exc_info=True)
 
     # -------- internals --------
     def _get_snapshot_via_queue(self) -> Tuple[Optional[Snapshot], Optional[FramePacket]]:
@@ -847,11 +848,11 @@ class Pipeline:
         try:
             self.segmenter.close()
         except Exception:
-            pass
+            logger.warning("Failed to close segmenter during shutdown", exc_info=True)
         try:
             self.clip.close()
         except Exception:
-            pass
+            logger.warning("Failed to close CLIP adapter during shutdown", exc_info=True)
 
     # -------- single test  step (hardcoded import) --------
     @torch.no_grad()
