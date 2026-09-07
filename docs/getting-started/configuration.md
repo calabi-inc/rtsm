@@ -21,12 +21,13 @@ The guide shows the active backend's controls and their tradeoffs, and flags
 settings that currently have no effect. Choose from `missing`, `duplicates`,
 `pollution`, `latency`, and `search`, or omit `--symptom` for the full guide.
 
-For example, the actual mask-area cutoff is `filters.min_area_px`, not
-`staging.min_area_px`. The depth rejection fraction is
-`staging.depth_valid_min`, not `gates.min_depth_valid` or
-`filters.depth.valid_min_pct`. The `gates` and `masks` sections are not consumed
-by the current pipeline. The `segmentation.sam2` automatic-mask thresholds
-do not tune Grounded SAM2.
+Older configuration files may still carry keys the pipeline never read:
+`gates`, `masks`, `staging.min_area_px`, `filters.depth.valid_min_pct`,
+`filters.aspect_ratio`, `filters.solidity_min`, `filters.border_touch_max_pct`,
+and the `filters.border` subsection. They are reported as advisories. The live
+mask-area cutoff is `filters.min_area_px` and the live depth rejection
+fraction is `staging.depth_valid_min`. Coverage and border contact are scored
+softly through the `staging.w_*` weights rather than rejected outright.
 
 The shipped main configuration includes the RC-car experiment's five-object
 vocabulary. Inspect it before evaluating on a different scene. The demo has a
@@ -237,29 +238,25 @@ units:
 
 ## Mask Filtering & Heuristics
 
-Controls which masks pass through the perception pipeline:
+Hard rejects applied to every mask before scoring:
 
 ```yaml
-gates:
-  min_brightness: 5
-  min_std: 5
-  min_depth_valid: 0.35          # min fraction of valid depth pixels
-
-masks:
-  min_coverage: 0.005
-  max_coverage: 0.8              # reject wall/floor-sized masks
-  max_border_fraction: 0.15
-
 filters:
-  min_area_px: 500               # minimum mask area in pixels
-  aspect_ratio: [0.2, 5.0]
-  border_touch_max_pct: 0.15     # reject masks with >15% border contact
+  min_area_px: 500               # hard reject: minimum mask area in pixels
   depth:
-    z_min_m: 0.2                 # minimum depth (meters)
-    z_max_m: 8.0                 # maximum depth (meters)
-    valid_min_pct: 0.10          # min valid depth pixel fraction
-    sigma_max_m: 0.50            # max depth spread
+    z_min_m: 0.2                 # depth outside this range counts as invalid
+    z_max_m: 8.0
+    sigma_max_m: 0.50            # hard reject: max depth spread (metres)
+
+staging:
+  depth_erode_px: 1              # erode mask edges before depth statistics
+  depth_valid_min: 0.02          # hard reject: min valid-depth fraction after erosion
+  centroid_min_valid: 0.05       # min valid-depth fraction before a 3D centroid is computed
 ```
+
+Coverage, border contact, and bounding-box size are not hard gates. They enter
+the priority score through the `staging.w_*` weights in the next section, so a
+wall-sized or edge-touching mask is ranked down rather than dropped.
 
 ---
 

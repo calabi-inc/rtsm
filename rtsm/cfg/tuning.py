@@ -146,6 +146,10 @@ def validate_tuning(cfg: dict) -> list[str]:
         ("masks", "The masks section is not consumed by the current pipeline."),
         ("staging.min_area_px", "staging.min_area_px has no effect; use filters.min_area_px."),
         ("filters.depth.valid_min_pct", "filters.depth.valid_min_pct has no effect; use staging.depth_valid_min."),
+        ("filters.aspect_ratio", "filters.aspect_ratio has no effect; shape gates are not implemented."),
+        ("filters.solidity_min", "filters.solidity_min has no effect; shape gates are not implemented."),
+        ("filters.border_touch_max_pct", "filters.border_touch_max_pct has no effect; border contact is scored via staging.w_border_fraction."),
+        ("filters.border", "The filters.border section has no effect; border contact is scored via staging.w_border_fraction."),
     )
     for path, message in ineffective:
         if _get(cfg, path) is not None:
@@ -157,11 +161,6 @@ def validate_tuning(cfg: dict) -> list[str]:
         warnings.append("LTM requires more view bins than confirmation; some confirmed objects may be absent from semantic search.")
     if not _get(cfg, "vectors.enable", True):
         warnings.append("Vector storage is disabled; semantic search will be unavailable.")
-    if backend == "grounded_sam2":
-        for key in ("pred_iou_thresh", "stability_score_thresh", "points_per_side"):
-            if _get(cfg, f"segmentation.sam2.{key}") is not None:
-                warnings.append("SAM2 automatic-mask thresholds/grid settings do not configure grounded_sam2; only sam2.model_id supplies its fallback model.")
-                break
     return warnings
 
 
