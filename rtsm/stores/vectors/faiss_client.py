@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import logging
 import os
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import numpy as np
 import faiss
+
+logger = logging.getLogger(__name__)
+
 
 class FaissClient:
     """
@@ -157,8 +161,16 @@ class FaissClient:
         if self.persistent_path:
             try:
                 self.save(self.persistent_path)
-            except Exception:
-                pass
+            except Exception as e:
+                # A failed post-reset save is dangerous, not ignorable: the
+                # pre-reset vectors are still on disk, so the next process
+                # restart resurrects them as ghost objects. Keep /reset
+                # non-fatal, but say so loudly.
+                logger.warning(
+                    f"[faiss] failed to persist cleared index after reset: {e} "
+                    f"-- on-disk store still holds pre-reset vectors; a restart "
+                    f"will resurrect them until a save succeeds"
+                )
         return {"vectors_cleared": vec_count}
 
     def save(self, path: str) -> None:
