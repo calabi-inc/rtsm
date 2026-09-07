@@ -70,8 +70,21 @@ def run_demo(argv: list[str] | None = None) -> None:
         description="Run RTSM demo with pre-recorded data",
     )
     parser.add_argument("--no-viz", action="store_true", help="Skip visualization server")
-    parser.add_argument("--port", type=int, default=8002, help="API/UI port (default: 8002)")
+    parser.add_argument("--port", type=int, default=None, help="API/UI port (default: configured api.port, normally 8002)")
+    from rtsm.cfg import ConfigError, cfg_path, config_fingerprint
+    from rtsm.cfg.cli import add_config_arguments, config_from_args
+    from rtsm.cfg.tuning import validate_tuning
+    add_config_arguments(parser)
     args = parser.parse_args(argv or [])
+    try:
+        cfg = config_from_args(args, "demo_config.yaml")
+    except (ConfigError, OSError) as exc:
+        parser.error(str(exc))
+    if args.port is not None:
+        cfg.setdefault("api", {})["port"] = args.port
+    if args.no_viz:
+        cfg.setdefault("visualization", {})["enable"] = False
+    args.port = int(cfg.get("api", {}).get("port", 8002))
 
     print("=" * 60)
     print("  RTSM Demo - Real-Time Spatio-Semantic Memory")
@@ -99,13 +112,14 @@ def run_demo(argv: list[str] | None = None) -> None:
 
     # ── Load config ──
     print("  [2/5] Loading configuration...")
-    from rtsm.cfg import load_config, cfg_path
-    cfg = load_config("demo_config.yaml")
-    print(f"        Config: {cfg_path('demo_config.yaml')}")
+    print(f"        Config: {cfg_path(args.config if args.config is not None else 'demo_config.yaml')}")
+    print(f"        Config SHA-256: {config_fingerprint(cfg)}")
+    for advisory in validate_tuning(cfg):
+        logger.warning("Configuration: %s", advisory)
     print(f"        Backend: {cfg['segmentation']['backend']}")
 
     # ── Load models ──
-    print("  [3/5] Loading segmentation model (grounded_sam2)...")
+    print(f"  [3/5] Loading segmentation model ({cfg['segmentation']['backend']})...")
     print("        (Downloads ~1GB from HuggingFace on first run)")
     from rtsm.models.segmentation import get_segmenter
     segmenter = get_segmenter(cfg)
