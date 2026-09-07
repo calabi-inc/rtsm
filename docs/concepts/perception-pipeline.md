@@ -54,13 +54,12 @@ Heuristic filters remove unsuitable masks using depth and geometric information:
 
 | Filter | Purpose | Config key |
 |--------|---------|------------|
-| Min area | Remove noise/tiny fragments | `filters.min_area_px` (500) |
-| Max coverage | Remove walls/floors/background | `masks.max_coverage` (0.8) |
-| Aspect ratio | Remove extreme shapes | `filters.aspect_ratio` ([0.2, 5.0]) |
-| Border contact | Reject masks touching frame edges | `filters.border_touch_max_pct` (0.15) |
-| Depth validity | Require minimum valid depth pixels | `filters.depth.valid_min_pct` (0.10) |
-| Depth range | Reject too close/far objects | `filters.depth.z_min_m` / `z_max_m` |
-| Depth spread | Reject noisy depth regions | `filters.depth.sigma_max_m` (0.50) |
+| Min area | Remove noise/tiny fragments (hard reject) | `filters.min_area_px` (500) |
+| Depth range | Depth outside the range counts as invalid | `filters.depth.z_min_m` / `z_max_m` |
+| Depth validity | Reject masks with too little valid depth after edge erosion (hard reject) | `staging.depth_valid_min` (0.02), `staging.depth_erode_px` (1) |
+| Depth spread | Reject noisy depth regions (hard reject) | `filters.depth.sigma_max_m` (0.50) |
+| 3D centroid | Minimum valid depth before a 3D centroid is computed | `staging.centroid_min_valid` (0.05) |
+| Coverage / border | Rank down wall-sized or edge-touching masks (soft, see Top-K) | `staging.w_coverage`, `coverage_soft_cap`, `w_coverage_oversize`, `w_border_fraction` |
 | Planarity | Detect and score planar surfaces | `planarity.*` |
 
 !!! note "Heuristics cost varies by backend"

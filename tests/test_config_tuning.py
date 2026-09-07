@@ -130,13 +130,36 @@ def test_guide_exposes_effective_controls_and_inactive_ones():
     cfg = load_config()
     report = explain_tuning(cfg, "pollution")
     assert "staging.depth_valid_min = 0.02" in report
-    assert "filters.depth.valid_min_pct has no effect" in report
-    assert "gates section is not consumed" in report
+    # Packaged defaults carry no legacy keys, so no ineffective-setting advisories.
+    assert "has no effect" not in report and "not consumed" not in report
     assert "segmentation.fastsam.conf =" not in report
     assert "not a probability of correctness" in report
     assert "Detection vocabulary:" in report
     custom = load_config(set_values=["segmentation.grounded_sam2.vocab=[teddy bear]"])
     assert "Detection vocabulary: ['teddy bear']" in explain_tuning(custom, "pollution")
+
+
+def test_legacy_keys_in_user_config_are_advisories_not_overrides(tmp_path):
+    legacy = load_config()
+    legacy["gates"] = {"min_brightness": 5, "min_std": 5, "min_depth_valid": .35}
+    legacy["masks"] = {"min_coverage": .005, "max_coverage": .8, "max_border_fraction": .15}
+    legacy["staging"]["min_area_px"] = 120
+    legacy["filters"].update(aspect_ratio=[.2, 5.], solidity_min=.3, border_touch_max_pct=.15)
+    legacy["filters"]["depth"]["valid_min_pct"] = .1
+    legacy["filters"]["border"] = {"partial_min_pct": .3, "extreme_drop_pct": .9, "tiny_px": 150}
+    path = tmp_path / "legacy.yaml"
+    path.write_text(yaml.safe_dump(legacy), encoding="utf-8")
+    cfg = load_config(path)
+    warnings = validate_tuning(cfg)
+    for needle in ("gates section", "masks section", "staging.min_area_px",
+                   "filters.depth.valid_min_pct", "filters.aspect_ratio",
+                   "filters.solidity_min", "filters.border_touch_max_pct",
+                   "filters.border section"):
+        assert any(needle in warning for warning in warnings), needle
+    assert "gates section is not consumed" in explain_tuning(cfg, "pollution")
+    # The legacy keys no longer exist in any packaged base, so they are not valid overrides.
+    with pytest.raises(ConfigError, match="Unknown or malformed override"):
+        load_config(set_values=["gates.min_brightness=5"])
 
 
 def test_upsert_mismatch_is_advisory_not_unsupported_constraint():
