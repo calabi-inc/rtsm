@@ -8,6 +8,7 @@ import torch
 import cv2
 from PIL import Image
 
+from rtsm.core.frame_gate import FrameQualityGate
 from rtsm.utils.mask_staging import run_heuristics, MaskStats
 from rtsm.utils.prepare_ann import prepare_ann
 from rtsm.utils.periodic_logger import PeriodicLogger
@@ -76,6 +77,8 @@ class Pipeline:
         # Frames dropped because a present pose failed matrix conversion
         # (exposed via /stats; see _get_snapshot_via_queue)
         self.pose_conversion_failures = 0
+        # Frame-quality gate (gates.*): skips unusable frames before segmentation
+        self.frame_gate = FrameQualityGate(cfg)
         # Frame-flow heartbeat read by the watchdog (see rtsm/core/watchdog.py)
         self.heartbeat = PipelineHeartbeat()
 
@@ -182,6 +185,23 @@ class Pipeline:
                     self._latency_analytics.record_gate_rejection()
                 except Exception:
                     pass
+            return
+
+        # Frame-quality gate: skip black, blank, or depth-less frames before paying
+        # for a segmentation pass. Keyframe bookkeeping above has already run, and
+        # record_processed() below is skipped, so the sweep cache is not marked.
+        try:
+            fq = self.frame_gate.check(snap.rgb, snap.depth_m)
+        except Exception as e:
+            logger.warning(f"frame-quality gate error; proceeding: {e}")
+            fq = None
+        if fq is not None and not fq.accept:
+            if self._latency_analytics:
+                try:
+                    self._latency_analytics.record_frame_rejection()
+                except Exception:
+                    pass
+            self.frame_gate.maybe_log(fq)
             return
 
         t_step_start = time.perf_counter()

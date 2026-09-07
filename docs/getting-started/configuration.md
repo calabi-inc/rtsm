@@ -1,12 +1,91 @@
 # Configuration
 
-RTSM is configured via `config/rtsm.yaml`. This page covers the main settings grouped by section.
+RTSM ships its defaults in `rtsm/cfg/rtsm.yaml` and uses
+`rtsm/cfg/demo_config.yaml` for `rtsm demo`. A source checkout may also have a
+`config/` symlink. You can tune a small override file without editing the package.
+
+## Start with the symptom
+
+These commands work with core dependencies, without loading models or a GPU:
+
+From a source checkout, `python -m rtsm config ...` uses the checkout directly
+without requiring an updated console-script installation.
+
+```bash
+rtsm config explain --symptom pollution
+rtsm config explain --symptom duplicates
+rtsm config explain --demo --symptom missing
+```
+
+The guide shows the active backend's controls and their tradeoffs, and flags
+settings that currently have no effect. Choose from `missing`, `duplicates`,
+`pollution`, `latency`, and `search`, or omit `--symptom` for the full guide.
+
+Older configuration files may still carry keys the pipeline never read:
+`masks`, `staging.min_area_px`, `filters.depth.valid_min_pct`,
+`filters.aspect_ratio`, `filters.solidity_min`, `filters.border_touch_max_pct`,
+and the `filters.border` subsection. They are reported as advisories. The live
+mask-area cutoff is `filters.min_area_px` and the live depth rejection
+fraction is `staging.depth_valid_min`. Coverage and border contact are scored
+softly through the `staging.w_*` weights rather than rejected outright.
+
+The shipped main configuration includes the RC-car experiment's five-object
+vocabulary. Inspect it before evaluating on a different scene. The demo has a
+different vocabulary and confirmation policy. Neither is a universal reliability
+preset.
+
+## Repeatable tuning
+
+Save just the values you want to investigate in a file such as `room.yaml`:
+
+```yaml
+# An experiment, not a calibrated recommendation.
+staging:
+  depth_valid_min: 0.10
+```
+
+Then inspect, validate and replay the same profile:
+
+```bash
+rtsm config explain --profile room.yaml --symptom pollution
+rtsm config validate --profile room.yaml
+rtsm --replay recordings/my-room --profile room.yaml
+rtsm demo --profile room.yaml
+```
+
+Precedence is **base configuration → profiles in order → `--set` values in
+order**. Nested mappings merge; lists replace. Omitted settings retain their
+base values. Use `--profile` for a small patch; `--config` selects a complete
+base file. Both runners support these flags. The demo's `--port` and `--no-viz`
+flags take precedence over configuration values.
+
+```bash
+rtsm config show --profile room.yaml --set object.promote_hits=3 > trial.yaml
+rtsm --replay recordings/my-room --config trial.yaml
+```
+
+`show` writes valid YAML to stdout and advisories to stderr. Each resolved
+configuration has a SHA-256 fingerprint, also printed at runner startup.
+Keep the snapshot with the recording and evaluation results. The fingerprint
+identifies settings, not model weights, input data or code version.
+
+Profiles and `--set` reject unknown paths to catch typos. They accept settings
+from the shipped configurations, documented tuning controls, and any additional
+expert settings already declared in your complete `--config` file. Validation
+covers the documented tuning controls; it is not a complete schema or a check
+of hardware/model compatibility.
+
+Restart to apply a profile. There is no live-update API yet: component
+constructors cache some values. Change one suspected cause, compare against the
+same replay, and inspect wrong identities, misses, position error and stage
+latency. More confirmed objects alone does not establish better quality.
 
 ---
 
-## Minimal Configuration
+## Minimal setup profile
 
-A minimal config to get started — most defaults are sensible:
+For example, use the following as a `--profile` layered over the packaged
+defaults. Incoming per-frame intrinsics take precedence in the pipeline:
 
 ```yaml
 camera:
@@ -157,31 +236,49 @@ units:
 
 ---
 
-## Mask Filtering & Heuristics
+## Frame-Quality Gate
 
-Controls which masks pass through the perception pipeline:
+Runs before segmentation on a strided subsample of each frame, so it costs well
+under a millisecond and saves a full segmentation pass on unusable frames:
 
 ```yaml
 gates:
-  min_brightness: 5
-  min_std: 5
-  min_depth_valid: 0.35          # min fraction of valid depth pixels
-
-masks:
-  min_coverage: 0.005
-  max_coverage: 0.8              # reject wall/floor-sized masks
-  max_border_fraction: 0.15
-
-filters:
-  min_area_px: 500               # minimum mask area in pixels
-  aspect_ratio: [0.2, 5.0]
-  border_touch_max_pct: 0.15     # reject masks with >15% border contact
-  depth:
-    z_min_m: 0.2                 # minimum depth (meters)
-    z_max_m: 8.0                 # maximum depth (meters)
-    valid_min_pct: 0.10          # min valid depth pixel fraction
-    sigma_max_m: 0.50            # max depth spread
+  enable: true
+  min_brightness: 5.0            # mean grey level (0-255); below = dark or covered lens
+  min_std: 5.0                   # grey standard deviation; below = blank, uniform frame
+  min_depth_valid: 0.02          # fraction of finite, positive depth pixels; below = depth failure
+  sample_stride: 4               # pixel subsampling for the statistics
 ```
+
+The defaults are deliberately conservative: they catch black, blank, and
+depth-less frames only. Skipped frames are counted as `frame_rejections` in the
+latency analytics and summarised in the log at most every ten seconds. Raise the
+thresholds only with replay evidence, since a frame-level gate that is too
+strict silently starves the map.
+
+---
+
+## Mask Filtering & Heuristics
+
+Hard rejects applied to every mask before scoring:
+
+```yaml
+filters:
+  min_area_px: 500               # hard reject: minimum mask area in pixels
+  depth:
+    z_min_m: 0.2                 # depth outside this range counts as invalid
+    z_max_m: 8.0
+    sigma_max_m: 0.50            # hard reject: max depth spread (metres)
+
+staging:
+  depth_erode_px: 1              # erode mask edges before depth statistics
+  depth_valid_min: 0.02          # hard reject: min valid-depth fraction after erosion
+  centroid_min_valid: 0.05       # min valid-depth fraction before a 3D centroid is computed
+```
+
+Coverage, border contact, and bounding-box size are not hard gates. They enter
+the priority score through the `staging.w_*` weights in the next section, so a
+wall-sized or edge-touching mask is ranked down rather than dropped.
 
 ---
 

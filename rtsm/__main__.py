@@ -1,5 +1,5 @@
 import logging
-from .run import main
+from .cli import main
 
 # Configure process-wide logging once at entrypoint
 logging.basicConfig(

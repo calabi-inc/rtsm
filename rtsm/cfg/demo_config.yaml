@@ -118,29 +118,23 @@ time_sync:
 
 # -------------------- Perception Pipeline --------------------
 gates:
-  min_brightness: 5
-  min_std: 5
-  min_depth_valid: 0.40              # DEMO: slightly stricter
-
-masks:
-  min_coverage: 0.005
-  max_coverage: 0.8
-  max_border_fraction: 0.15
+  # Frame-quality gate: skip frames that cannot yield usable masks before
+  # paying for a segmentation pass. Conservative defaults catch black, blank,
+  # and depth-less frames only. Raise them with replay evidence, not intuition.
+  enable: true
+  min_brightness: 5.0             # mean grey level (0-255); below = dark or covered lens
+  min_std: 5.0                    # grey standard deviation; below = blank, uniform frame
+  min_depth_valid: 0.02           # fraction of finite, positive depth pixels; below = depth failure
+  sample_stride: 4                # pixel subsampling for the statistics (<1 ms)
 
 filters:
+  # Hard mask rejects. Coverage and border contact are scored softly through
+  # staging.w_* below rather than rejected here; shape gates are not implemented.
   min_area_px: 400                   # DEMO: lower to catch smaller objects (dolls, toys)
-  aspect_ratio: [0.2, 5.0]
-  solidity_min: 0.3
-  border_touch_max_pct: 0.15
   depth:
     z_min_m: 0.2
     z_max_m: 8.0
-    valid_min_pct: 0.10
     sigma_max_m: 0.35                # DEMO: tighter depth spread
-  border:
-    partial_min_pct: 0.30
-    extreme_drop_pct: 0.90
-    tiny_px: 150
 
 structure:
   enable: true
@@ -157,7 +151,6 @@ planarity:
 
 # -------------------- Staging --------------------
 staging:
-  min_area_px: 120
   centroid_min_valid: 0.05
   depth_valid_min: 0.02
   depth_erode_px: 1
