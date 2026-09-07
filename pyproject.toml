@@ -63,8 +63,8 @@ all = [
 ]
 
 [project.scripts]
-rtsm = "rtsm.run:main"
-rtsm-run = "rtsm.run:main"
+rtsm = "rtsm.cli:main"
+rtsm-run = "rtsm.cli:main"
 rtsm-mcp = "rtsm.io.mcp_server:main_sync"
 
 [build-system]

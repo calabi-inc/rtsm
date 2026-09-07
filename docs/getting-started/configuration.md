@@ -1,12 +1,90 @@
 # Configuration
 
-RTSM is configured via `config/rtsm.yaml`. This page covers the main settings grouped by section.
+RTSM ships its defaults in `rtsm/cfg/rtsm.yaml` and uses
+`rtsm/cfg/demo_config.yaml` for `rtsm demo`. A source checkout may also have a
+`config/` symlink. You can tune a small override file without editing the package.
+
+## Start with the symptom
+
+These commands work with core dependencies, without loading models or a GPU:
+
+From a source checkout, `python -m rtsm config ...` uses the checkout directly
+without requiring an updated console-script installation.
+
+```bash
+rtsm config explain --symptom pollution
+rtsm config explain --symptom duplicates
+rtsm config explain --demo --symptom missing
+```
+
+The guide shows the active backend's controls and their tradeoffs, and flags
+settings that currently have no effect. Choose from `missing`, `duplicates`,
+`pollution`, `latency`, and `search`, or omit `--symptom` for the full guide.
+
+For example, the actual mask-area cutoff is `filters.min_area_px`, not
+`staging.min_area_px`. The depth rejection fraction is
+`staging.depth_valid_min`, not `gates.min_depth_valid` or
+`filters.depth.valid_min_pct`. The `gates` and `masks` sections are not consumed
+by the current pipeline. The `segmentation.sam2` automatic-mask thresholds
+do not tune Grounded SAM2.
+
+The shipped main configuration includes the RC-car experiment's five-object
+vocabulary. Inspect it before evaluating on a different scene. The demo has a
+different vocabulary and confirmation policy. Neither is a universal reliability
+preset.
+
+## Repeatable tuning
+
+Save just the values you want to investigate in a file such as `room.yaml`:
+
+```yaml
+# An experiment, not a calibrated recommendation.
+staging:
+  depth_valid_min: 0.10
+```
+
+Then inspect, validate and replay the same profile:
+
+```bash
+rtsm config explain --profile room.yaml --symptom pollution
+rtsm config validate --profile room.yaml
+rtsm --replay recordings/my-room --profile room.yaml
+rtsm demo --profile room.yaml
+```
+
+Precedence is **base configuration → profiles in order → `--set` values in
+order**. Nested mappings merge; lists replace. Omitted settings retain their
+base values. Use `--profile` for a small patch; `--config` selects a complete
+base file. Both runners support these flags. The demo's `--port` and `--no-viz`
+flags take precedence over configuration values.
+
+```bash
+rtsm config show --profile room.yaml --set object.promote_hits=3 > trial.yaml
+rtsm --replay recordings/my-room --config trial.yaml
+```
+
+`show` writes valid YAML to stdout and advisories to stderr. Each resolved
+configuration has a SHA-256 fingerprint, also printed at runner startup.
+Keep the snapshot with the recording and evaluation results. The fingerprint
+identifies settings, not model weights, input data or code version.
+
+Profiles and `--set` reject unknown paths to catch typos. They accept settings
+from the shipped configurations, documented tuning controls, and any additional
+expert settings already declared in your complete `--config` file. Validation
+covers the documented tuning controls; it is not a complete schema or a check
+of hardware/model compatibility.
+
+Restart to apply a profile. There is no live-update API yet: component
+constructors cache some values. Change one suspected cause, compare against the
+same replay, and inspect wrong identities, misses, position error and stage
+latency. More confirmed objects alone does not establish better quality.
 
 ---
 
-## Minimal Configuration
+## Minimal setup profile
 
-A minimal config to get started — most defaults are sensible:
+For example, use the following as a `--profile` layered over the packaged
+defaults. Incoming per-frame intrinsics take precedence in the pipeline:
 
 ```yaml
 camera:

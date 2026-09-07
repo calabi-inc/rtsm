@@ -31,7 +31,9 @@ from rtsm.utils.net import print_server_addresses, get_local_ipv4_addresses
 from rtsm.utils.static_dir import find_static_dir
 from rtsm.stores.sweep_policy import SweepPolicy
 from rtsm.api.server import create_app, start_server, ResetComponents
-from rtsm.cfg import load_config, cfg_path
+from rtsm.cfg import ConfigError, cfg_path, config_fingerprint
+from rtsm.cfg.cli import add_config_arguments, config_from_args
+from rtsm.cfg.tuning import validate_tuning
 
 import argparse
 import sys
@@ -68,7 +70,12 @@ def main():
                         help="Replay speed multiplier (<1 = slower, e.g. 0.5 = half speed)")
     parser.add_argument("--record-only", action="store_true",
                         help="Record without running pipeline (no GPU needed)")
+    add_config_arguments(parser)
     args = parser.parse_args()
+    try:
+        cfg = config_from_args(args)
+    except (ConfigError, OSError) as exc:
+        parser.error(str(exc))
 
     print("=" * 60)
     print("  RTSM - Real-Time Spatio-Semantic Memory")
@@ -81,8 +88,11 @@ def main():
         print("For CUDA support, add:  --extra-index-url https://download.pytorch.org/whl/cu128")
         return
 
-    cfg = load_config("rtsm.yaml")
-    logger.info(f"Configuration loaded from {cfg_path('rtsm.yaml')}")
+    logger.info("Configuration loaded: %s (SHA-256 %s)",
+                cfg_path(args.config if args.config is not None else "rtsm.yaml"),
+                config_fingerprint(cfg))
+    for advisory in validate_tuning(cfg):
+        logger.warning("Configuration: %s", advisory)
 
     # ── Record-only mode: skip all heavy init, just record raw WebSocket ──
     if args.record and args.record_only:
