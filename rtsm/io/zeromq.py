@@ -52,6 +52,7 @@ class ZeroMQSubscriber:
         on_kf_pose_update: Optional[Callable[..., Any]] = None,
         latency_analytics: Optional[Any] = None,
         event_sink: Optional[Callable[[Any], None]] = None,
+        throttle_clock: str = "wall",
     ) -> None:
         """
         Initialize dual-socket ZMQ subscriber.
@@ -118,8 +119,12 @@ class ZeroMQSubscriber:
         self._last_pose_t_wc: Optional[np.ndarray] = None
         self._last_pose_q_xyzw: Optional[np.ndarray] = None
 
-        # Throttle non-keyframe enqueuing (pipeline can't keep up with 30Hz)
+        # Throttle non-keyframe enqueuing (pipeline can't keep up with 30Hz).
+        # Stamps advance on the ADMIT decision, not on enqueue. "wall" compares
+        # process time, "sensor" compares the pose timestamps (ingest.clock).
+        self._throttle_clock = "sensor" if str(throttle_clock).lower() == "sensor" else "wall"
         self._last_nonkf_enq_mono: float = 0.0
+        self._last_nonkf_admit_sensor_ns: Optional[int] = None
         # Frame-flow trace sink (ReceiverEvent per decision); None = off.
         self._event_sink = event_sink
         self._nonkf_min_interval_s: float = 0.5  # Max ~2 non-KF per second
@@ -482,13 +487,14 @@ class ZeroMQSubscriber:
             self._trace_rx(RX_DROPPED, RX_DUPLICATE_TS, ts_ns, is_keyframe)
             return
 
-        # Throttle non-keyframes to avoid overwhelming the pipeline
-        now_mono = time.monotonic()
-        if not is_keyframe:
-            elapsed = now_mono - self._last_nonkf_enq_mono
-            if elapsed < self._nonkf_min_interval_s:
-                self._trace_rx(RX_DROPPED, RX_THROTTLE, ts_ns, is_keyframe)
-                return  # Skip, too soon since last non-KF
+        # Throttle non-keyframes to avoid overwhelming the pipeline. Check
+        # first (cheap), assemble, then STAMP: a pose whose camera frame has
+        # not arrived yet is not an admission and must not burn the window —
+        # the next pose ~33 ms later retries. A full queue after the stamp
+        # still thins (the stamp does not depend on put() succeeding).
+        if not is_keyframe and not self._nonkf_due(ts_ns):
+            self._trace_rx(RX_DROPPED, RX_THROTTLE, ts_ns, is_keyframe)
+            return  # Skip, too soon since last non-KF
 
         # Assemble frame data from window
         rgb, depth, intr = self.fw.assemble_pair(ts_ns)
@@ -496,6 +502,8 @@ class ZeroMQSubscriber:
             # No matching camera frame yet
             self._trace_rx(RX_DROPPED, RX_NO_CAMERA_FRAME, ts_ns, is_keyframe)
             return
+        if not is_keyframe:
+            self._stamp_nonkf(ts_ns)
 
         # Build pose
         pose = PoseStamped(
@@ -530,8 +538,6 @@ class ZeroMQSubscriber:
         if ok:
             self.last_enqueue_mono = time.monotonic()
             self._last_enq_ts_ns = ts_ns
-            if not is_keyframe:
-                self._last_nonkf_enq_mono = now_mono
             frame_type = "KF" if is_keyframe else "frame"
             logger.debug(f"[zmq] enqueued {frame_type} -> queue={self.ingest_q.qsize()}")
             self._trace_rx(RX_ENQUEUED, "", ts_ns, is_keyframe)
@@ -541,6 +547,27 @@ class ZeroMQSubscriber:
             frame_type = "keyframe" if is_keyframe else "non-KF"
             logger.warning(f"[zeromq] ingest queue full; dropping {frame_type}")
             self._trace_rx(RX_DROPPED, RX_QUEUE_FULL, ts_ns, is_keyframe)
+
+    def _sensor_throttle_active(self, ts_ns: Optional[int]) -> bool:
+        return self._throttle_clock == "sensor" and ts_ns is not None and int(ts_ns) > 0
+
+    def _nonkf_due(self, ts_ns: Optional[int]) -> bool:
+        """Min-interval throttle check for a non-keyframe (no side effects).
+        sensor mode compares pose timestamps (negative delta = restarted
+        clock -> due); wall mode compares process time."""
+        interval = self._nonkf_min_interval_s
+        if self._sensor_throttle_active(ts_ns):
+            last = self._last_nonkf_admit_sensor_ns
+            return not (last is not None and 0 <= (int(ts_ns) - last) < int(interval * 1e9))
+        return (time.monotonic() - self._last_nonkf_enq_mono) >= interval
+
+    def _stamp_nonkf(self, ts_ns: Optional[int]) -> None:
+        """Record an admitted non-keyframe (called once the frame is paired,
+        before the enqueue attempt)."""
+        if self._sensor_throttle_active(ts_ns):
+            self._last_nonkf_admit_sensor_ns = int(ts_ns)
+        else:
+            self._last_nonkf_enq_mono = time.monotonic()
 
     def _trace_rx(self, decision: str, reason: str, ts_ns: Optional[int], is_keyframe: bool) -> None:
         """Frame-flow trace: one ReceiverEvent per receiver decision (no-op when

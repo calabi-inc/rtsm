@@ -1,6 +1,6 @@
 # Record & Replay
 
-RTSM can record live WebSocket sessions to disk and replay them through the full pipeline at the original rate. This enables reproducible benchmarking and offline testing without camera hardware.
+RTSM can record live WebSocket sessions to disk and replay them through the full pipeline at the original rate (or faster/slower with `--replay-speed`). This enables reproducible benchmarking and offline testing without camera hardware. Under replay the ingest clock defaults to the frames' own timestamps (`ingest.clock: auto` → `sensor`), so the admitted frames and the resulting memory do not depend on replay pacing; pass `--set ingest.clock=wall` to time the replay by process time instead.
 
 ---
 

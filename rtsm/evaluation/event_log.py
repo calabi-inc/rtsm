@@ -8,7 +8,8 @@ object with a ``kind`` field; the first line is ``kind: "meta"`` and carries
 
 Line kinds (schema_version 2, 2026-09-09 — P1 task 0 of the Gate 4.5 plan):
 
-  meta      once per file: schema_version, wall time, pid.
+  meta      once per file: schema_version, wall time, pid, and what the runner
+            adds (ingest_clock: wall | sensor).
   receiver  one per RECEIVER DECISION (websocket / replay / zeromq thread):
             enqueued, or dropped with the reason (malformed, parse_error,
             tracking_state, throttle, duplicate_ts, no_camera_frame,
@@ -20,10 +21,14 @@ Line kinds (schema_version 2, 2026-09-09 — P1 task 0 of the Gate 4.5 plan):
             present pose fails conversion: outcome (processed | gate_rejected
             | frame_rejected | dropped), the reason (IngestDecision.reason,
             FrameGateDecision.reason, "keyframe", "no_pose", "gate_error",
-            "pose_conversion_failed"), and queue_wait_s = dequeue time minus
-            TimeBundle.t_mono_s. That stamp is set when the FramePacket is
-            built (after decode, just before enqueue), so this is the ingest-
-            queue wait; sensor-clock age arrives with the P1 clock work.
+            "pose_conversion_failed"), queue_wait_s = dequeue time minus
+            TimeBundle.t_mono_s (both wall; that stamp is set when the
+            FramePacket is built, after decode, so this is the ingest-queue
+            wait — deliberately kept on wall so it stays a latency measure),
+            and clock_s = the ingest clock (rtsm/core/clock.py) after
+            advancing to this frame. Under ingest.clock=sensor clock_s is
+            anchored to the first frame's wall time, so compare it as
+            differences, never as absolute values.
             outcome=processed means ADMITTED to processing: the line is written
             before segmentation so a crash mid-frame still leaves it; join with
             the frame line (same t_sensor_ns) for completion.
@@ -35,9 +40,11 @@ A/A comparator contract: compare the receiver and dequeue streams PER KIND as
 ordered sequences of (frame_seq, t_sensor_ns, decision/outcome, reason); never
 compare file order across kinds (an enqueued line is written after put(), so
 the pipeline's dequeue line can precede it), and ignore timestamp,
-queue_wait_s, queue_depth, frame_count and the meta line, which are run-
-specific until the sensor-time clock lands. Writes are serialised with a lock
-because the receiver thread and the pipeline thread both write.
+queue_wait_s, queue_depth and the meta line, which are run-specific; under
+ingest.clock=sensor the (frame_seq, t_sensor_ns, outcome, reason) sequences
+are identical across runs and replay speeds (P1 gate G1-B), and clock_s
+differences match too. Writes are serialised with a lock because the receiver
+thread and the pipeline thread both write.
 
 Path resolution rules:
   - None / unset  -> eval_output/<YYYYMMDD_HHMMSS>/events.jsonl  (per-run, auto)
@@ -113,6 +120,7 @@ class DequeueEvent:
     queue_depth: int                 # ingest queue depth right after this dequeue
     outcome: str                     # processed | gate_rejected | frame_rejected | dropped
     reason: str                      # gate reason, or one of the DQ_REASON_* labels
+    clock_s: Optional[float] = None  # ingest clock (rtsm/core/clock.py) after advancing to this frame
     kind: str = "dequeue"
 
 
@@ -167,7 +175,8 @@ class EventLogWriter:
     producers can skip building events entirely.
     """
 
-    def __init__(self, enabled: bool, configured_path: Optional[str], repo_root: Optional[Path] = None):
+    def __init__(self, enabled: bool, configured_path: Optional[str], repo_root: Optional[Path] = None,
+                 extra_meta: Optional[Dict[str, Any]] = None):
         self._enabled = bool(enabled)
         self._fh = None
         self._path: Optional[Path] = None
@@ -185,13 +194,16 @@ class EventLogWriter:
         # WRITE mode (truncate) — each run starts fresh. Line-buffered so a
         # crash mid-run still preserves prior frames.
         self._fh = self._path.open("w", encoding="utf-8", buffering=1)
-        self.write({
+        meta: Dict[str, Any] = {
             "kind": "meta",
             "schema_version": SCHEMA_VERSION,
             "created_wall_utc_s": time.time(),
             "created_mono_s": time.monotonic(),
             "pid": os.getpid(),
-        })
+        }
+        if extra_meta:
+            meta.update({k: v for k, v in extra_meta.items() if k != "kind"})
+        self.write(meta)
         logger.info(f"event_log: writing diagnostics to {self._path}")
 
     @property

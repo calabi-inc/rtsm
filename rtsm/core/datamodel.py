@@ -152,6 +152,10 @@ class FramePacket:
     is_keyframe: bool = False
     confidence: Optional[NDArray[np.uint8]] = None  # (H,W) uint8 ARKit confidence 0/1/2
     rgb_jpeg: Optional[bytes] = None  # raw JPEG bytes (if source was JPEG), for zero-copy viz forwarding
+    # Pose-frame epoch of the source session (websocket receiver bumps it on a
+    # new client session; None for sources without the notion). The dispatcher's
+    # SensorClock re-bases on a change so sensor time stays continuous.
+    frame_epoch: Optional[int] = None
 
     # convenience helpers
     @property

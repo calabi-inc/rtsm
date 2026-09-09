@@ -35,6 +35,7 @@ from rtsm.cfg import ConfigError, cfg_path, config_fingerprint
 from rtsm.cfg.cli import add_config_arguments, config_from_args
 from rtsm.cfg.tuning import validate_tuning
 from rtsm.evaluation.event_log import EventLogWriter
+from rtsm.core.clock import make_clock, resolve_clock_mode
 
 import argparse
 import sys
@@ -100,6 +101,21 @@ def main():
                 config_fingerprint(cfg))
     for advisory in validate_tuning(cfg):
         logger.warning("Configuration: %s", advisory)
+
+    # Ingest clock (ingest.clock: auto|wall|sensor). Drives frame admission and
+    # memory timing: the receiver non-KF throttle, ingest-gate grace / TTL /
+    # parallax ages, proto expiry and LTM scheduling. auto = sensor under
+    # --replay (speed-independent, repeatable), wall for live receivers.
+    # Resolved here, before any model or index is built, so a bad value exits
+    # through the config-error path like every other config mistake.
+    try:
+        clock_mode = resolve_clock_mode((cfg.get("ingest") or {}).get("clock", "auto"),
+                                        replay=bool(args.replay))
+    except ValueError as exc:
+        parser.error(str(exc))
+    clock = make_clock(clock_mode)
+    logger.info("Ingest clock: %s (ingest.clock=%s)", clock_mode,
+                (cfg.get("ingest") or {}).get("clock", "auto"))
 
     # ── Record-only mode: skip all heavy init, just record raw WebSocket ──
     if args.record and args.record_only:
@@ -178,7 +194,7 @@ def main():
     pi_grid = GridSpec(cell_m=cell_m, use_3d=not two_d, up_axis=up_axis)
     proximity_index = ProximityIndex(pi_grid, per_cell_cap=per_cell_cap, neighbors_max=neighbors_max)
     logger.info(f"Proximity index successfully initialized")
-    wm = WorkingMemory(cfg, index=proximity_index)
+    wm = WorkingMemory(cfg, index=proximity_index, clock=clock)
     logger.info(f"Working memory successfully initialized")
     assoc = Associator(cfg)
     ingest_gate = IngestGate(cfg)
@@ -259,6 +275,7 @@ def main():
     event_log = EventLogWriter(
         enabled=bool(diag_cfg.get("enabled", False)),
         configured_path=diag_cfg.get("event_log_path"),
+        extra_meta={"ingest_clock": clock_mode},
     )
     event_sink = event_log.sink()
 
@@ -283,6 +300,7 @@ def main():
             latency_analytics=latency_analytics,
             replay_speed=args.replay_speed,
             event_sink=event_sink,
+            throttle_clock=clock_mode,
         )
         replay_receiver.start()
         logger.info(f"Replay receiver started from {args.replay} (speed={args.replay_speed}x)")
@@ -318,6 +336,7 @@ def main():
             # the receiver skip the depth statistic entirely.
             clearance_sink=wm.set_forward_clearance if clearance_enabled else None,
             event_sink=event_sink,
+            throttle_clock=clock_mode,
             latency_analytics=latency_analytics,
         )
         ws_receiver.start()
@@ -337,6 +356,7 @@ def main():
             on_kf_packet=vis_server.handle_kf_packet if vis_server else None,
             on_kf_pose_update=vis_server.handle_kf_pose_update if vis_server else None,
             event_sink=event_sink,
+            throttle_clock=clock_mode,
             latency_analytics=latency_analytics,
         )
         t = threading.Thread(target=sub.run_forever, daemon=True)
@@ -367,6 +387,7 @@ def main():
         ingest_q=ingest_q,
         sweep_cache=sweep_cache,
         event_log=event_log,
+        clock=clock,
         seg_analytics=seg_analytics,
         latency_analytics=latency_analytics,
     )
@@ -406,6 +427,7 @@ def main():
         sweep_cache=sweep_cache,
         frame_window=frame_window_for_reset,  # FrameWindow (ZMQ) or None (WebSocket)
         vis_server=vis_server,
+        clock=clock,  # SensorClock re-anchors on /reset (WallClock: no-op)
     )
 
     mcp_cfg = cfg.get("mcp", {})

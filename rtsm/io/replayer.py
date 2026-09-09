@@ -48,6 +48,7 @@ class ReplayReceiver:
         latency_analytics=None,
         replay_speed: float = 1.0,
         event_sink: Optional[callable] = None,
+        throttle_clock: str = "wall",
     ) -> None:
         self._recording_dir = os.path.abspath(recording_dir)
         self._ingest_q = ingest_queue
@@ -87,6 +88,9 @@ class ReplayReceiver:
             event_sink=event_sink,
             event_source="replay",
             trace_queue=ingest_queue,
+            # ingest.clock: "sensor" makes the non-KF throttle compare recorded
+            # header timestamps, so the admitted set is the same at any speed.
+            throttle_clock=throttle_clock,
         )
 
         self._replay_speed = max(0.1, replay_speed)  # <1 = slower, >1 = faster
@@ -184,9 +188,7 @@ class ReplayReceiver:
                         if ok:
                             frames_enqueued += 1
                             self._decoder._trace_rx(RX_ENQUEUED, "", pkt=pkt)
-                            # Mirror _handle_stream state update for non-KF throttle
-                            if not pkt.is_keyframe:
-                                self._decoder._last_nonkf_enq_mono = time.monotonic()
+                            # (throttle stamp advanced at the decoder's admit decision)
                             if pkt.is_keyframe and self._on_keyframe is not None:
                                 try:
                                     self._on_keyframe(pkt)

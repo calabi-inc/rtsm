@@ -1,0 +1,28 @@
+== A rc=0 ==
+objects/confirmed 121 66 frames 53 full sha 92e0a8f1206d77da -> HEADLESS anchor 121/66@53 | confirmed-only 667439a458bf4296 | upserts 233
+meta.ingest_clock wall | rtsm args ['--profile', 'C:/Users/konam/AppData/Local/Temp/claude/C--Users-konam-Desktop-calabi-repo-rtsm/c99f81f1-d743-4906-85ee-b894ab355ce0/scratchpad/p1t1_gates/A.profile.yaml', '--set', 'ingest.clock=wall', '--no-viz']
+rx Counter({('dropped', 'throttle'): 152, ('enqueued', ''): 88}) | dq Counter({('gate_rejected', 'skip'): 31, ('processed', 'hard_max_s'): 31, ('processed', 'parallax'): 13, ('processed', 'keyframe'): 9, ('gate_rejected', 'near_recent_keyframe'): 4})
+t_total mean 0.2794 | gate_acceptance_rate 0.6023
+== B1 rc=0 ==
+objects/confirmed 124 65 frames 53 full sha ad6f71a5b89c8506 -> NEW | confirmed-only 6909ab8c382930d3 | upserts 206
+meta.ingest_clock sensor | rtsm args ['--profile', 'C:/Users/konam/AppData/Local/Temp/claude/C--Users-konam-Desktop-calabi-repo-rtsm/c99f81f1-d743-4906-85ee-b894ab355ce0/scratchpad/p1t1_gates/B1.profile.yaml', '--no-viz']
+rx Counter({('dropped', 'throttle'): 154, ('enqueued', ''): 86}) | dq Counter({('processed', 'hard_max_s'): 30, ('gate_rejected', 'skip'): 29, ('processed', 'parallax'): 13, ('processed', 'keyframe'): 9, ('gate_rejected', 'near_recent_keyframe'): 4, ('processed', 'ttl+novelty'): 1})
+t_total mean 0.2566 | gate_acceptance_rate 0.6163
+== B2 rc=0 ==
+objects/confirmed 124 65 frames 53 full sha ad6f71a5b89c8506 -> NEW | confirmed-only 6909ab8c382930d3 | upserts 206
+meta.ingest_clock sensor | rtsm args ['--profile', 'C:/Users/konam/AppData/Local/Temp/claude/C--Users-konam-Desktop-calabi-repo-rtsm/c99f81f1-d743-4906-85ee-b894ab355ce0/scratchpad/p1t1_gates/B2.profile.yaml', '--no-viz']
+rx Counter({('dropped', 'throttle'): 154, ('enqueued', ''): 86}) | dq Counter({('processed', 'hard_max_s'): 30, ('gate_rejected', 'skip'): 29, ('processed', 'parallax'): 13, ('processed', 'keyframe'): 9, ('gate_rejected', 'near_recent_keyframe'): 4, ('processed', 'ttl+novelty'): 1})
+t_total mean 0.2432 | gate_acceptance_rate 0.6163
+== B3 rc=0 ==
+objects/confirmed 124 65 frames 53 full sha ad6f71a5b89c8506 -> NEW | confirmed-only 6909ab8c382930d3 | upserts 177
+meta.ingest_clock sensor | rtsm args ['--profile', 'C:/Users/konam/AppData/Local/Temp/claude/C--Users-konam-Desktop-calabi-repo-rtsm/c99f81f1-d743-4906-85ee-b894ab355ce0/scratchpad/p1t1_gates/B3.profile.yaml', '--replay-speed', '5.0', '--no-viz']
+rx Counter({('dropped', 'throttle'): 154, ('enqueued', ''): 86}) | dq Counter({('processed', 'hard_max_s'): 30, ('gate_rejected', 'skip'): 29, ('processed', 'parallax'): 13, ('processed', 'keyframe'): 9, ('gate_rejected', 'near_recent_keyframe'): 4, ('processed', 'ttl+novelty'): 1})
+t_total mean 0.2466 | gate_acceptance_rate 0.6163
+== G1-B comparison ==
+B1 vs B2: enqueued identical (86) | throttled identical (154) | dequeue(seq,ts,outcome,reason) identical (86) | multiset identical ad6f71a5b89c8506 ad6f71a5b89c8506 | counts (124, 65) (124, 65)
+B1 vs B3: enqueued identical (86) | throttled identical (154) | dequeue(seq,ts,outcome,reason) identical (86) | multiset identical ad6f71a5b89c8506 ad6f71a5b89c8506 | counts (124, 65) (124, 65)
+B2 vs B3: enqueued identical (86) | throttled identical (154) | dequeue(seq,ts,outcome,reason) identical (86) | multiset identical ad6f71a5b89c8506 ad6f71a5b89c8506 | counts (124, 65) (124, 65)
+A (wall) vs B1 (sensor): enqueued DIFFER at index 2: (5, 683333572088000) vs (6, 683333672096291) (lens 88 vs 86) | dequeue DIFFER at index 2: (5, 683333572088000, 'gate_rejected', 'skip') vs (6, 683333672096291, 'gate_rejected', 'skip') (lens 88 vs 86) | multiset 92e0a8f1206d77da vs ad6f71a5b89c8506 | counts (121, 66) vs (124, 65)
+A outcomes {('processed', 'keyframe'): 9, ('gate_rejected', 'near_recent_keyframe'): 4, ('gate_rejected', 'skip'): 31, ('processed', 'hard_max_s'): 31, ('processed', 'parallax'): 13}
+B1 outcomes {('processed', 'keyframe'): 9, ('gate_rejected', 'near_recent_keyframe'): 4, ('gate_rejected', 'skip'): 29, ('processed', 'ttl+novelty'): 1, ('processed', 'hard_max_s'): 30, ('processed', 'parallax'): 13}
+P1T1_GATES_DONE

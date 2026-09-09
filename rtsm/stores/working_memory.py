@@ -35,10 +35,6 @@ def _cos(a: Emb, b: Emb) -> float:
     return float(np.dot(a, b))
 
 
-def _now_mono() -> float:
-    return time.monotonic()
-
-
 def _now_wall_utc() -> float:
     return time.time()
 
@@ -161,9 +157,19 @@ class ProximityIndexLike(Protocol):
 # ------------------------- Working Memory -------------------------
 
 class WorkingMemory:
-    def __init__(self, cfg: Dict[str, Any], *, index: Optional[ProximityIndexLike] = None) -> None:
+    def __init__(self, cfg: Dict[str, Any], *, index: Optional[ProximityIndexLike] = None,
+                 clock: Optional[Any] = None) -> None:
         self.cfg = cfg
         self.index = index  # ObjectIndex-like: insert/update/remove
+        # Ingest clock (rtsm/core/clock.py): every memory-timing read — object
+        # create/update stamps, proto TTL expiry, LTM upsert scheduling — goes
+        # through it so the stamper and the expirer share one clock. Wall by
+        # default; the runner injects a SensorClock under --replay so memory
+        # timing follows the frames' own timestamps, not replay speed.
+        if clock is None:
+            from rtsm.core.clock import WallClock
+            clock = WallClock()
+        self._clock = clock
 
         self._map: Dict[str, ObjectState] = {}
         self._lock = threading.RLock()
@@ -277,7 +283,7 @@ class WorkingMemory:
         Returns:
             Object ID if created, None if rejected (e.g., out of bounds)
         """
-        t_mono = _now_mono() if t_mono is None else t_mono
+        t_mono = self._clock.now_mono() if t_mono is None else t_mono
         wall_now = _now_wall_utc()
         emb_vis = emb_vis.astype(np.float32)
         D = int(emb_vis.shape[0])
@@ -373,7 +379,7 @@ class WorkingMemory:
             old_xyz = o.xyz_world.copy()
 
         # --- timestamps & deltas ---
-        now_m = _now_mono()
+        now_m = self._clock.now_mono()
         now_w = _now_wall_utc()
         dt_s = float(dt_s if dt_s is not None else max(1e-3, now_m - o.last_seen_mono))
 
@@ -522,7 +528,7 @@ class WorkingMemory:
                     f"[WM] promote oid={oid} label={top_lbl if top_lbl else '-'} "
                     f"conf={conf:.3f} hits={o.hits} stab={o.stability:.3f}"
                 )
-                heapq.heappush(self._ltm_heap, (_now_mono(), oid))
+                heapq.heappush(self._ltm_heap, (self._clock.now_mono(), oid))
 
     def collect_ready_for_upsert(self, force_all: bool = False) -> List[Dict[str, Any]]:
         """Collect confirmed objects that should be (re)upserted to LTM now.
@@ -535,7 +541,7 @@ class WorkingMemory:
                        confirmed objects are searchable after replay completes.
         """
         out: List[Dict[str, Any]] = []
-        m_now = _now_mono()
+        m_now = self._clock.now_mono()
         wall_now = _now_wall_utc()
 
         def _schedule_next_due(o: ObjectState, now_m: float) -> None:
@@ -650,7 +656,7 @@ class WorkingMemory:
 
         Returns the number of objects re-queued.
         """
-        now_m = _now_mono()
+        now_m = self._clock.now_mono()
         requeued = 0
         with self._lock:
             for oid in object_ids:
@@ -669,7 +675,7 @@ class WorkingMemory:
 
     def expire_timeouts(self) -> List[str]:
         """Expire proto objects past TTL using a min-heap. Returns list of removed IDs."""
-        now_m = _now_mono()
+        now_m = self._clock.now_mono()
         removed: List[str] = []
         with self._lock:
             while self._proto_heap and self._proto_heap[0][0] <= now_m:

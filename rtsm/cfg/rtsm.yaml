@@ -105,6 +105,22 @@ io:
   clearance:
     enable: false
 
+# -------------------- Ingest (frame admission timing) --------------------
+ingest:
+  # Which clock drives frame admission and memory timing: the receiver's
+  # non-keyframe throttle, the ingest gate's grace / TTL / parallax ages, proto
+  # expiry and LTM upsert scheduling.
+  #   wall   = process time (real elapsed seconds) - the live default.
+  #   sensor = the frames' own timestamps, advanced per dequeued frame - replays
+  #            give the same admitted sequence and the same memory at any
+  #            --replay-speed, which is what evaluation and A/A gates need.
+  #   auto   = sensor under --replay and `rtsm demo`, wall for live receivers.
+  # Latency analytics, the watchdog, recorder/replayer pacing and vector-flush
+  # cadence always stay on wall time. Also the config-level rollback: set wall.
+  clock: auto
+  dup_window_ns: 200000000        # non-KF within this sensor-time window of the last keyframe is skipped
+  non_kf_grace_s: 0.03            # non-KF grace right after a keyframe arrives (on the ingest clock)
+
 units:
   # Convert incoming values to meters at ingestion
   # If your dataset publishes millimeters, set to 0.001
