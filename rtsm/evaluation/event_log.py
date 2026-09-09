@@ -16,6 +16,13 @@ Line kinds (schema_version 2, 2026-09-09 — P1 task 0 of the Gate 4.5 plan):
             queue_full). Carries the source's seq / t_sensor_ns / is_keyframe
             when the header parsed. ZeroMQ has no source seq: its join key is
             (t_sensor_ns, is_keyframe).
+            depth_valid_frac (P1 task 2): the finite fraction of the decoded
+            depth BEFORE the confidence filter -- one statistic on every
+            websocket / replay line written after the depth decode (throttled
+            and queue_full frames included; malformed / tracking lines carry
+            None). ZeroMQ lines never carry it (depth stays encoded for the
+            frames it refuses). It is a per-frame statistic, not part of the
+            comparator tuple below.
   dequeue   one per DEQUEUED frame (pipeline thread), including the frames the
             ingest gate or the frame-quality gate rejects and the frames whose
             present pose fails conversion: outcome (processed | gate_rejected
@@ -136,6 +143,7 @@ class ReceiverEvent:
     is_keyframe: Optional[bool] = None
     frame_count: Optional[int] = None  # receiver's running count after the tracking filter
     queue_depth: Optional[int] = None  # ingest queue depth after the decision
+    depth_valid_frac: Optional[float] = None  # finite fraction of the decoded depth BEFORE the confidence filter (websocket/replay; dropped frames included)
     kind: str = "receiver"
 
 

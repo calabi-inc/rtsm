@@ -252,6 +252,8 @@ def run_demo(argv: list[str] | None = None) -> None:
         latency_analytics=latency_analytics,
         event_sink=event_sink,
         throttle_clock=clock_mode,
+        # Receive-time robot pose under replay (every tracking-normal frame)
+        pose_sink=wm.update_robot_pose,
     )
 
     pipe = Pipeline(

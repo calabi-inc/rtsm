@@ -240,6 +240,8 @@ io:
   rtabmap_endpoint: tcp://127.0.0.1:6000     # RTABMap pose topics
 ```
 
+The subscriber pairs each RTABMap pose with the nearest camera frame (30 ms slop) from a window of **encoded** JPEG/PNG frames — 2 s or at most 90 frames (≈ 30 MB worst case; `ZeroMQSubscriber(frame_window_ttl_s=, frame_window_max_items=)` until these become `ingest:` keys) — and decodes a frame only once its pose has been admitted to the ingest queue. The window has to outlast the latency of a keyframe pose stamp behind the newest camera frame (RTABMap can trail by more than a second during loop closure); an unpaired keyframe is dropped as `no_camera_frame`, not retried.
+
 ### Unit Conversion
 
 If your depth source uses millimeters (e.g., RealSense D435i):

@@ -14,6 +14,7 @@ import time
 import sys
 import json
 import math
+from collections import OrderedDict
 from typing import Optional, List, Callable, Any
 
 import zmq
@@ -28,8 +29,8 @@ from rtsm.core.datamodel import FramePacket, TimeBundle, PoseStamped, PinholeInt
 from rtsm.io.ingest_queue import IngestQueue
 from rtsm.utils.transforms import euler_to_quat_xyzw
 from rtsm.evaluation.event_log import (
-    RX_DROPPED, RX_DUPLICATE_TS, RX_ENQUEUED, RX_MALFORMED, RX_NO_CAMERA_FRAME, RX_QUEUE_FULL, RX_THROTTLE,
-    ReceiverEvent,
+    RX_DROPPED, RX_DUPLICATE_TS, RX_ENQUEUED, RX_MALFORMED, RX_NO_CAMERA_FRAME, RX_PARSE_ERROR, RX_QUEUE_FULL,
+    RX_THROTTLE, ReceiverEvent,
 )
 
 
@@ -53,6 +54,18 @@ class ZeroMQSubscriber:
         latency_analytics: Optional[Any] = None,
         event_sink: Optional[Callable[[Any], None]] = None,
         throttle_clock: str = "wall",
+        # FrameWindow now holds ENCODED frames (JPEG / PNG bytes, ~0.35 MB per
+        # 640x480 frame). Its old defaults (30 s, 2000 items) held ~1.9 GB of
+        # decoded frames. The window must cover the LATENCY OF A kf_pose
+        # STAMP behind the newest camera frame (RTAB-Map stamps a node when
+        # it processes it: typically 50-300 ms, above 1 s during loop
+        # closure / graph optimisation), not just the pairing slop -- an
+        # unpaired keyframe is not retried. The TTL is meant to be the
+        # binding bound, so max_items >= ttl * fps with margin (90 = 2 s *
+        # 30 Hz * 1.5, <= ~32 MB); at 45+ fps the count binds first. Task 6
+        # moves these to `ingest:` keys, deriving the count from ttl * fps.
+        frame_window_ttl_s: float = 2.0,
+        frame_window_max_items: int = 90,
     ) -> None:
         """
         Initialize dual-socket ZMQ subscriber.
@@ -108,8 +121,14 @@ class ZeroMQSubscriber:
         self.poller.register(self.camera_sock, zmq.POLLIN)
         self.poller.register(self.rtabmap_sock, zmq.POLLIN)
 
-        # Frame window for buffering camera data
-        self.fw = FrameWindow()
+        # Frame window for buffering camera data (encoded bytes; decoded only
+        # after a pose is admitted — see _try_enqueue_frame / _decode_rgbd)
+        self.fw = FrameWindow(ttl_sec=float(frame_window_ttl_s), max_items=int(frame_window_max_items))
+        # Decode memo keyed by the MATCHED CAMERA stamp (not the pose stamp:
+        # two poses within slop of one frame decode it once; a pose whose
+        # nearest frame changes between calls does not get stale pixels).
+        self._decode_cache: "OrderedDict[int, tuple]" = OrderedDict()
+        self._decode_cache_max = 4
 
         # Track last enqueued timestamp to avoid duplicates
         self._last_enq_ts_ns: Optional[int] = None
@@ -187,26 +206,18 @@ class ZeroMQSubscriber:
                 cy=float(intr_data["cy"]),
             )
 
-            # Decode JPEG RGB
-            jpg_buf = np.frombuffer(parts[2], dtype=np.uint8)
-            rgb = cv2.imdecode(jpg_buf, cv2.IMREAD_COLOR)
-            if rgb is None:
-                logger.warning("[zeromq] camera.rgbd: failed to decode JPEG")
+            # Buffer the ENCODED frame (admit-before-decode): JPEG bytes and
+            # (PNG bytes, depth units). Decoding happens in _try_enqueue_frame
+            # once a pose has paired with this frame AND the ingest queue has
+            # room — a congested pipeline no longer costs a decode per 30 Hz
+            # camera message that is never admitted.
+            jpg_bytes = bytes(parts[2])
+            png_bytes = bytes(parts[3])
+            if not jpg_bytes or not png_bytes:
+                logger.warning("[zeromq] camera.rgbd: empty RGB or depth payload")
                 return
-
-            # Decode PNG depth (16-bit uint16)
-            png_buf = np.frombuffer(parts[3], dtype=np.uint8)
-            depth_u16 = cv2.imdecode(png_buf, cv2.IMREAD_UNCHANGED)
-            if depth_u16 is None:
-                logger.warning("[zeromq] camera.rgbd: failed to decode PNG depth")
-                return
-
-            # Convert depth to meters
-            depth_m = depth_u16.astype(np.float32) * depth_units
-
-            # Add to frame window with intrinsics
-            self.fw.add_rgbd(ts_ns, rgb, depth_m, intr)
-            logger.debug(f"[zmq] camera.rgbd: buffered frame ts={ts_ns}")
+            self.fw.add_rgbd(ts_ns, jpg_bytes, (png_bytes, depth_units), intr)
+            logger.debug(f"[zmq] camera.rgbd: buffered encoded frame ts={ts_ns}")
 
         except Exception as e:
             logger.error(f"[zeromq] camera.rgbd: parse error: {e}")
@@ -496,14 +507,43 @@ class ZeroMQSubscriber:
             self._trace_rx(RX_DROPPED, RX_THROTTLE, ts_ns, is_keyframe)
             return  # Skip, too soon since last non-KF
 
-        # Assemble frame data from window
-        rgb, depth, intr = self.fw.assemble_pair(ts_ns)
-        if rgb is None:
+        # Assemble frame data from window (encoded bytes, not decoded arrays)
+        rgb_raw, depth_raw, intr = self.fw.assemble_pair(ts_ns)
+        if rgb_raw is None:
             # No matching camera frame yet
             self._trace_rx(RX_DROPPED, RX_NO_CAMERA_FRAME, ts_ns, is_keyframe)
             return
+
+        # Paired: STAMP the non-KF now, before the queue check, so a refused
+        # frame still burns the throttle window -- the same attempt-based
+        # semantics as the websocket path (step 6 before 6b) and as main.
+        # Otherwise every 30 Hz pose would probe a full queue, log a warning
+        # and count a queue drop: ~15x the websocket receiver's queue_drops
+        # for the same congestion.
         if not is_keyframe:
             self._stamp_nonkf(ts_ns)
+
+        # Queue admission BEFORE the decode (admit-before-decode): the legacy
+        # tail-drop queue would refuse this frame after put(); deciding here
+        # saves the JPEG + PNG decode for a frame that is about to be dropped.
+        if self.ingest_q.full():
+            if self._latency_analytics:
+                self._latency_analytics.sample_queue_depth(self.ingest_q.qsize())
+                self._latency_analytics.record_queue_drop()
+            frame_type = "keyframe" if is_keyframe else "non-KF"
+            logger.warning(f"[zeromq] ingest queue full; dropping {frame_type} before decode")
+            self._trace_rx(RX_DROPPED, RX_QUEUE_FULL, ts_ns, is_keyframe)
+            return
+
+        # Memo key = the camera stamp the pair came from (duck-typed windows
+        # without match_stamp fall back to the pose stamp).
+        match = getattr(self.fw, "match_stamp", None)
+        cam_ts = match(ts_ns) if match is not None else None
+        decoded = self._decode_rgbd(cam_ts if cam_ts is not None else ts_ns, rgb_raw, depth_raw)
+        if decoded is None:
+            self._trace_rx(RX_DROPPED, RX_PARSE_ERROR, ts_ns, is_keyframe)
+            return
+        rgb, depth = decoded
 
         # Build pose
         pose = PoseStamped(
@@ -548,6 +588,43 @@ class ZeroMQSubscriber:
             logger.warning(f"[zeromq] ingest queue full; dropping {frame_type}")
             self._trace_rx(RX_DROPPED, RX_QUEUE_FULL, ts_ns, is_keyframe)
 
+    def _decode_rgbd(self, ts_ns: int, rgb_raw: Any, depth_raw: Any):
+        """Decode a paired camera frame after admission; memoised per CAMERA
+        stamp (the stamp assemble_pair matched, see FrameWindow.match_stamp).
+
+        Accepts already-decoded arrays too (tests, or a window filled by
+        another producer). Returns (rgb_bgr, depth_m) or None on a decode
+        failure.
+        """
+        hit = self._decode_cache.get(ts_ns)
+        if hit is not None:
+            self._decode_cache.move_to_end(ts_ns)
+            return hit
+        try:
+            if isinstance(rgb_raw, np.ndarray):
+                rgb = rgb_raw
+            else:
+                rgb = cv2.imdecode(np.frombuffer(rgb_raw, dtype=np.uint8), cv2.IMREAD_COLOR)
+                if rgb is None:
+                    logger.warning("[zeromq] camera.rgbd: failed to decode JPEG")
+                    return None
+            if isinstance(depth_raw, np.ndarray) or depth_raw is None:
+                depth_m = depth_raw
+            else:
+                png_bytes, depth_units = depth_raw
+                depth_u16 = cv2.imdecode(np.frombuffer(png_bytes, dtype=np.uint8), cv2.IMREAD_UNCHANGED)
+                if depth_u16 is None:
+                    logger.warning("[zeromq] camera.rgbd: failed to decode PNG depth")
+                    return None
+                depth_m = depth_u16.astype(np.float32) * float(depth_units)
+        except Exception as e:  # noqa: BLE001 — a bad frame must not kill the subscriber
+            logger.warning(f"[zeromq] camera.rgbd: decode error: {e}")
+            return None
+        self._decode_cache[ts_ns] = (rgb, depth_m)
+        while len(self._decode_cache) > self._decode_cache_max:
+            self._decode_cache.popitem(last=False)
+        return rgb, depth_m
+
     def _sensor_throttle_active(self, ts_ns: Optional[int]) -> bool:
         return self._throttle_clock == "sensor" and ts_ns is not None and int(ts_ns) > 0
 
@@ -562,8 +639,9 @@ class ZeroMQSubscriber:
         return (time.monotonic() - self._last_nonkf_enq_mono) >= interval
 
     def _stamp_nonkf(self, ts_ns: Optional[int]) -> None:
-        """Record an admitted non-keyframe (called once the frame is paired,
-        before the enqueue attempt)."""
+        """Record a non-keyframe ATTEMPT (called once the frame is paired,
+        before the queue check and the decode): a refused frame still burns
+        the window, exactly as on the websocket path."""
         if self._sensor_throttle_active(ts_ns):
             self._last_nonkf_admit_sensor_ns = int(ts_ns)
         else:

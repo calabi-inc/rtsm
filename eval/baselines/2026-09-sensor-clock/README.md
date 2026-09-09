@@ -45,3 +45,13 @@ sensor time, sitting 3 ms below the 30 Hz frame period; it produced no rejection
 `dup_window_ns` covers the same frames) and is deterministic per recording, but task 6 should define it relative to
 the frame period or drop it. (3) A `SensorClock` re-anchors on `POST /reset` and re-bases on a backwards jump larger
 than 5 s inside one epoch (a re-replayed recording), so a long-running process cannot freeze its timing gates.
+
+## Task 2 reproduction (admit before decode, 2026-09-09) — `task2-admit-before-decode/`
+
+Same harness, branch `feature/admit-before-decode` (main `50e4a9e` + the reorder). Sensor run **S**: 124/65 @53,
+full sha `ad6f71a5b89c8506` = this anchor; dequeue sequence identical to B1 (86), receiver sequence identical (240);
+`depth_valid_frac` present on all 240 receiver lines (throttled frames included) and uniform: 1.000 on enqueued and
+throttled lines alike (pre-confidence-filter statistic; ARKit depth has no zero pixels on the wire). Record = the re-run
+after the review fixes (packet-carried statistic, ZMQ stamp-before-admission, window 90) — same numbers as before them. Wall run **W** (info only):
+121/66 @53 `92e0a8f1206d77da` = A, dequeue identical (88). Moving the queue admission in front of the RGB decode and
+the viz broadcast behind it changes nothing when nothing is dropped, as designed.

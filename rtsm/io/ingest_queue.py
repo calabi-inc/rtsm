@@ -31,4 +31,14 @@ class IngestQueue:
     def qsize(self) -> int:
         return self._q.qsize()
 
+    def full(self) -> bool:
+        """True when a non-blocking put would fail right now. Receivers consult
+        this BEFORE decoding a frame (admit-before-decode) so a congested
+        pipeline does not make the receiver decode frames it will drop."""
+        return self._q.full()
+
+    @property
+    def maxsize(self) -> int:
+        return int(self._q.maxsize)
+
 
