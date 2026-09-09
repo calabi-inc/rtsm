@@ -21,6 +21,12 @@ Options (everything else on the command line is a backend name):
                      launch (repeatable). Raw JSON is then written as
                      datasheet_raw_<backend>.<profile-stem>.json so it never
                      clobbers the default-config run.
+    --viz            keep the visualization server on (browser tab opens per
+                     run) for human review. Default is headless: no viz
+                     server, no browser; the raw JSON's Tier-2 hourly lists
+                     are empty and object counts differ slightly from viz-on
+                     runs (compare against headless anchors only; see
+                     benchmark_backends.patch_config).
 
 Runs are SEQUENTIAL by necessity: concurrent GPU jobs would contend and
 corrupt per-frame latency. Each backend's raw JSON is written immediately

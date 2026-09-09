@@ -70,12 +70,18 @@ def main():
                         help="Replay speed multiplier (<1 = slower, e.g. 0.5 = half speed)")
     parser.add_argument("--record-only", action="store_true",
                         help="Record without running pipeline (no GPU needed)")
+    parser.add_argument("--no-viz", action="store_true",
+                        help="Skip the visualization server and the browser auto-open "
+                             "(headless replay / eval / CI); same as "
+                             "--set visualization.enable=false")
     add_config_arguments(parser)
     args = parser.parse_args()
     try:
         cfg = config_from_args(args)
     except (ConfigError, OSError) as exc:
         parser.error(str(exc))
+    if args.no_viz:
+        cfg.setdefault("visualization", {})["enable"] = False
 
     print("=" * 60)
     print("  RTSM - Real-Time Spatio-Semantic Memory")

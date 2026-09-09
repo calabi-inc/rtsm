@@ -44,6 +44,10 @@ REPORT_DIR = ROOT / "reports"
 # Profiles are layered AFTER the base file, so patch_config()'s backend patch
 # still wins as long as the profile does not pin segmentation.backend.
 RTSM_EXTRA_ARGS: List[str] = []
+# Visualization server during benchmark runs. False = headless (default):
+# patch_config() writes visualization.enable=false AND --no-viz is passed to
+# the runner, so a profile cannot re-enable it by accident. --viz flips both.
+VIZ: bool = False
 
 API_PORT = 8002
 POLL_INTERVAL = 5          # seconds between API polls
@@ -87,9 +91,22 @@ def patch_config(backend: str) -> None:
     with open(CONFIG_PATH, "r") as f:
         cfg = yaml.safe_load(f)
     cfg["segmentation"]["backend"] = backend
-    # Keep visualization enabled so vis server does Tier 2 rollups,
-    # but we don't connect any clients
-    cfg["visualization"]["enable"] = True
+    # Headless by default (2026-09-08): the viz server auto-opens a browser
+    # tab per run and adds per-frame JPEG/broadcast work, and nothing the
+    # rendered datasheet reads (latency/segmentation aggregates,
+    # working_memory, /objects) needs it. Two consequences to know:
+    #  * The Tier-2 per-second rollup runs only inside the viz push loop
+    #    while a browser client is attached (the old comment here was wrong:
+    #    it came from the auto-opened tab, not from "keeping viz enabled").
+    #    Headless, the raw JSON's latency_hourly / segmentation_hourly lists
+    #    are empty and aggregate input_hz / effective_ratio read 0.0, until
+    #    the rollup moves to a headless timer (execution plan P1 task 5).
+    #  * Object counts are NOT viz-independent: a faster step shifts the
+    #    wall-clock non-KF admission, so headless runs carry a few extra
+    #    unconfirmed protos (confirmed set identical). Compare headless runs
+    #    only against headless anchors (eval/baselines/*-headless/).
+    # Pass --viz to the harness when a human wants to watch the run.
+    cfg["visualization"]["enable"] = bool(VIZ)
     # Increase analytics buffer to capture all frames (session1 has 162)
     cfg["analytics"]["buffer_frames"] = 500
     with open(CONFIG_PATH, "w") as f:
@@ -643,14 +660,21 @@ def parse_common_args(argv: Optional[List[str]] = None):
     treats them as backend names).
     """
     import argparse
+    global VIZ
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("--profile", action="append", default=[],
                         help="sparse config profile passed to `python -m rtsm --profile` "
                              "(repeatable; resolved relative to the repo root)")
+    parser.add_argument("--viz", action="store_true",
+                        help="keep the visualization server (and its browser tab) on for "
+                             "human review; default is headless (--no-viz)")
     args, rest = parser.parse_known_args(argv)
+    VIZ = bool(args.viz)
     RTSM_EXTRA_ARGS.clear()
     for p in args.profile:
         RTSM_EXTRA_ARGS.extend(["--profile", p])
+    if not VIZ:
+        RTSM_EXTRA_ARGS.append("--no-viz")
     return args, rest
 
 

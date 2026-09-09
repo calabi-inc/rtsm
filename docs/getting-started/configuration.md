@@ -67,8 +67,10 @@ rtsm demo --profile room.yaml
 Precedence is **base configuration → profiles in order → `--set` values in
 order**. Nested mappings merge; lists replace. Omitted settings retain their
 base values. Use `--profile` for a small patch; `--config` selects a complete
-base file. Both runners support these flags. The demo's `--port` and `--no-viz`
-flags take precedence over configuration values.
+base file. Both runners support these flags, and both accept `--no-viz` (skip
+the visualization server and the browser auto-open; headless replay, eval,
+CI). The demo's `--port` and either runner's `--no-viz` take precedence over
+configuration values.
 
 ```bash
 rtsm config show --profile room.yaml --set object.promote_hits=3 > trial.yaml
