@@ -22,12 +22,13 @@ Per-branch `floor.json` + `README.md` hold the per-run numbers. Object identity 
 | main | dual | 107 / 107 / 107 | 70 / 70 / 70 | 53 / 53 / 53 | 0.27–0.29 s | **bitwise identical multiset — floor 0** |
 | main | grounded_sam2 | 139 / 133 / 133 | 81 / 81 / 81 | 53 / 53 / 53 | 1.05–1.08 s | **objects spread 6**, confirmed 0; runs 2–3 identical, run 1 differs |
 | demo2 | dual | 115 / 116 / 115 | 66 / 68 / 66 | 53 / 54 / 53 | 0.29–0.32 s | runs 1 and 3 identical; run 2 processed **one extra frame** → +1 object / +2 confirmed |
-| demo2 | grounded_sam2 | 25 / 25 / 25 | 18 / 18 / 18 | 53 / 54 / 54 | 0.36–0.38 s | counts floor 0; multiset differs run 1 vs 2–3 (mm-level xyz) |
+| demo2 | grounded_sam2 | 25 / 25 / 25 | 18 / 18 / 18 | 53 / 54 / 54 | 0.36–0.38 s | counts floor 0; multiset differs run 1 vs 2–3 (mm-level xyz). NB: demo2's committed yaml carried the E1 perception settings (box 0.30 + five-class vocabulary), so this is session1 seen through those settings — not an E1 result |
 
 **G0 targets derived from this:** merged main with default config must reproduce `dual` 107/70 with an **identical**
 multiset, and `grounded_sam2` within 133–139 / 81; merged main with `--profile e1-demo2` must reproduce
 `grounded_sam2` 25/18 (the profile carries demo2's `box_threshold 0.30` + 5-class E1 vocabulary — that vocabulary,
-not the threshold, is why demo2's grounded_sam2 finds 25 objects vs main's ~135).
+not the threshold, is why demo2's grounded_sam2 finds 25 objects vs main's ~135). This is a config-survival check on the
+session1 replay; E1 itself is evaluated from the trial logger (`examples/rc_car_agent/paper/**`, frozen), which none of these runs touch.
 
 ## Findings worth carrying forward
 

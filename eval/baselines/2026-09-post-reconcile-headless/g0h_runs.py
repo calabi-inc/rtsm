@@ -7,17 +7,17 @@ from collections import Counter
 
 ROOT = 'C:/Users/konam/Desktop/calabi-repo/rtsm'
 os.chdir(ROOT)
-OUT = 'eval/baselines/2026-09-post-reconcile'
+OUT = 'eval/baselines/2026-09-post-reconcile-headless'
 os.makedirs(OUT, exist_ok=True)
 LOG = os.path.join(OUT, 'results.jsonl')
-DONE = os.path.join(OUT, 'G0_DONE')
+DONE = os.path.join(OUT, 'G0H_DONE')
 FAISS = 'model_store/faiss'
-ASIDE = 'model_store/faiss.pre-g0-20260908'
+ASIDE = 'model_store/faiss.pre-g0h-20260908'
 PROFILE = 'examples/rc_car_agent/e1-demo2.profile.yaml'
 ANCHORS = {'b71b98ca1fc2bf0d': 'PRE-FLIP main 107/70@53', '935bc8eb254c4dfe': 'PRE-FLIP base 111/74@54',
            '1994e0fe5dd6167c': 'POST-FLIP demo2 115/66@53', '72fd5c7f0475da90': 'POST-FLIP demo2 116/68@54',
            'f12c8dc2024f0c53': 'demo2 session1 w/ E1 settings 25/18@53 run1', 'a556dbdcad9fef0a': 'demo2 session1 w/ E1 settings 25/18@54',
-           'eab7e618f54b2f13': 'main gs2 139/81', '4a29c1ed37d2b052': 'main gs2 133/81'}
+           'eab7e618f54b2f13': 'main gs2 139/81', '8dcd388694cfe9c5': 'HEADLESS dual 122/68@54 (first check)', '6b5a2ca503fe3af5': 'viz-on gs2 127/72', '5ec1337f412da431': 'viz-on gs2 122/72', '4a29c1ed37d2b052': 'main gs2 133/81'}
 JOBS = [('dual', 'dual', []), ('grounded_sam2', 'grounded_sam2', []), ('grounded_sam2-e1settings', 'grounded_sam2', ['--profile', PROFILE])]
 
 
@@ -112,8 +112,8 @@ def main():
     if os.path.isdir(FAISS) and not os.path.isdir(ASIDE):
         shutil.move(FAISS, ASIDE); moved = True
     try:
-        for i in (1, 2, 3):
-            for name, backend, extra in JOBS:
+        for name, backend, extra in JOBS:
+            for i in (1, 2, 3):
                 try:
                     run(name, backend, extra, i)
                 except Exception as e:
