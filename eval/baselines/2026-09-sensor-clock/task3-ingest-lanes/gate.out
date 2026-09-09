@@ -1,0 +1,22 @@
+== L rc=0 ==
+== G rc=0 ==
+== T1 rc=0 ==
+== T2 rc=0 ==
+== T3 rc=0 ==
+L: (124, 65) frames 53 sha ad6f71a5b89c8506 | meta policy=lossless clock=sensor | rx {('enqueued', ''): 86, ('dropped', 'throttle'): 154} | sources {'replay': 240} | lanes {'fifo': 86} | stats {'policy': 'lossless', 'maxsize': 32, 'depth': {'fifo': 0}, 'max_depth_seen': 2, 'blocked_s': 0.0, 'closed': False, 'admitted_kf': 9, 'admitted_nonkf': 77, 'nonkf_superseded': 0, 'kf_dropped': 0, 'kf_lane_full': 0, 'age_dropped': 0, 'blocked_puts': 0, 'closed_puts': 0, 'lossless_depth': 32}
+   vs B1: multiset IDENTICAL | dequeue identical (86) | receiver identical (240)
+   vs task-2 S per-line incl. depth_valid_frac: identical (240)
+   meta policy == lossless : True | enqueued lanes == {'fifo': 86} : True
+G: (124, 65) frames 53 sha ad6f71a5b89c8506 | meta policy=legacy clock=sensor | rx {('enqueued', ''): 86, ('dropped', 'throttle'): 154} | sources {'replay': 240} | lanes {None: 86} | stats {'policy': 'legacy', 'maxsize': 512, 'depth': {'legacy': 0}}
+   vs B1: multiset IDENTICAL | dequeue identical (86) | receiver identical (240)
+   vs task-2 S per-line incl. depth_valid_frac: identical (240)
+   meta policy == legacy : True | enqueued lanes == {None: 86} : True
+HARD GATE: PASS
+--- policy=latest (info only; pacing-dependent, never compared to the anchor)
+T1: (124, 65) frames 53 sha ad6f71a5b89c8506 | rx {('enqueued', ''): 86, ('dropped', 'throttle'): 154, ('dropped', 'superseded'): 1} | sources {'replay': 240, 'lanes': 1} | enqueued 86 - lanes-dropped 1 = 85 vs dequeued 85 | superseded 1 kf_dropped 0 age_dropped 0 max_depth 2 | counters queue_drops 0 superseded 1 age_drops 0
+   invariants (session1: depth<=2, no KF dropped, enqueued-lanes_dropped==dequeued, lane ids, queue_drops==0, counters.superseded==lanes): OK
+T2: (124, 65) frames 53 sha ad6f71a5b89c8506 | rx {('enqueued', ''): 86, ('dropped', 'throttle'): 154, ('dropped', 'superseded'): 1} | sources {'replay': 240, 'lanes': 1} | enqueued 86 - lanes-dropped 1 = 85 vs dequeued 85 | superseded 1 kf_dropped 0 age_dropped 0 max_depth 2 | counters queue_drops 0 superseded 1 age_drops 0
+   invariants (session1: depth<=2, no KF dropped, enqueued-lanes_dropped==dequeued, lane ids, queue_drops==0, counters.superseded==lanes): OK
+T3: (124, 65) frames 53 sha ad6f71a5b89c8506 | rx {('enqueued', ''): 86, ('dropped', 'throttle'): 154, ('dropped', 'superseded'): 1} | sources {'replay': 240, 'lanes': 1} | enqueued 86 - lanes-dropped 1 = 85 vs dequeued 85 | superseded 1 kf_dropped 0 age_dropped 0 max_depth 2 | counters queue_drops 0 superseded 1 age_drops 0
+   invariants (session1: depth<=2, no KF dropped, enqueued-lanes_dropped==dequeued, lane ids, queue_drops==0, counters.superseded==lanes): OK
+P1T3_GATE_DONE

@@ -114,8 +114,16 @@ class ReplayReceiver:
         logger.info(f"[replay] Started from {self._recording_dir}")
 
     def stop(self) -> None:
-        """Signal the replay thread to stop."""
+        """Signal the replay thread to stop. Under ingest.policy=lossless this
+        also CLOSES the ingest queue -- terminally: the replay thread may be
+        blocked in put() and only close() wakes it; get() keeps draining but
+        no later put is admitted. Other policies never block, so their queue
+        is left open."""
         self._stop_event.set()
+        if getattr(self._ingest_q, "policy", None) == "lossless":
+            close = getattr(self._ingest_q, "close", None)
+            if callable(close):
+                close()
 
     def wait(self, timeout: Optional[float] = None) -> bool:
         """Block until replay finishes. Returns True if completed."""
@@ -220,8 +228,9 @@ class ReplayReceiver:
                         else:
                             if self._latency_analytics:
                                 self._latency_analytics.record_queue_drop()
-                            logger.warning("[replay] ingest queue full; dropping frame")
-                            self._decoder._trace_rx(RX_DROPPED, RX_QUEUE_FULL, pkt=pkt)
+                            reason = getattr(getattr(pkt, "ingest", None), "drop_reason", None) or RX_QUEUE_FULL
+                            logger.warning(f"[replay] ingest queue refused frame ({reason}); dropping")
+                            self._decoder._trace_rx(RX_DROPPED, reason, pkt=pkt)
 
                 elif kind == "text":
                     try:

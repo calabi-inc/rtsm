@@ -41,4 +41,33 @@ class IngestQueue:
     def maxsize(self) -> int:
         return int(self._q.maxsize)
 
+    # ── surface shared with rtsm/io/ingest_lanes.IngestLanes (P1 task 3) ──
+    # put()/get() above are deliberately untouched: this class IS the
+    # `ingest.policy: legacy` rollback and must behave exactly as before.
+
+    policy = "legacy"
+
+    def refusal(self, is_keyframe: bool, keyframe_origin: Optional[str] = None) -> Optional[str]:
+        """Admit-before-decode check: the legacy queue refuses any frame
+        while full."""
+        return "queue_full" if self._q.full() else None
+
+    def depth(self) -> dict:
+        return {"legacy": self._q.qsize()}
+
+    def backlog_signal(self) -> dict:
+        n = self._q.qsize()
+        return {"lane_full": n >= self._q.maxsize, "age_dropped": 0, "depth": {"legacy": n}}
+
+    def stats(self) -> dict:
+        return {"policy": self.policy, "maxsize": self.maxsize, "depth": self.depth()}
+
+    def set_on_drop(self, cb) -> None:
+        """No lane-side drops exist in the legacy queue (tail-drop refusals
+        are reported by put() -> False and traced by the receiver)."""
+        return None
+
+    def close(self) -> None:
+        return None
+
 

@@ -290,9 +290,17 @@ GET /stats
   "confirmed": 62,
   "avg_hits": 4.2,
   "upserts_total": 28,
-  "ingest_q": 0
+  "ingest_q": 0,
+  "ingest_lanes": {"policy": "latest", "maxsize": 4, "depth": {"keyframe": 0, "latest": 0},
+                   "nonkf_superseded": 0, "kf_dropped": 0, "age_dropped": 0, "blocked_puts": 0}
 }
 ```
+
+`ingest_q` is the number of frames waiting for the pipeline. Under
+`ingest.policy: latest` (the live default) that is the keyframe lane plus the
+one non-keyframe slot, so it never exceeds `keyframe_lane_depth + 1`; under
+`lossless` / `legacy` it is the FIFO depth. `ingest_lanes` carries the policy,
+per-lane depth and the lane counters (see the configuration guide).
 
 ### Detailed Stats
 

@@ -436,6 +436,8 @@ class TestGateAcceptanceRate:
         assert agg["counters"] == {
             "received": 3, "processed": 6, "gate_rejections": 3, "frame_rejections": 1,
             "queue_drops": 1, "throttle_skips": 1, "tracking_drops": 1,
+            "age_drops": 0,
+            "superseded": 0,
         }
 
     def test_rate_is_zero_when_nothing_was_dequeued(self):

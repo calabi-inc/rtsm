@@ -25,7 +25,8 @@ import cv2
 logger = logging.getLogger(__name__)
 
 from rtsm.stores.frame_window import FrameWindow
-from rtsm.core.datamodel import FramePacket, TimeBundle, PoseStamped, PinholeIntrinsics
+from rtsm.core.datamodel import FramePacket, TimeBundle, PoseStamped, PinholeIntrinsics, IngestMeta
+from rtsm.io.ingest_lanes import KF_SOURCE
 from rtsm.io.ingest_queue import IngestQueue
 from rtsm.utils.transforms import euler_to_quat_xyzw
 from rtsm.evaluation.event_log import (
@@ -129,6 +130,10 @@ class ZeroMQSubscriber:
         # nearest frame changes between calls does not get stale pixels).
         self._decode_cache: "OrderedDict[int, tuple]" = OrderedDict()
         self._decode_cache_max = 4
+        # Receiver-local running count of enqueue attempts (the only per-frame
+        # id ZeroMQ frames have; TimeBundle.seq stays None so frame ids do not
+        # become ws_*).
+        self._rx_seq: int = 0
 
         # Track last enqueued timestamp to avoid duplicates
         self._last_enq_ts_ns: Optional[int] = None
@@ -492,10 +497,12 @@ class ZeroMQSubscriber:
         """
         if self.ingest_q is None:
             return
+        self._rx_seq += 1
+        rx_seq = self._rx_seq
 
         # Skip duplicates (except keyframes always get enqueued)
         if not is_keyframe and self._last_enq_ts_ns == ts_ns:
-            self._trace_rx(RX_DROPPED, RX_DUPLICATE_TS, ts_ns, is_keyframe)
+            self._trace_rx(RX_DROPPED, RX_DUPLICATE_TS, ts_ns, is_keyframe, rx_seq=rx_seq)
             return
 
         # Throttle non-keyframes to avoid overwhelming the pipeline. Check
@@ -504,14 +511,14 @@ class ZeroMQSubscriber:
         # the next pose ~33 ms later retries. A full queue after the stamp
         # still thins (the stamp does not depend on put() succeeding).
         if not is_keyframe and not self._nonkf_due(ts_ns):
-            self._trace_rx(RX_DROPPED, RX_THROTTLE, ts_ns, is_keyframe)
+            self._trace_rx(RX_DROPPED, RX_THROTTLE, ts_ns, is_keyframe, rx_seq=rx_seq)
             return  # Skip, too soon since last non-KF
 
         # Assemble frame data from window (encoded bytes, not decoded arrays)
         rgb_raw, depth_raw, intr = self.fw.assemble_pair(ts_ns)
         if rgb_raw is None:
             # No matching camera frame yet
-            self._trace_rx(RX_DROPPED, RX_NO_CAMERA_FRAME, ts_ns, is_keyframe)
+            self._trace_rx(RX_DROPPED, RX_NO_CAMERA_FRAME, ts_ns, is_keyframe, rx_seq=rx_seq)
             return
 
         # Paired: STAMP the non-KF now, before the queue check, so a refused
@@ -523,16 +530,19 @@ class ZeroMQSubscriber:
         if not is_keyframe:
             self._stamp_nonkf(ts_ns)
 
-        # Queue admission BEFORE the decode (admit-before-decode): the legacy
-        # tail-drop queue would refuse this frame after put(); deciding here
-        # saves the JPEG + PNG decode for a frame that is about to be dropped.
-        if self.ingest_q.full():
+        # Queue admission BEFORE the decode (admit-before-decode): ask the
+        # queue whether it would refuse this frame (legacy: full; lanes: a
+        # SOURCE keyframe meeting a full keyframe lane under overflow=reject),
+        # so a frame about to be dropped costs no JPEG + PNG decode.
+        kf_origin = KF_SOURCE if is_keyframe else None
+        refusal = self.ingest_q.refusal(is_keyframe, kf_origin)
+        if refusal is not None:
             if self._latency_analytics:
                 self._latency_analytics.sample_queue_depth(self.ingest_q.qsize())
                 self._latency_analytics.record_queue_drop()
             frame_type = "keyframe" if is_keyframe else "non-KF"
-            logger.warning(f"[zeromq] ingest queue full; dropping {frame_type} before decode")
-            self._trace_rx(RX_DROPPED, RX_QUEUE_FULL, ts_ns, is_keyframe)
+            logger.warning(f"[zeromq] ingest queue refused {frame_type} before decode ({refusal})")
+            self._trace_rx(RX_DROPPED, refusal, ts_ns, is_keyframe, rx_seq=rx_seq)
             return
 
         # Memo key = the camera stamp the pair came from (duck-typed windows
@@ -541,7 +551,7 @@ class ZeroMQSubscriber:
         cam_ts = match(ts_ns) if match is not None else None
         decoded = self._decode_rgbd(cam_ts if cam_ts is not None else ts_ns, rgb_raw, depth_raw)
         if decoded is None:
-            self._trace_rx(RX_DROPPED, RX_PARSE_ERROR, ts_ns, is_keyframe)
+            self._trace_rx(RX_DROPPED, RX_PARSE_ERROR, ts_ns, is_keyframe, rx_seq=rx_seq)
             return
         rgb, depth = decoded
 
@@ -569,6 +579,7 @@ class ZeroMQSubscriber:
             pose=pose,
             intr=intr,
             is_keyframe=is_keyframe,
+            ingest=IngestMeta(keyframe_origin=kf_origin, rx_seq=rx_seq),
         )
 
         # Enqueue
@@ -580,13 +591,15 @@ class ZeroMQSubscriber:
             self._last_enq_ts_ns = ts_ns
             frame_type = "KF" if is_keyframe else "frame"
             logger.debug(f"[zmq] enqueued {frame_type} -> queue={self.ingest_q.qsize()}")
-            self._trace_rx(RX_ENQUEUED, "", ts_ns, is_keyframe)
+            self._trace_rx(RX_ENQUEUED, "", ts_ns, is_keyframe, rx_seq=rx_seq,
+                           lane=getattr(fp.ingest, "lane", None))
         else:
             if self._latency_analytics:
                 self._latency_analytics.record_queue_drop()
+            reason = getattr(fp.ingest, "drop_reason", None) or RX_QUEUE_FULL
             frame_type = "keyframe" if is_keyframe else "non-KF"
-            logger.warning(f"[zeromq] ingest queue full; dropping {frame_type}")
-            self._trace_rx(RX_DROPPED, RX_QUEUE_FULL, ts_ns, is_keyframe)
+            logger.warning(f"[zeromq] ingest queue refused {frame_type} ({reason}); dropping")
+            self._trace_rx(RX_DROPPED, reason, ts_ns, is_keyframe, rx_seq=rx_seq)
 
     def _decode_rgbd(self, ts_ns: int, rgb_raw: Any, depth_raw: Any):
         """Decode a paired camera frame after admission; memoised per CAMERA
@@ -647,10 +660,12 @@ class ZeroMQSubscriber:
         else:
             self._last_nonkf_enq_mono = time.monotonic()
 
-    def _trace_rx(self, decision: str, reason: str, ts_ns: Optional[int], is_keyframe: bool) -> None:
+    def _trace_rx(self, decision: str, reason: str, ts_ns: Optional[int], is_keyframe: bool, *,
+                  rx_seq: Optional[int] = None, lane: Optional[str] = None) -> None:
         """Frame-flow trace: one ReceiverEvent per receiver decision (no-op when
         no sink is set). ZeroMQ has no source seq; (t_sensor_ns, is_keyframe)
-        is the join key. Never raises into the receive path."""
+        is the join key, plus rx_seq (receiver-local attempt count) since P1
+        task 3. Never raises into the receive path."""
         sink = self._event_sink
         if sink is None:
             return
@@ -666,6 +681,8 @@ class ZeroMQSubscriber:
                 is_keyframe=bool(is_keyframe),
                 frame_count=None,
                 queue_depth=(int(q.qsize()) if q is not None else None),
+                lane=lane,
+                rx_seq=rx_seq,
             ))
         except Exception:
             logger.debug("[zeromq] frame-flow trace failed", exc_info=True)

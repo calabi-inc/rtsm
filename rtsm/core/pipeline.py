@@ -1191,6 +1191,14 @@ class Pipeline:
 
     # -------- teardown --------
     def shutdown(self):
+        # The consumer is going away: wake any producer blocked in a lossless
+        # put() and make later puts fail fast instead of hanging a receiver.
+        close = getattr(self.ingest_q, "close", None)
+        if callable(close):
+            try:
+                close()
+            except Exception:
+                logger.warning("Failed to close ingest queue during shutdown", exc_info=True)
         # free heavy models if desired
         try:
             self.segmenter.close()

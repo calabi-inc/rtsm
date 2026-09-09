@@ -127,7 +127,7 @@ def create_app(
 
         status "degraded" when any of:
           - the watchdog reports a degraded frame-flow state (receiver_dead,
-            hung, starved, pose_degraded, no_ingestible_input), or
+            hung, starved, backlogged, pose_degraded, no_ingestible_input), or
           - vector upserts failing (reasons carry the last error), or
           - index persistence failing, or
           - confirmed objects far outnumber indexed vectors (the 2026-08-15

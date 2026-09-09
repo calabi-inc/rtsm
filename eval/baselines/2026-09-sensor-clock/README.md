@@ -55,3 +55,14 @@ throttled lines alike (pre-confidence-filter statistic; ARKit depth has no zero 
 after the review fixes (packet-carried statistic, ZMQ stamp-before-admission, window 90) — same numbers as before them. Wall run **W** (info only):
 121/66 @53 `92e0a8f1206d77da` = A, dequeue identical (88). Moving the queue admission in front of the RGB decode and
 the viz broadcast behind it changes nothing when nothing is dropped, as designed.
+
+## Task 3 reproduction (ingest lanes, 2026-09-09) — `task3-ingest-lanes/`
+
+Same harness, branch `feature/ingest-lanes` (main `c75a8c5` + the lanes). **L** = packaged default (`ingest.policy: auto`
+→ lossless under replay): 124/65 @53 `ad6f71a5b89c8506` = this anchor; dequeue (86) and receiver (240) sequences identical
+to B1; all receiver lines `source: replay`; per-line `(decision, reason, frame_seq, depth_valid_frac)` identical to
+`task2-admit-before-decode/S.events.jsonl`. FIFO peak depth 2, `blocked_puts` 0 (the record is the re-run after the code-review fixes; the first run peaked at 3). **G** = `--set ingest.policy=legacy`:
+identical. **G1-A PASS.** **T1–T3** = `--set ingest.policy=latest`, info only (not reproducible by construction, never
+compared to the anchor): each superseded exactly one waiting non-keyframe (max depth 2, no keyframe dropped, no age drop,
+enqueued 86 − 1 = 85 dequeued) and still produced 124/65 `ad6f71a5`; the lanes barely engage when dual keeps up with
+session1 at 1×. `gate.out` is the script's verdict; the script itself is `p1t3_gate.sh`.

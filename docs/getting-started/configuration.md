@@ -272,6 +272,36 @@ old wall-clock behaviour; latency analytics, the watchdog, recorder/replayer
 pacing and vector-flush cadence always stay on wall time. Object `created_mono`
 / `last_seen_mono` fields in `/objects` are stamped on this clock.
 
+### Ingest policy (how frames wait for the pipeline)
+
+`ingest.policy` selects the queue between the receiver and the pipeline:
+
+- `latest` — per-lane admission. Keyframes go to a small FIFO
+  (`keyframe_lane_depth`, default 3) that the pipeline drains first; on overflow
+  the **oldest** waiting keyframe is dropped (`keyframe_lane_overflow:
+  drop_oldest`), or with `reject` a SLAM-flagged keyframe is refused before it
+  is decoded. Non-keyframes have one slot: a newer frame supersedes the waiting
+  one, and a non-keyframe older than `max_frame_age_s` (default 2.0 s, `null`
+  disables) at dequeue is discarded. Memory stays at a handful of decoded
+  frames and the pipeline always sees the freshest input. Supersession is the
+  normal steady state when input outpaces the segmenter, not a fault. The
+  live default.
+- `lossless` — one FIFO of `lossless_depth` (default 32); when it is full the
+  producer **waits**, nothing is dropped. Replay and evaluation only: a
+  blocking put inside a live receive loop would stall it, so the runner
+  refuses `lossless` for live receivers. Under the sensor clock the wait does
+  not change what is admitted, so the depth only bounds memory.
+- `legacy` — the previous 512-deep tail-drop queue (the config-level
+  rollback; it holds up to ~4 GB of decoded frames under congestion).
+- `auto` (packaged default) — `lossless` under `--replay` and `rtsm demo`,
+  `latest` for live receivers.
+
+`/stats.ingest_lanes` reports the policy, per-lane depth and the counters
+(`nonkf_superseded`, `kf_dropped`, `age_dropped`, `blocked_puts`); the
+frame-flow trace writes lane-side drops as receiver lines with `source:
+"lanes"`. The watchdog reports `backlogged` only when a lane stays full for
+three consecutive polls or a frame was discarded for age.
+
 ```bash
 rtsm config show --profile room.yaml --set object.promote_hits=3 > trial.yaml
 rtsm --replay recordings/my-room --config trial.yaml
@@ -293,6 +323,11 @@ ingest:
   clock: auto                # auto | wall | sensor (see above)
   dup_window_ns: 200000000   # a non-keyframe within this sensor-time window of the last keyframe is skipped
   non_kf_grace_s: 0.03       # non-keyframe grace right after a keyframe arrives (on the ingest clock)
+  policy: auto               # latest | lossless | legacy | auto (lossless under replay / demo, latest live)
+  keyframe_lane_depth: 3     # latest: waiting keyframes kept; overflow drops the oldest
+  keyframe_lane_overflow: drop_oldest   # latest: drop_oldest | reject (reject refuses SLAM keyframes before decode)
+  max_frame_age_s: 2.0       # latest: non-keyframe older than this at dequeue is discarded (null disables)
+  lossless_depth: 32         # lossless: FIFO depth before the replayer waits
 ```
 
 `dup_window_ns` and `non_kf_grace_s` were always read by the ingest gate with

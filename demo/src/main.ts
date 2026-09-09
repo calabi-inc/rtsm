@@ -1801,7 +1801,7 @@ function renderConfigPanel() {
   items.push(
     item('kf-every', `${rx.keyframe_every_n}f`),
     item('throttle', `${rx.nonkf_min_interval_s}s`),
-    item('queue', rx.queue_maxsize),
+    item('queue', `${rx.queue_maxsize} (${rx.ingest_policy ?? 'legacy'})`),
     item('top-k', pl.topk_preclip),
   )
 
@@ -1866,12 +1866,22 @@ function updateKPIs() {
     setKPISub('kpi-latency', `ms mean (p95: ${p95Ms}ms)`)
 
     const qMax = lastB?.queue_depth_max ?? 0
-    const qDrops = lastB?.queue_drops ?? 0
-    const qCls = qDrops > 0 ? 'red' : qMax > 400 ? 'red' : qMax > 256 ? 'yellow' : 'green'
+    const qDrops = lastB?.queue_drops ?? 0          // refused / oldest keyframe dropped: real losses
+    const qAge = lastB?.age_drops ?? 0              // discarded for age: the pipeline stalled
+    const qSup = lastB?.superseded ?? 0             // replaced by a newer frame: designed steady state
+    // Capacity comes from the runner's config echo: 512 (legacy queue),
+    // lossless_depth, or keyframe_lane_depth + 1 (latest lanes). Under the
+    // lanes a depth of 2 (one keyframe + the slot) is normal, so depth-based
+    // colouring only applies to the FIFO policies; losses colour every policy.
+    const qCap = Number(runtimeConfig?.receiver?.queue_maxsize) || 512
+    const lanes = (runtimeConfig?.receiver?.ingest_policy ?? 'legacy') === 'latest'
+    const lost = qDrops + qAge
+    const qCls = lost > 0 ? 'red' : (!lanes && qMax >= qCap) ? 'red' : (!lanes && qMax >= qCap / 2) ? 'yellow' : 'green'
     setKPI('kpi-queue', `${qMax}`, qCls)
-    setKPISub('kpi-queue', qDrops > 0 ? `/ 512 cap  (${qDrops} drops!)` : '/ 512 cap')
+    const supTxt = qSup > 0 ? `  ·  ${qSup} superseded` : ''
+    setKPISub('kpi-queue', lost > 0 ? `/ ${qCap} cap  (${qDrops} dropped, ${qAge} aged!)${supTxt}` : `/ ${qCap} cap${supTxt}`)
     const qCard = document.getElementById('kpi-queue')
-    if (qCard) qCard.classList.toggle('congestion', qDrops > 0)
+    if (qCard) qCard.classList.toggle('congestion', lost > 0)
 
     const surv = ((la.mask_survival_rate ?? 0) * 100).toFixed(0)
     setKPI('kpi-masks', `${la.mean_masks_in ?? 0}`)
@@ -2150,7 +2160,7 @@ function buildAnalyticsSummary(): string {
     const lastB = latencyHistory.length > 0 ? latencyHistory[latencyHistory.length - 1] : null
     lines.push(
       `Throughput: ${la.input_hz ?? 0} Hz in -> ${la.processing_hz ?? 0} Hz proc (${((la.effective_ratio ?? 0) * 100).toFixed(0)}%)`,
-      `Queue: ${lastB?.queue_depth_mean ?? 0} avg / ${lastB?.queue_depth_max ?? 0} max / 512 cap | Drops: ${lastB?.queue_drops ?? 0}`,
+      `Queue: ${lastB?.queue_depth_mean ?? 0} avg / ${lastB?.queue_depth_max ?? 0} max / ${Number(cfg?.receiver?.queue_maxsize) || 512} cap | Drops: ${lastB?.queue_drops ?? 0} | Aged: ${lastB?.age_drops ?? 0} | Superseded: ${lastB?.superseded ?? 0}`,
       '---',
       'Latency (mean / p95):',
       `  Total: ${fmtT(la.t_total)}`,

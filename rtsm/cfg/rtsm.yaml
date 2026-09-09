@@ -120,6 +120,22 @@ ingest:
   clock: auto
   dup_window_ns: 200000000        # non-KF within this sensor-time window of the last keyframe is skipped
   non_kf_grace_s: 0.03            # non-KF grace right after a keyframe arrives (on the ingest clock)
+  # How frames wait between the receiver and the pipeline (rtsm/io/ingest_lanes.py):
+  #   latest   = per-lane admission: a small keyframe FIFO drained first (overflow
+  #              drops the OLDEST waiting keyframe) + one non-keyframe slot a newer
+  #              frame supersedes; non-keyframes older than max_frame_age_s at
+  #              dequeue are discarded. Bounded memory (<= keyframe_lane_depth + 2
+  #              decoded frames), newest-first under congestion. The live default.
+  #   lossless = one FIFO of lossless_depth; the producer WAITS when it is full,
+  #              nothing is dropped. Replay / eval only (a blocking put would stall
+  #              a live receive loop); deterministic offline runs need it.
+  #   legacy   = the previous 512-deep tail-drop queue (config-level rollback).
+  #   auto     = lossless under --replay and `rtsm demo`, latest live.
+  policy: auto
+  keyframe_lane_depth: 3          # latest: waiting keyframes kept (oldest dropped on overflow)
+  keyframe_lane_overflow: drop_oldest   # latest: drop_oldest | reject (reject refuses SOURCE keyframes before decode)
+  max_frame_age_s: 2.0            # latest: non-keyframe older than this at dequeue is discarded (null disables)
+  lossless_depth: 32              # lossless: FIFO depth before the producer waits (~8.5 MB per decoded frame)
 
 units:
   # Convert incoming values to meters at ingestion

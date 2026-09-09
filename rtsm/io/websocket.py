@@ -35,6 +35,8 @@ from rtsm.evaluation.event_log import (
     RX_DROPPED, RX_ENQUEUED, RX_MALFORMED, RX_PARSE_ERROR, RX_QUEUE_FULL, RX_THROTTLE, RX_TRACKING,
     ReceiverEvent,
 )
+from rtsm.core.datamodel import IngestMeta
+from rtsm.io.ingest_lanes import KF_MINTED
 
 logger = logging.getLogger(__name__)
 
@@ -322,6 +324,11 @@ class WebSocketReceiver:
         self._last_nonkf_enq_mono: float = 0.0
         self._last_nonkf_admit_sensor_ns: Optional[int] = None
         self._last_enq_ts_ns: Optional[int] = None
+        # Receiver-local running count of parsed binary frames (never reset:
+        # it is a join key across sessions in one trace file), and the value
+        # for the frame being parsed right now.
+        self._rx_seq: int = 0
+        self._cur_rx_seq: Optional[int] = None
         self._active_session_id: Optional[str] = None
 
         # Frame-flow liveness stamps (server-lifetime, read by the watchdog).
@@ -491,10 +498,9 @@ class WebSocketReceiver:
                                 else:
                                     if self._latency_analytics:
                                         self._latency_analytics.record_queue_drop()
-                                    logger.warning(
-                                        "[websocket] ingest queue full; dropping frame"
-                                    )
-                                    self._trace_rx(RX_DROPPED, RX_QUEUE_FULL, pkt=pkt)
+                                    reason = getattr(getattr(pkt, "ingest", None), "drop_reason", None) or RX_QUEUE_FULL
+                                    logger.warning(f"[websocket] ingest queue refused frame ({reason}); dropping")
+                                    self._trace_rx(RX_DROPPED, reason, pkt=pkt)
                         except Exception as e:
                             # (the parse_error trace line is emitted inside
                             # _parse_binary_message, with the header ids)
@@ -616,7 +622,8 @@ class WebSocketReceiver:
     def _trace_rx(self, decision: str, reason: str = "", *, pkt: Optional[FramePacket] = None,
                   seq: Any = None, ts: Any = None, is_kf: Optional[bool] = None,
                   frame_count: Optional[int] = None, queue_depth: Optional[int] = None,
-                  depth_valid_frac: Optional[float] = None) -> None:
+                  depth_valid_frac: Optional[float] = None, lane: Optional[str] = None,
+                  rx_seq: Optional[int] = None) -> None:
         """Emit one ReceiverEvent to the event sink (no-op when unset).
 
         Returns None so drop sites can `return self._trace_rx(...)`. When a
@@ -634,13 +641,20 @@ class WebSocketReceiver:
             if queue_depth is None:
                 q = self._admission_queue
                 queue_depth = int(q.qsize()) if q is not None else None
-            if depth_valid_frac is None and pkt is not None:
+            if pkt is not None:
                 # One statistic on every line: the PRE-confidence-filter
-                # fraction the parser put on the packet at step 5d
-                # (pkt.depth_m itself has been NaN-masked by step 13 by now).
-                depth_valid_frac = getattr(pkt, "depth_valid_frac", None)
+                # fraction the parser put on pkt.ingest at step 5d. NEVER
+                # recomputed from pkt.depth_m here -- step 13 has NaN-masked it
+                # by now and the post-filter value would silently reappear.
+                meta = getattr(pkt, "ingest", None)
                 if depth_valid_frac is None:
-                    depth_valid_frac = depth_valid_fraction(pkt.depth_m)
+                    depth_valid_frac = getattr(meta, "depth_valid_frac", None)
+                if lane is None:
+                    lane = getattr(meta, "lane", None)
+                if rx_seq is None:
+                    rx_seq = getattr(meta, "rx_seq", None)
+            elif rx_seq is None:
+                rx_seq = self._cur_rx_seq
             sink(ReceiverEvent(
                 timestamp=time.monotonic(),
                 source=self._event_source,
@@ -652,6 +666,8 @@ class WebSocketReceiver:
                 frame_count=frame_count,
                 queue_depth=queue_depth,
                 depth_valid_frac=depth_valid_frac,
+                lane=lane,
+                rx_seq=rx_seq,
             ))
         except Exception:
             logger.debug("[websocket] frame-flow trace failed", exc_info=True)
@@ -671,6 +687,8 @@ class WebSocketReceiver:
         """
         self._hdr_seq = None
         self._hdr_ts = None
+        self._rx_seq += 1
+        self._cur_rx_seq = self._rx_seq
         try:
             return self._parse_binary_message_impl(data)
         except Exception:
@@ -842,14 +860,16 @@ class WebSocketReceiver:
         # is about to throw away (the E1 wedge). The stream loop keeps its
         # put(): a slot can still fill between this check and the put.
         aq = self._admission_queue
-        if aq is not None and aq.full():
+        kf_origin = KF_MINTED if is_keyframe else None
+        refusal = aq.refusal(is_keyframe, kf_origin) if aq is not None else None
+        if refusal is not None:
             if self._latency_analytics:
                 # Sample the (saturated) depth too: the stream loop samples
                 # only for frames that get this far, so without this the
                 # per-second queue_depth_max could never show maxsize.
                 self._latency_analytics.sample_queue_depth(aq.qsize())
                 self._latency_analytics.record_queue_drop()
-            return self._trace_rx(RX_DROPPED, RX_QUEUE_FULL, seq=hdr_seq, ts=hdr_ts,
+            return self._trace_rx(RX_DROPPED, refusal, seq=hdr_seq, ts=hdr_ts,
                                   is_kf=is_keyframe, frame_count=self._frame_count,
                                   depth_valid_frac=dvf)
 
@@ -943,7 +963,7 @@ class WebSocketReceiver:
             confidence=confidence_m,
             rgb_jpeg=raw_jpeg,
             frame_epoch=self._frame_epoch,
-            depth_valid_frac=dvf,
+            ingest=IngestMeta(keyframe_origin=kf_origin, depth_valid_frac=dvf, rx_seq=self._cur_rx_seq),
         )
 
     # ── Server lifecycle ──
