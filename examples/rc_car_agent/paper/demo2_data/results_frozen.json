@@ -1,0 +1,109 @@
+{
+  "n_files": 60,
+  "excluded": {
+    "off_protocol": 0,
+    "invalid_marked": 17,
+    "operator_result": 0,
+    "uncalibrated": 0
+  },
+  "off_protocol_n": 0,
+  "tape_success_cm": 50.0,
+  "conditions": {
+    "rtsm": {
+      "n": 30,
+      "arrived_believed": 26,
+      "censored": 0,
+      "aborted": 4,
+      "results": {
+        "arrived": 26,
+        "not_found": 3,
+        "drift": 1
+      },
+      "tcr_tape": 0.8333333333333334,
+      "tcr_tape_any_verdict": 0.8333333333333334,
+      "tcr_sweep": {
+        "40cm": 0.7666666666666667,
+        "50cm": 0.8333333333333334,
+        "60cm": 0.8333333333333334
+      },
+      "tcr_tape_denom": 30,
+      "tcr_untaped_arrivals": 0,
+      "tape_invalid_n": 0,
+      "tcr_believed": 0.8666666666666667,
+      "terminal_err_median_m": 0.20550000000000002,
+      "terminal_err_iqr_m": [
+        0.19575,
+        0.21675000000000003
+      ],
+      "believed_arrived_tape_failed": 1,
+      "tta_median_s": 34.586,
+      "tta_iqr_s": [
+        30.3945,
+        38.921499999999995
+      ],
+      "tta_n": 30,
+      "pe_median": 1.0960855386295556,
+      "pe_n": 26,
+      "search_time_median_s": null,
+      "planner_paths": {
+        "haiku": 27,
+        "haiku_no_match": 3
+      }
+    },
+    "baseline": {
+      "n": 30,
+      "arrived_believed": 26,
+      "censored": 0,
+      "aborted": 4,
+      "results": {
+        "arrived": 26,
+        "drift": 3,
+        "not_found": 1
+      },
+      "tcr_tape": 0.8666666666666667,
+      "tcr_tape_any_verdict": 0.9,
+      "tcr_sweep": {
+        "40cm": 0.8666666666666667,
+        "50cm": 0.8666666666666667,
+        "60cm": 0.8666666666666667
+      },
+      "tcr_tape_denom": 30,
+      "tcr_untaped_arrivals": 0,
+      "tape_invalid_n": 0,
+      "tcr_believed": 0.8666666666666667,
+      "terminal_err_median_m": 0.20350000000000001,
+      "terminal_err_iqr_m": [
+        0.1605,
+        0.21700000000000003
+      ],
+      "believed_arrived_tape_failed": 0,
+      "tta_median_s": 65.82,
+      "tta_iqr_s": [
+        50.3715,
+        238.77325000000002
+      ],
+      "tta_n": 30,
+      "pe_median": 1.1000619647539898,
+      "pe_n": 26,
+      "search_time_median_s": 33.562,
+      "planner_paths": {
+        "baseline_fresh": 30
+      }
+    }
+  },
+  "mann_whitney_tta": {
+    "U": 169.0,
+    "p_one_sided": 1.648780401913852e-05
+  },
+  "mann_whitney_tta_arrivals_only": {
+    "U": 57.0,
+    "p_one_sided": 1.4221367206079805e-07
+  },
+  "sign_test_by_layout": {
+    "per_layout": {},
+    "memory_wins": 0,
+    "of_layouts": 0,
+    "p_one_sided": null
+  },
+  "tta_speedup_median": 1.9030821719771005
+}

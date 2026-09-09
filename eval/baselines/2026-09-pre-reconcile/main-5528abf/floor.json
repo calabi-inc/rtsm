@@ -1,0 +1,165 @@
+{
+  "branch_dir": "eval/baselines/2026-09-pre-reconcile/main-5528abf",
+  "backends": {
+    "dual": {
+      "runs": [
+        {
+          "run": 1,
+          "objects": 107,
+          "confirmed": 70,
+          "avg_hits": 4.607476635514018,
+          "upserts_total": 101,
+          "objects_page_total": 107,
+          "objects_page_count": 100,
+          "multiset_sha256": "b71b98ca1fc2bf0d",
+          "frame_count": 53,
+          "processing_hz": 1.1,
+          "input_hz": 4.5,
+          "t_total_mean": 0.2743,
+          "queue_depth_max": 0,
+          "queue_drops": 0,
+          "gate_rejections": 26,
+          "frame_rejections": 0,
+          "hourly_buckets": 39
+        },
+        {
+          "run": 2,
+          "objects": 107,
+          "confirmed": 70,
+          "avg_hits": 4.607476635514018,
+          "upserts_total": 101,
+          "objects_page_total": 107,
+          "objects_page_count": 100,
+          "multiset_sha256": "b71b98ca1fc2bf0d",
+          "frame_count": 53,
+          "processing_hz": 1.08,
+          "input_hz": 5.1,
+          "t_total_mean": 0.269,
+          "queue_depth_max": 0,
+          "queue_drops": 0,
+          "gate_rejections": 25,
+          "frame_rejections": 0,
+          "hourly_buckets": 29
+        },
+        {
+          "run": 3,
+          "objects": 107,
+          "confirmed": 70,
+          "avg_hits": 4.607476635514018,
+          "upserts_total": 101,
+          "objects_page_total": 107,
+          "objects_page_count": 100,
+          "multiset_sha256": "b71b98ca1fc2bf0d",
+          "frame_count": 53,
+          "processing_hz": 1.08,
+          "input_hz": 4.9,
+          "t_total_mean": 0.2939,
+          "queue_depth_max": 0,
+          "queue_drops": 0,
+          "gate_rejections": 15,
+          "frame_rejections": 0,
+          "hourly_buckets": 12
+        }
+      ],
+      "objects_min": 107,
+      "objects_max": 107,
+      "confirmed_min": 70,
+      "confirmed_max": 70,
+      "floor_objects": 0,
+      "floor_confirmed": 0,
+      "multiset_identical_across_runs": true,
+      "multiset_diffs": [
+        {
+          "vs_run": 2,
+          "only_in_run1": 0,
+          "only_in_other": 0
+        },
+        {
+          "vs_run": 3,
+          "only_in_run1": 0,
+          "only_in_other": 0
+        }
+      ]
+    },
+    "grounded_sam2": {
+      "runs": [
+        {
+          "run": 1,
+          "objects": 139,
+          "confirmed": 81,
+          "avg_hits": 3.683453237410072,
+          "upserts_total": 114,
+          "objects_page_total": 139,
+          "objects_page_count": 100,
+          "multiset_sha256": "eab7e618f54b2f13",
+          "frame_count": 53,
+          "processing_hz": 0.88,
+          "input_hz": 4.6,
+          "t_total_mean": 1.0544,
+          "queue_depth_max": 11,
+          "queue_drops": 0,
+          "gate_rejections": 24,
+          "frame_rejections": 0,
+          "hourly_buckets": 35
+        },
+        {
+          "run": 2,
+          "objects": 133,
+          "confirmed": 81,
+          "avg_hits": 3.8045112781954886,
+          "upserts_total": 116,
+          "objects_page_total": 133,
+          "objects_page_count": 100,
+          "multiset_sha256": "4a29c1ed37d2b052",
+          "frame_count": 53,
+          "processing_hz": 0.88,
+          "input_hz": 0.0,
+          "t_total_mean": 1.0499,
+          "queue_depth_max": 4,
+          "queue_drops": 0,
+          "gate_rejections": 16,
+          "frame_rejections": 0,
+          "hourly_buckets": 17
+        },
+        {
+          "run": 3,
+          "objects": 133,
+          "confirmed": 81,
+          "avg_hits": 3.8045112781954886,
+          "upserts_total": 123,
+          "objects_page_total": 133,
+          "objects_page_count": 100,
+          "multiset_sha256": "4a29c1ed37d2b052",
+          "frame_count": 53,
+          "processing_hz": 0.87,
+          "input_hz": 0.0,
+          "t_total_mean": 1.0774,
+          "queue_depth_max": 4,
+          "queue_drops": 0,
+          "gate_rejections": 15,
+          "frame_rejections": 0,
+          "hourly_buckets": 12
+        }
+      ],
+      "objects_min": 133,
+      "objects_max": 139,
+      "confirmed_min": 81,
+      "confirmed_max": 81,
+      "floor_objects": 6,
+      "floor_confirmed": 0,
+      "multiset_identical_across_runs": false,
+      "multiset_diffs": [
+        {
+          "vs_run": 2,
+          "only_in_run1": 6,
+          "only_in_other": 6
+        },
+        {
+          "vs_run": 3,
+          "only_in_run1": 6,
+          "only_in_other": 6
+        }
+      ]
+    }
+  }
+}

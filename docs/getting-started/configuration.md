@@ -29,10 +29,21 @@ mask-area cutoff is `filters.min_area_px` and the live depth rejection
 fraction is `staging.depth_valid_min`. Coverage and border contact are scored
 softly through the `staging.w_*` weights rather than rejected outright.
 
-The shipped main configuration includes the RC-car experiment's five-object
-vocabulary. Inspect it before evaluating on a different scene. The demo has a
-different vocabulary and confirmation policy. Neither is a universal reliability
-preset.
+The shipped configuration uses the general indoor vocabulary (`vocab: null`,
+48 classes) with `box_threshold 0.20`. The RC-car experiment's five-object
+vocabulary and its `box_threshold 0.30` are **not** shipped as defaults; they
+live in a sparse profile, `examples/rc_car_agent/e1-demo2.profile.yaml`
+(together with the opt-in receive-time clearance the agent needs). Apply it
+when you want the E1 conditions:
+
+```bash
+python -m rtsm --profile examples/rc_car_agent/e1-demo2.profile.yaml
+rtsm config show --profile examples/rc_car_agent/e1-demo2.profile.yaml
+```
+
+Inspect any vocabulary before evaluating on a different scene. The demo has a
+different vocabulary and confirmation policy. None of these is a universal
+reliability preset.
 
 ## Repeatable tuning
 
@@ -214,6 +225,25 @@ io:
     nonkf_min_interval_s: 0.5        # throttle non-keyframes (~2/s)
     confidence_threshold: 2          # 0=all, 1=medium+high, 2=high only
 ```
+
+### Receive-Time Forward Clearance (opt-in)
+
+```yaml
+io:
+  clearance:
+    enable: false                    # default off: no per-frame cost, no /stats field
+```
+
+When enabled (websocket receiver only), every frame that passes the tracking
+filter and the non-keyframe throttle gets a 10th-percentile depth statistic
+over the central image band right after depth decode -- on the receiver
+thread, before the ingest queue and any GPU work -- published as
+`/stats.forward_clearance = {clearance_m, valid_frac, timestamp}` (`null`
+until the first depth frame; `clearance_m == 0.0` means blocked or
+unmeasurable, fail-closed). `examples/rc_car_agent` requires it
+(`python -m rtsm --set io.clearance.enable=true`, or the E1 profile above;
+its preflight refuses to start without the field). With the default `false`
+the receiver and `/stats` are identical to a build without the feature.
 
 ### ZeroMQ Receiver (RealSense + RTABMap)
 

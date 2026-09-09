@@ -1,0 +1,60 @@
+# E1 (Demo 2, RC-car agent) perception tuning.
+#
+# A sparse --profile layered over the packaged rtsm/cfg/rtsm.yaml. It carries
+# the two values the demo2 branch (f7a0880) had baked into its committed
+# rtsm.yaml and that the reconcile deliberately did NOT ship as public
+# defaults: the GDINO box threshold and the five-object E1 roster vocabulary.
+# Everything else (gates, ltm, staging.judge_crop_*, diagnostics, ...) is the
+# packaged default and is shared by both branches after the reconcile.
+#
+# Usage (restart RTSM to apply; see docs/getting-started/configuration.md):
+#   python -m rtsm --profile examples/rc_car_agent/e1-demo2.profile.yaml
+#   rtsm --replay recordings/session1 --profile examples/rc_car_agent/e1-demo2.profile.yaml
+#   rtsm config explain --profile examples/rc_car_agent/e1-demo2.profile.yaml --symptom missing
+#   rtsm config show    --profile examples/rc_car_agent/e1-demo2.profile.yaml > trial.yaml
+# Trial event logs are a separate operator choice:
+#   ... --profile examples/rc_car_agent/e1-demo2.profile.yaml --set diagnostics.enabled=true
+# The profile also switches on receive-time forward clearance (io.clearance,
+# opt-in after the reconcile): nav.py's drive-phase obstacle guard and
+# baseline_search's relocation-walk gate read /stats.forward_clearance and are
+# blind without it. `--set io.clearance.enable=true` (the agent's spawn_cmd)
+# is the path-independent equivalent; under --replay it is inert (warning only).
+#
+# The RC-car agent does not pass this profile by itself: examples/rc_car_agent/
+# config.yaml names no RTSM config file (rtsm.lifecycle "attach"; spawn mode
+# runs the bare `python -m rtsm`, server.py Popen(spawn_cmd.split())). Either
+# start RTSM with the flag above, or set
+#   rtsm.spawn_cmd: "python -m rtsm --profile examples/rc_car_agent/e1-demo2.profile.yaml"
+#
+# Backend: E1 ran grounded_sam2 for BOTH conditions (2026-08-28 protocol
+# amendment: the RC-mounted low camera angle starves FastSAM's generic
+# proposals; GDINO is PROMPTED for the roster classes, so per-frame recall on
+# targets is what the campaign needs). grounded_sam2 is already the packaged
+# default, and this profile intentionally does not pin segmentation.backend so
+# that harnesses which patch the backend in the base file (benchmark_*.py)
+# keep control of it. Pin it explicitly if the packaged default ever changes:
+#   --set segmentation.backend=grounded_sam2
+#
+# Provenance: examples/rc_car_agent/paper/E1_PROTOCOL.md (frozen tree) --
+# vocabulary amendment 2026-08-28, threshold amendment 2026-08-30 (0.20 -> 0.30).
+# Pre-reconcile floor with this tuning (demo2 f7a0880, grounded_sam2, session1
+# replay): 25 objects / 18 confirmed, 3/3 runs
+# (eval/baselines/2026-09-pre-reconcile/demo2-f7a0880/). This is an experiment
+# configuration, not a general preset: the 5-class roster sees ~25 objects on
+# session1 where the packaged 48-class indoor vocabulary sees ~133-139.
+
+segmentation:
+  grounded_sam2:
+    # 2026-08-30: 0.20 minted 4 fake "dumbbells" + a thermos-as-bottle from
+    # round/metal clutter in the L1 pilot; real roster peaks measured
+    # 0.55-0.88. Verify all 5 objects still fire at scan check before trials.
+    box_threshold: 0.30
+    # E1 roster vocabulary (2026-08-28, operator-set): the five venue objects.
+    # null (the packaged default) falls back to the 48-class indoor vocabulary.
+    vocab: [teddy bear, water bottle, scissors, tissue box, dumbbell]
+
+io:
+  clearance:
+    # E1 ran with the wall guard live; the agent's preflight refuses to start
+    # without /stats.forward_clearance. No effect under --replay (no source).
+    enable: true

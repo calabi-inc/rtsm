@@ -9,7 +9,7 @@ import cv2
 from PIL import Image
 
 from rtsm.core.frame_gate import FrameQualityGate
-from rtsm.utils.mask_staging import run_heuristics, MaskStats
+from rtsm.utils.mask_staging import run_heuristics, MaskStats, FilterDiagnostics
 from rtsm.utils.prepare_ann import prepare_ann
 from rtsm.utils.periodic_logger import PeriodicLogger
 from rtsm.models.segmentation import SegmentationAdapter, SegmentationResult
@@ -23,8 +23,10 @@ from rtsm.stores.sweep_cache import SweepCache
 from rtsm.io.ingest_queue import IngestQueue
 from rtsm.core.datamodel import FramePacket
 from rtsm.core.watchdog import PipelineHeartbeat
+from rtsm.evaluation.event_log import EventLogWriter, FrameEvent, summarize_sources
 
 logger = logging.getLogger(__name__)
+
 
 @dataclass
 class Snapshot:
@@ -41,6 +43,71 @@ class Candidate:
     priority: float               # computed priority score
     crop: Optional[np.ndarray] = None    # 224x224x3 uint8 after pre-clip
     emb_vis: Optional[np.ndarray] = None # CLIP visual embedding (L2-normalized)
+    # Judgment crop (2026-08-30): native-resolution, UNMASKED, generously
+    # padded cut of the same detection — for the stored snapshot gallery
+    # that VLM selection and operator eyeballing consume. The 224 masked
+    # `crop` above is an EMBEDDING input (background suppressed so CLIP
+    # focuses on the object) and was never fit for judgment: the L1 pilot
+    # showed the arbiter rubber-stamping wrong objects it could not
+    # actually identify at that size, with the mean-fill background
+    # destroying all context.
+    crop_hires: Optional[np.ndarray] = None
+
+
+def cut_judgment_crop(rgb: np.ndarray, x0: int, y0: int, x1: int, y1: int,
+                      pad_frac: float, max_px: int) -> Optional[np.ndarray]:
+    """Unmasked judgment crop (2026-08-30): pure function, unit-tested.
+
+    Cuts the bbox (already in RGB pixel space) from the full frame with
+    context padding of pad_frac × the box's own size on every side,
+    clamped to the frame; downscales with INTER_AREA only when the long
+    side exceeds max_px. Returns None for degenerate boxes. The result
+    is what the snapshot gallery stores — the crop VLM selection and
+    operator eyeballing consume (the masked 224 embedding crop was never
+    fit for judgment)."""
+    H, W = rgb.shape[:2]
+    bw, bh = x1 - x0, y1 - y0
+    if bw <= 0 or bh <= 0:
+        return None
+    jx0 = max(0, int(x0 - bw * pad_frac))
+    jy0 = max(0, int(y0 - bh * pad_frac))
+    jx1 = min(W, int(x1 + bw * pad_frac))
+    jy1 = min(H, int(y1 + bh * pad_frac))
+    if jx1 <= jx0 or jy1 <= jy0:
+        return None
+    hires = rgb[jy0:jy1, jx0:jx1].copy()
+    long_side = max(hires.shape[0], hires.shape[1])
+    if long_side > max_px:
+        scale = max_px / float(long_side)
+        hires = cv2.resize(
+            hires,
+            (max(1, int(hires.shape[1] * scale)),
+             max(1, int(hires.shape[0] * scale))),
+            interpolation=cv2.INTER_AREA)
+    return hires
+
+
+@dataclass
+class ScoringTraceEntry:
+    """Per-candidate scoring trace row. Captured before dedup/topK so the full
+    distribution is visible offline (sweep tuning needs to see what almost
+    survived, not just what did)."""
+    mask_idx: int
+    priority: float
+    coverage: float
+    border_fraction: float
+    depth_valid: float
+    depth_spread: float
+    bbox_area_norm: float
+    confirmation_source: Optional[str]   # "dual" | "yoloe_only" | "fastsam_only" | None
+    selected_topk: bool                  # True for candidates that survived the top-K cut
+
+
+@dataclass
+class ScoringTrace:
+    n_candidates: int                    # total scored (pre-dedup)
+    n_selected: int                      # actually returned by _score_and_select (post-dedup, capped at topK)
+    entries: List[ScoringTraceEntry]
 
 class Pipeline:
     def __init__(
@@ -70,6 +137,7 @@ class Pipeline:
         self.vectors = vectors  # generic vector store client (FAISS or Milvus)
         self._running = False
         self._last_flush_ts = 0.0
+        self._vector_flush_failures = 0
         self.ingest_q = ingest_q
         self.sweep_cache = sweep_cache or SweepCache()
         self._seg_analytics = seg_analytics
@@ -88,6 +156,17 @@ class Pipeline:
             interval_s=float(log_cfg.get("summary_interval_s", 5.0)),
             enabled=bool(log_cfg.get("periodic_summary", True)),
         )
+
+        # Phase 0 diagnostics: per-frame JSONL event log (off by default).
+        # See rtsm/evaluation/event_log.py for path resolution rules.
+        diag_cfg = cfg.get("diagnostics", {})
+        self._event_log = EventLogWriter(
+            enabled=bool(diag_cfg.get("enabled", False)),
+            configured_path=diag_cfg.get("event_log_path"),
+        )
+        # Always-present attrs (populated each frame when set; default to None)
+        self._last_filter_diagnostics: Optional[FilterDiagnostics] = None
+        self._last_scoring_trace: Optional[ScoringTrace] = None
 
     # -------- public entrypoints --------
     def run_forever(self):
@@ -208,7 +287,13 @@ class Pipeline:
         t_step_start = time.perf_counter()
 
         # 1) segmentation -> masks
-        pil_img = Image.fromarray(snap.rgb) if isinstance(snap.rgb, np.ndarray) else snap.rgb
+        # Ingest frames are BGR by contract (io/websocket.decode_rgb); PIL
+        # convention is RGB, and every PIL-consuming backend (GDINO, YOLOE,
+        # SAM2 preprocessors) assumes it. Flip ONCE at this boundary —
+        # feeding BGR-as-RGB silently degraded detection for months
+        # (found 2026-08-15: a red Coca-Cola can stored as blue).
+        pil_img = (Image.fromarray(snap.rgb[..., ::-1])
+                   if isinstance(snap.rgb, np.ndarray) else snap.rgb)
 
         # Get segmentation vocab from config (for open-vocab models)
         seg_cfg = self.cfg.get("segmentation", {})
@@ -228,6 +313,14 @@ class Pipeline:
         t_seg_end = time.perf_counter()
         # Store for downstream priority boost and label propagation
         self._last_seg_result = seg_result
+        # Detector-label monitor (2026-08-28): tally what the PROMPTED
+        # detector claims to see this frame, before any association/
+        # confirmation gate can hide it — served in /stats so operators
+        # can separate "detector never saw it" from "memory never
+        # surfaced it".
+        if self.working_mem is not None and seg_result.labels:
+            self.working_mem.note_label_detections(seg_result.labels,
+                                                   seg_result.scores)
 
         # Extract masks - use prepare_ann for consistency with existing pipeline
         if seg_result.has_masks:
@@ -285,12 +378,13 @@ class Pipeline:
             mask_to_rgb_sy = rgb_h_frame / mask_hw[0]  # height
 
         t_heur_start = time.perf_counter()
-        kept_masks, stats = run_heuristics(
+        kept_masks, stats, filter_diag = run_heuristics(
             ann_bool,
             snap.depth_m,
             cfg=heur_cfg,
         )
         t_heur_end = time.perf_counter()
+        self._last_filter_diagnostics = filter_diag
         logger.debug(f"staging: kept {len(kept_masks)}/{n_masks} masks after heuristics")
 
         # Scale centroid_px from mask space to RGB space for downstream consumers
@@ -443,6 +537,59 @@ class Pipeline:
                 self.working_mem.update_robot_pose(twc, q, timestamp)
         except Exception:
             logger.warning("Post-processing ingest bookkeeping or robot-pose update failed", exc_info=True)
+
+        # ---- Phase 0 diagnostic event log (no-op when disabled) ----
+        if self._event_log.enabled:
+            try:
+                fd = self._last_filter_diagnostics
+                st = self._last_scoring_trace
+                filter_dict: Dict[str, Any] = {}
+                if fd is not None:
+                    filter_dict = {
+                        "total_input": fd.total_input,
+                        "dropped_area": fd.dropped_area,
+                        "dropped_depth_valid": fd.dropped_depth_valid,
+                        "dropped_depth_spread": fd.dropped_depth_spread,
+                        "passed": fd.passed,
+                    }
+                    if fd.drop_details:
+                        filter_dict["drop_details"] = fd.drop_details
+                scoring_dict: Dict[str, Any] = {}
+                if st is not None:
+                    scoring_dict = {
+                        "n_candidates": st.n_candidates,
+                        "n_selected": st.n_selected,
+                        "top_k_priorities": [e.priority for e in st.entries[:5]],
+                        "source_breakdown": summarize_sources(st.entries),
+                    }
+                n_conf = 0
+                if self.working_mem is not None:
+                    try:
+                        n_conf = int(self.working_mem.stats().get("confirmed", 0))
+                    except Exception:
+                        n_conf = 0
+                self._event_log.write(FrameEvent(
+                    timestamp=t_step_start,
+                    frame_seq=int(pkt.time.seq or 0) if pkt is not None else 0,
+                    is_keyframe=is_kf,
+                    n_masks_raw=n_masks,
+                    filter=filter_dict,
+                    scoring=scoring_dict,
+                    n_matched=m,
+                    n_created=c,
+                    n_objects_confirmed=n_conf,
+                    timing_ms={
+                        "segmentation": (t_seg_end - t_seg_start) * 1000.0,
+                        "heuristics": (t_heur_end - t_heur_start) * 1000.0,
+                        "scoring": (t_score_end - t_score_start) * 1000.0,
+                        "clip": (t_clip_end - t_clip_start) * 1000.0,
+                        "association": (t_assoc_end - t_assoc_start) * 1000.0,
+                        "total": (t_assoc_end - t_step_start) * 1000.0,
+                    },
+                ))
+            except Exception:
+                # Never let diagnostics kill the pipeline
+                logger.debug("event log write failed", exc_info=True)
 
     # -------- internals --------
     def _get_snapshot_via_queue(self) -> Tuple[Optional[Snapshot], Optional[FramePacket]]:
@@ -612,6 +759,33 @@ class Pipeline:
         # pick top-K by priority
         cands.sort(key=lambda c: c.priority, reverse=True)
 
+        # Build scoring trace (pre-dedup snapshot of all candidates with their priorities).
+        # selected_topk is filled in after dedup at the end of this function.
+        seg = getattr(self, '_last_seg_result', None)
+        seg_sources = (
+            seg.confirmation_source
+            if seg is not None and seg.confirmation_source is not None
+            else None
+        )
+        trace_entries: List[ScoringTraceEntry] = []
+        for cd in cands:
+            s = cd.stats
+            bbox_n = min(1.0, (max(0, s.bbox[2]-s.bbox[0]) * max(0, s.bbox[3]-s.bbox[1])) / img_area) if img_area > 0 else 0.0
+            src: Optional[str] = None
+            if seg_sources is not None and 0 <= s.idx < len(seg_sources):
+                src = seg_sources[s.idx]
+            trace_entries.append(ScoringTraceEntry(
+                mask_idx=int(s.idx),
+                priority=float(cd.priority),
+                coverage=float(s.coverage),
+                border_fraction=float(s.border_fraction),
+                depth_valid=float(s.depth_valid),
+                depth_spread=0.0 if s.depth_spread is None else float(s.depth_spread),
+                bbox_area_norm=float(bbox_n),
+                confirmation_source=src,
+                selected_topk=False,  # filled in at the end after dedup
+            ))
+
         # Scoring diagnostics: log all candidates ranked by priority
         if cands:
             logger.info(
@@ -743,10 +917,24 @@ class Pipeline:
             if not suppress:
                 kept.append(c)
 
-        return kept[:topK]
+        final = kept[:topK]
+
+        # Mark which trace entries actually survived dedup + topK
+        selected_mask_idx = {int(c.stats.idx) for c in final}
+        for entry in trace_entries:
+            if entry.mask_idx in selected_mask_idx:
+                entry.selected_topk = True
+        self._last_scoring_trace = ScoringTrace(
+            n_candidates=len(trace_entries),
+            n_selected=len(final),
+            entries=trace_entries,
+        )
+
+        return final
 
     def _make_crops_inplace(self, cands: List[Candidate], rgb: np.ndarray,
-                            mask_to_rgb_sx: float = 1.0, mask_to_rgb_sy: float = 1.0):
+                            mask_to_rgb_sx: float = 1.0,
+                            mask_to_rgb_sy: float = 1.0):
         pad = int(self.cfg.get("staging",{}).get("crop_pad_px", 6))
         size = int(self.cfg.get("staging",{}).get("clip_input", 224))
         H, W, _ = rgb.shape
@@ -768,6 +956,15 @@ class Pipeline:
             if x1 <= x0 or y1 <= y0:
                 c.crop = None
                 continue
+
+            # Judgment crop FIRST, before any masking (2026-08-30): the
+            # snapshot gallery needs real pixels with context.
+            pad_frac = float(self.cfg.get("staging", {})
+                             .get("judge_crop_pad_frac", 0.20))
+            max_px = int(self.cfg.get("staging", {})
+                         .get("judge_crop_max_px", 640))
+            c.crop_hires = cut_judgment_crop(rgb, x0, y0, x1, y1,
+                                             pad_frac, max_px)
 
             crop = rgb[y0:y1, x0:x1].copy()    # copy needed for masking
             if crop.size == 0:
@@ -812,9 +1009,11 @@ class Pipeline:
         for i, c in enumerate(cands):
             if c.crop is None:
                 continue
-            # ensure RGB PIL for preprocess; if your crop is BGR, swap channels here once:
-            # crop = c.crop[..., ::-1]
-            crop = c.crop
+            # Crops are cut from the BGR ingest frame; CLIP/SigLIP was
+            # trained on RGB — swap ONCE here (this line sat commented out
+            # while every embedding in the store was computed on swapped
+            # channels; found 2026-08-15).
+            crop = c.crop[..., ::-1]
             imgs.append(Image.fromarray(crop))  # already 224x224 uint8
             idxs.append(i)
         if not imgs:
@@ -832,25 +1031,43 @@ class Pipeline:
                     label, tv, class_idx, topk = cls[row]
                     # Always store top-K labels with scores (frontend will pick best for display)
                     setattr(cands[i], 'label_topk', [(cid, float(sc)) for (cid, sc, _j) in topk])
-        # Merge YOLOE detection labels with CLIP vocab labels.
-        # For dual-confirmed masks, prepend the YOLOE label (higher specificity
-        # from detection head) ahead of CLIP's vocab-classifier labels.
+        # Merge DETECTION labels with CLIP vocab labels — the detection
+        # head's label (higher specificity; for prompted backends it is
+        # matched against the operator's vocabulary) goes ahead of CLIP's
+        # vocab-classifier labels. Sources: dual/YOLOE fill
+        # detection_labels/label_confidence; grounded_sam2 and standalone
+        # yoloe fill the base labels/scores fields (2026-08-28: grounded
+        # labels were silently dropped here — objects kept only CLIP
+        # classifier labels like 'card box' for a GDINO-detected
+        # 'tissue box', so label search had nothing to match).
         seg = getattr(self, '_last_seg_result', None)
-        if seg is not None and seg.detection_labels is not None:
+        if seg is not None:
             det_labels = seg.detection_labels
             det_conf = seg.label_confidence
-            for i, c in enumerate(cands):
-                src_idx = c.stats.idx  # original mask index from segmentation output
-                if src_idx < len(det_labels) and det_labels[src_idx]:
-                    yoloe_label = det_labels[src_idx]
-                    yoloe_score = float(det_conf[src_idx]) if det_conf and src_idx < len(det_conf) else 0.5
-                    existing = getattr(c, 'label_topk', None) or []
-                    # Merge: YOLOE label first (if not already present), then CLIP labels
-                    merged = [(yoloe_label, yoloe_score)]
-                    for lbl, sc in existing:
-                        if lbl != yoloe_label:
-                            merged.append((lbl, sc))
-                    c.label_topk = merged[:5]
+            if det_labels is None and seg.labels is not None:
+                det_labels = seg.labels
+                det_conf = ([float(s) for s in seg.scores]
+                            if seg.scores is not None else None)
+            if det_labels is not None:
+                for i, c in enumerate(cands):
+                    src_idx = c.stats.idx  # original mask index from segmentation output
+                    if src_idx < len(det_labels) and det_labels[src_idx]:
+                        det_label = det_labels[src_idx]
+                        # RAW measured confidence (0.5 only when the
+                        # backend reports none) — a floor here saturates
+                        # label_scores to a constant, which destroys
+                        # label-search ranking (exact ties broken by
+                        # object age) and fabricates every stored
+                        # label_confidence (reviewed 2026-08-28).
+                        det_score = (float(det_conf[src_idx])
+                                     if det_conf and src_idx < len(det_conf)
+                                     else 0.5)
+                        existing = getattr(c, 'label_topk', None) or []
+                        merged = [(det_label, det_score)]
+                        for lbl, sc in existing:
+                            if lbl != det_label:
+                                merged.append((lbl, sc))
+                        c.label_topk = merged[:5]
 
         # Single boundary cast: move whole batch to CPU numpy float32 for association/WM
         try:
@@ -870,16 +1087,47 @@ class Pipeline:
         if (now - self._last_flush_ts) < flush_every_s:
             return
         self._last_flush_ts = now
-        # Let associator (or WM) provide a list of “ready” objects to upsert
-        ready = self.working_mem.collect_ready_for_upsert()
+        # Let associator (or WM) provide a list of “ready” objects to upsert.
+        # Guarded: run_forever() has no per-step catch, so an exception here
+        # would kill the whole pipeline thread.
+        try:
+            ready = self.working_mem.collect_ready_for_upsert()
+        except Exception:
+            logger.error("[PIPE] collect_ready_for_upsert failed", exc_info=True)
+            return
         if not ready:
             return
         try:
             self.vectors.upsert_batch(ready)  # implementation behind your interface
-        except Exception as e:
-            logger.warning(f"vectors upsert failed: {e}")
+        except Exception:
+            self._vector_flush_failures += 1
+            # Roll back the upsert bookkeeping so these objects retry next
+            # flush; otherwise they look freshly upserted and stay invisible
+            # to /search/semantic until the force period (or forever).
+            requeued = 0
+            try:
+                requeued = self.working_mem.mark_upsert_failed(
+                    [r["object_id"] for r in ready]
+                )
+            except Exception:
+                logger.error("[PIPE] upsert-failure requeue failed", exc_info=True)
+            logger.error(
+                f"[PIPE] vector upsert FAILED for {len(ready)} objects "
+                f"(requeued={requeued}, failures_total={self._vector_flush_failures}); "
+                f"semantic search will miss these objects until a flush succeeds",
+                exc_info=True,
+            )
+            return
         st = self.working_mem.stats()
-        logger.info(f"[PIPE] flushed {len(ready)} upserts; wm_confirmed={st.get('confirmed',0)} upserts_total={st.get('upserts_total',0)}")
+        vec_total = "?"
+        try:
+            vec_total = self.vectors.stats().get("count", "?")
+        except Exception:
+            pass
+        logger.info(
+            f"[PIPE] flushed {len(ready)} upserts; wm_confirmed={st.get('confirmed',0)} "
+            f"vectors_total={vec_total} upserts_total={st.get('upserts_total',0)}"
+        )
 
 
     # -------- teardown --------
@@ -893,6 +1141,10 @@ class Pipeline:
             self.clip.close()
         except Exception:
             logger.warning("Failed to close CLIP adapter during shutdown", exc_info=True)
+        try:
+            self._event_log.close()
+        except Exception:
+            logger.warning("Failed to close diagnostic event log during shutdown", exc_info=True)
 
     # -------- single test  step (hardcoded import) --------
     @torch.no_grad()
@@ -909,7 +1161,7 @@ class Pipeline:
         seg_result = self.segmenter.segment(pil)
         ann_bool = prepare_ann(seg_result.masks) if seg_result.has_masks else torch.empty(0, pil.height, pil.width, dtype=torch.bool)
         depth_m = load_depth_png_as_meters("test_dataset/depth/1754989062.627478.png")
-        kept_masks, stats = run_heuristics(
+        kept_masks, stats, _filter_diag = run_heuristics(
             ann_bool,
             depth_m,
             cfg=self.cfg,

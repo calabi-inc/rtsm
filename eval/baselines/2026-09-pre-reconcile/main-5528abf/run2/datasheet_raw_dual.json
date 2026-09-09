@@ -1,0 +1,2816 @@
+{
+  "label": "FastSAM + YOLOE (dual)",
+  "backend": "dual",
+  "timestamp": "2026-09-07T03:39:29.380062",
+  "latency": {
+    "frame_count": 53,
+    "window_duration_s": 48.9,
+    "input_hz": 5.1,
+    "processing_hz": 1.08,
+    "effective_ratio": 0.212,
+    "gate_acceptance_rate": 1.0,
+    "warmup_skipped": 5,
+    "t_segmentation": {
+      "mean": 0.1133,
+      "p50": 0.1025,
+      "p95": 0.1467,
+      "max": 0.4031
+    },
+    "t_heuristics": {
+      "mean": 0.0884,
+      "p50": 0.0921,
+      "p95": 0.1135,
+      "max": 0.1258
+    },
+    "t_scoring": {
+      "mean": 0.0003,
+      "p50": 0.0003,
+      "p95": 0.0004,
+      "max": 0.0005
+    },
+    "t_clip": {
+      "mean": 0.0545,
+      "p50": 0.0556,
+      "p95": 0.0765,
+      "max": 0.0928
+    },
+    "t_association": {
+      "mean": 0.0078,
+      "p50": 0.0081,
+      "p95": 0.0101,
+      "max": 0.0128
+    },
+    "t_total": {
+      "mean": 0.269,
+      "p50": 0.2628,
+      "p95": 0.335,
+      "max": 0.6154
+    },
+    "mean_queue_depth": 0.2,
+    "mean_masks_in": 25.9,
+    "mean_candidates": 13.1,
+    "mask_survival_rate": 0.508
+  },
+  "latency_hourly": [
+    {
+      "wall_ts": 1788777479.0939221,
+      "input_hz": 0.0,
+      "processing_hz": 0.0,
+      "effective_ratio": 0.0,
+      "queue_drops": 0,
+      "gate_rejections": 0,
+      "frame_rejections": 0,
+      "throttle_skips": 0,
+      "tracking_drops": 0,
+      "queue_depth_mean": 0.0,
+      "queue_depth_max": 0,
+      "t_total_ms": 0.0,
+      "t_seg_ms": 0.0,
+      "t_heur_ms": 0.0,
+      "t_scoring_ms": 0.0,
+      "t_clip_ms": 0.0,
+      "t_assoc_ms": 0.0,
+      "frames_in_bucket": 0,
+      "assoc_matched": 0,
+      "assoc_created": 0,
+      "wm_total": 0,
+      "wm_confirmed": 0,
+      "wm_proto": 0
+    },
+    {
+      "wall_ts": 1788777480.1064394,
+      "input_hz": 4.9,
+      "processing_hz": 0.0,
+      "effective_ratio": 0.0,
+      "queue_drops": 0,
+      "gate_rejections": 4,
+      "frame_rejections": 0,
+      "throttle_skips": 3,
+      "tracking_drops": 0,
+      "queue_depth_mean": 0.0,
+      "queue_depth_max": 0,
+      "t_total_ms": 0.0,
+      "t_seg_ms": 0.0,
+      "t_heur_ms": 0.0,
+      "t_scoring_ms": 0.0,
+      "t_clip_ms": 0.0,
+      "t_assoc_ms": 0.0,
+      "frames_in_bucket": 0,
+      "assoc_matched": 0,
+      "assoc_created": 0,
+      "wm_total": 11,
+      "wm_confirmed": 0,
+      "wm_proto": 11
+    },
+    {
+      "wall_ts": 1788777481.1147382,
+      "input_hz": 4.9,
+      "processing_hz": 0.0,
+      "effective_ratio": 0.0,
+      "queue_drops": 0,
+      "gate_rejections": 1,
+      "frame_rejections": 0,
+      "throttle_skips": 4,
+      "tracking_drops": 0,
+      "queue_depth_mean": 0.0,
+      "queue_depth_max": 0,
+      "t_total_ms": 0.0,
+      "t_seg_ms": 0.0,
+      "t_heur_ms": 0.0,
+      "t_scoring_ms": 0.0,
+      "t_clip_ms": 0.0,
+      "t_assoc_ms": 0.0,
+      "frames_in_bucket": 0,
+      "assoc_matched": 0,
+      "assoc_created": 0,
+      "wm_total": 11,
+      "wm_confirmed": 0,
+      "wm_proto": 11
+    },
+    {
+      "wall_ts": 1788777482.1217308,
+      "input_hz": 6.0,
+      "processing_hz": 1.0,
+      "effective_ratio": 0.167,
+      "queue_drops": 0,
+      "gate_rejections": 1,
+      "frame_rejections": 0,
+      "throttle_skips": 4,
+      "tracking_drops": 0,
+      "queue_depth_mean": 0.0,
+      "queue_depth_max": 0,
+      "t_total_ms": 223.8,
+      "t_seg_ms": 89.7,
+      "t_heur_ms": 72.4,
+      "t_scoring_ms": 0.3,
+      "t_clip_ms": 52.2,
+      "t_assoc_ms": 6.3,
+      "frames_in_bucket": 1,
+      "assoc_matched": 4,
+      "assoc_created": 10,
+      "wm_total": 21,
+      "wm_confirmed": 0,
+      "wm_proto": 21
+    },
+    {
+      "wall_ts": 1788777483.1211042,
+      "input_hz": 5.0,
+      "processing_hz": 0.0,
+      "effective_ratio": 0.0,
+      "queue_drops": 0,
+      "gate_rejections": 2,
+      "frame_rejections": 0,
+      "throttle_skips": 3,
+      "tracking_drops": 0,
+      "queue_depth_mean": 0.0,
+      "queue_depth_max": 0,
+      "t_total_ms": 0.0,
+      "t_seg_ms": 0.0,
+      "t_heur_ms": 0.0,
+      "t_scoring_ms": 0.0,
+      "t_clip_ms": 0.0,
+      "t_assoc_ms": 0.0,
+      "frames_in_bucket": 0,
+      "assoc_matched": 0,
+      "assoc_created": 0,
+      "wm_total": 21,
+      "wm_confirmed": 0,
+      "wm_proto": 21
+    },
+    {
+      "wall_ts": 1788777484.1140008,
+      "input_hz": 4.0,
+      "processing_hz": 1.0,
+      "effective_ratio": 0.25,
+      "queue_drops": 0,
+      "gate_rejections": 1,
+      "frame_rejections": 0,
+      "throttle_skips": 2,
+      "tracking_drops": 0,
+      "queue_depth_mean": 0.0,
+      "queue_depth_max": 0,
+      "t_total_ms": 235.7,
+      "t_seg_ms": 97.0,
+      "t_heur_ms": 76.9,
+      "t_scoring_ms": 0.2,
+      "t_clip_ms": 51.5,
+      "t_assoc_ms": 7.1,
+      "frames_in_bucket": 1,
+      "assoc_matched": 6,
+      "assoc_created": 6,
+      "wm_total": 27,
+      "wm_confirmed": 4,
+      "wm_proto": 23
+    },
+    {
+      "wall_ts": 1788777485.130766,
+      "input_hz": 4.9,
+      "processing_hz": 0.0,
+      "effective_ratio": 0.0,
+      "queue_drops": 0,
+      "gate_rejections": 2,
+      "frame_rejections": 0,
+      "throttle_skips": 3,
+      "tracking_drops": 0,
+      "queue_depth_mean": 0.0,
+      "queue_depth_max": 0,
+      "t_total_ms": 0.0,
+      "t_seg_ms": 0.0,
+      "t_heur_ms": 0.0,
+      "t_scoring_ms": 0.0,
+      "t_clip_ms": 0.0,
+      "t_assoc_ms": 0.0,
+      "frames_in_bucket": 0,
+      "assoc_matched": 0,
+      "assoc_created": 0,
+      "wm_total": 27,
+      "wm_confirmed": 4,
+      "wm_proto": 23
+    },
+    {
+      "wall_ts": 1788777486.1482487,
+      "input_hz": 4.9,
+      "processing_hz": 0.0,
+      "effective_ratio": 0.0,
+      "queue_drops": 0,
+      "gate_rejections": 1,
+      "frame_rejections": 0,
+      "throttle_skips": 4,
+      "tracking_drops": 0,
+      "queue_depth_mean": 0.0,
+      "queue_depth_max": 0,
+      "t_total_ms": 0.0,
+      "t_seg_ms": 0.0,
+      "t_heur_ms": 0.0,
+      "t_scoring_ms": 0.0,
+      "t_clip_ms": 0.0,
+      "t_assoc_ms": 0.0,
+      "frames_in_bucket": 0,
+      "assoc_matched": 0,
+      "assoc_created": 0,
+      "wm_total": 27,
+      "wm_confirmed": 4,
+      "wm_proto": 23
+    },
+    {
+      "wall_ts": 1788777487.169271,
+      "input_hz": 5.9,
+      "processing_hz": 1.97,
+      "effective_ratio": 0.333,
+      "queue_drops": 0,
+      "gate_rejections": 0,
+      "frame_rejections": 0,
+      "throttle_skips": 4,
+      "tracking_drops": 0,
+      "queue_depth_mean": 0.0,
+      "queue_depth_max": 0,
+      "t_total_ms": 180.3,
+      "t_seg_ms": 85.4,
+      "t_heur_ms": 53.3,
+      "t_scoring_ms": 0.2,
+      "t_clip_ms": 32.3,
+      "t_assoc_ms": 6.0,
+      "frames_in_bucket": 2,
+      "assoc_matched": 14,
+      "assoc_created": 6,
+      "wm_total": 33,
+      "wm_confirmed": 8,
+      "wm_proto": 25
+    },
+    {
+      "wall_ts": 1788777488.1879292,
+      "input_hz": 4.9,
+      "processing_hz": 0.98,
+      "effective_ratio": 0.2,
+      "queue_drops": 0,
+      "gate_rejections": 1,
+      "frame_rejections": 0,
+      "throttle_skips": 3,
+      "tracking_drops": 0,
+      "queue_depth_mean": 0.0,
+      "queue_depth_max": 0,
+      "t_total_ms": 173.8,
+      "t_seg_ms": 93.5,
+      "t_heur_ms": 46.6,
+      "t_scoring_ms": 0.1,
+      "t_clip_ms": 26.1,
+      "t_assoc_ms": 4.4,
+      "frames_in_bucket": 1,
+      "assoc_matched": 5,
+      "assoc_created": 2,
+      "wm_total": 35,
+      "wm_confirmed": 9,
+      "wm_proto": 26
+    },
+    {
+      "wall_ts": 1788777489.196499,
+      "input_hz": 4.9,
+      "processing_hz": 0.0,
+      "effective_ratio": 0.0,
+      "queue_drops": 0,
+      "gate_rejections": 2,
+      "frame_rejections": 0,
+      "throttle_skips": 3,
+      "tracking_drops": 0,
+      "queue_depth_mean": 0.0,
+      "queue_depth_max": 0,
+      "t_total_ms": 0.0,
+      "t_seg_ms": 0.0,
+      "t_heur_ms": 0.0,
+      "t_scoring_ms": 0.0,
+      "t_clip_ms": 0.0,
+      "t_assoc_ms": 0.0,
+      "frames_in_bucket": 0,
+      "assoc_matched": 0,
+      "assoc_created": 0,
+      "wm_total": 35,
+      "wm_confirmed": 9,
+      "wm_proto": 26
+    },
+    {
+      "wall_ts": 1788777490.336039,
+      "input_hz": 3.5,
+      "processing_hz": 1.75,
+      "effective_ratio": 0.5,
+      "queue_drops": 0,
+      "gate_rejections": 0,
+      "frame_rejections": 0,
+      "throttle_skips": 2,
+      "tracking_drops": 0,
+      "queue_depth_mean": 0.0,
+      "queue_depth_max": 0,
+      "t_total_ms": 342.3,
+      "t_seg_ms": 213.2,
+      "t_heur_ms": 68.5,
+      "t_scoring_ms": 0.2,
+      "t_clip_ms": 47.8,
+      "t_assoc_ms": 5.9,
+      "frames_in_bucket": 2,
+      "assoc_matched": 14,
+      "assoc_created": 8,
+      "wm_total": 36,
+      "wm_confirmed": 10,
+      "wm_proto": 26
+    },
+    {
+      "wall_ts": 1788777491.3680303,
+      "input_hz": 5.8,
+      "processing_hz": 0.97,
+      "effective_ratio": 0.167,
+      "queue_drops": 0,
+      "gate_rejections": 0,
+      "frame_rejections": 0,
+      "throttle_skips": 4,
+      "tracking_drops": 0,
+      "queue_depth_mean": 0.0,
+      "queue_depth_max": 0,
+      "t_total_ms": 245.9,
+      "t_seg_ms": 94.5,
+      "t_heur_ms": 97.3,
+      "t_scoring_ms": 0.2,
+      "t_clip_ms": 42.4,
+      "t_assoc_ms": 6.6,
+      "frames_in_bucket": 1,
+      "assoc_matched": 7,
+      "assoc_created": 5,
+      "wm_total": 41,
+      "wm_confirmed": 13,
+      "wm_proto": 28
+    },
+    {
+      "wall_ts": 1788777492.3737051,
+      "input_hz": 5.0,
+      "processing_hz": 0.0,
+      "effective_ratio": 0.0,
+      "queue_drops": 0,
+      "gate_rejections": 1,
+      "frame_rejections": 0,
+      "throttle_skips": 3,
+      "tracking_drops": 0,
+      "queue_depth_mean": 0.0,
+      "queue_depth_max": 0,
+      "t_total_ms": 0.0,
+      "t_seg_ms": 0.0,
+      "t_heur_ms": 0.0,
+      "t_scoring_ms": 0.0,
+      "t_clip_ms": 0.0,
+      "t_assoc_ms": 0.0,
+      "frames_in_bucket": 0,
+      "assoc_matched": 0,
+      "assoc_created": 0,
+      "wm_total": 45,
+      "wm_confirmed": 13,
+      "wm_proto": 32
+    },
+    {
+      "wall_ts": 1788777493.3931441,
+      "input_hz": 4.8,
+      "processing_hz": 0.97,
+      "effective_ratio": 0.2,
+      "queue_drops": 0,
+      "gate_rejections": 0,
+      "frame_rejections": 0,
+      "throttle_skips": 4,
+      "tracking_drops": 0,
+      "queue_depth_mean": 0.0,
+      "queue_depth_max": 0,
+      "t_total_ms": 266.5,
+      "t_seg_ms": 94.3,
+      "t_heur_ms": 103.5,
+      "t_scoring_ms": 0.3,
+      "t_clip_ms": 55.8,
+      "t_assoc_ms": 9.1,
+      "frames_in_bucket": 1,
+      "assoc_matched": 8,
+      "assoc_created": 7,
+      "wm_total": 56,
+      "wm_confirmed": 15,
+      "wm_proto": 41
+    },
+    {
+      "wall_ts": 1788777494.395417,
+      "input_hz": 6.0,
+      "processing_hz": 0.0,
+      "effective_ratio": 0.0,
+      "queue_drops": 0,
+      "gate_rejections": 2,
+      "frame_rejections": 0,
+      "throttle_skips": 4,
+      "tracking_drops": 0,
+      "queue_depth_mean": 0.0,
+      "queue_depth_max": 0,
+      "t_total_ms": 0.0,
+      "t_seg_ms": 0.0,
+      "t_heur_ms": 0.0,
+      "t_scoring_ms": 0.0,
+      "t_clip_ms": 0.0,
+      "t_assoc_ms": 0.0,
+      "frames_in_bucket": 0,
+      "assoc_matched": 0,
+      "assoc_created": 0,
+      "wm_total": 56,
+      "wm_confirmed": 15,
+      "wm_proto": 41
+    },
+    {
+      "wall_ts": 1788777495.4007404,
+      "input_hz": 5.0,
+      "processing_hz": 2.0,
+      "effective_ratio": 0.4,
+      "queue_drops": 0,
+      "gate_rejections": 0,
+      "frame_rejections": 0,
+      "throttle_skips": 3,
+      "tracking_drops": 0,
+      "queue_depth_mean": 0.0,
+      "queue_depth_max": 0,
+      "t_total_ms": 265.3,
+      "t_seg_ms": 101.3,
+      "t_heur_ms": 104.6,
+      "t_scoring_ms": 0.3,
+      "t_clip_ms": 46.4,
+      "t_assoc_ms": 9.0,
+      "frames_in_bucket": 2,
+      "assoc_matched": 17,
+      "assoc_created": 13,
+      "wm_total": 65,
+      "wm_confirmed": 20,
+      "wm_proto": 45
+    },
+    {
+      "wall_ts": 1788777496.407455,
+      "input_hz": 4.0,
+      "processing_hz": 1.0,
+      "effective_ratio": 0.25,
+      "queue_drops": 0,
+      "gate_rejections": 1,
+      "frame_rejections": 0,
+      "throttle_skips": 2,
+      "tracking_drops": 0,
+      "queue_depth_mean": 0.0,
+      "queue_depth_max": 0,
+      "t_total_ms": 335.0,
+      "t_seg_ms": 128.1,
+      "t_heur_ms": 111.7,
+      "t_scoring_ms": 0.3,
+      "t_clip_ms": 76.5,
+      "t_assoc_ms": 9.7,
+      "frames_in_bucket": 1,
+      "assoc_matched": 9,
+      "assoc_created": 6,
+      "wm_total": 71,
+      "wm_confirmed": 22,
+      "wm_proto": 49
+    },
+    {
+      "wall_ts": 1788777497.4203897,
+      "input_hz": 5.9,
+      "processing_hz": 1.97,
+      "effective_ratio": 0.333,
+      "queue_drops": 0,
+      "gate_rejections": 0,
+      "frame_rejections": 0,
+      "throttle_skips": 4,
+      "tracking_drops": 0,
+      "queue_depth_mean": 0.0,
+      "queue_depth_max": 0,
+      "t_total_ms": 288.6,
+      "t_seg_ms": 114.6,
+      "t_heur_ms": 103.1,
+      "t_scoring_ms": 0.3,
+      "t_clip_ms": 58.6,
+      "t_assoc_ms": 8.7,
+      "frames_in_bucket": 2,
+      "assoc_matched": 18,
+      "assoc_created": 11,
+      "wm_total": 78,
+      "wm_confirmed": 25,
+      "wm_proto": 53
+    },
+    {
+      "wall_ts": 1788777498.439738,
+      "input_hz": 4.8,
+      "processing_hz": 1.94,
+      "effective_ratio": 0.4,
+      "queue_drops": 0,
+      "gate_rejections": 0,
+      "frame_rejections": 0,
+      "throttle_skips": 3,
+      "tracking_drops": 0,
+      "queue_depth_mean": 0.0,
+      "queue_depth_max": 0,
+      "t_total_ms": 278.7,
+      "t_seg_ms": 106.7,
+      "t_heur_ms": 105.7,
+      "t_scoring_ms": 0.3,
+      "t_clip_ms": 53.0,
+      "t_assoc_ms": 9.5,
+      "frames_in_bucket": 2,
+      "assoc_matched": 22,
+      "assoc_created": 8,
+      "wm_total": 84,
+      "wm_confirmed": 28,
+      "wm_proto": 56
+    },
+    {
+      "wall_ts": 1788777499.4606795,
+      "input_hz": 5.9,
+      "processing_hz": 0.98,
+      "effective_ratio": 0.167,
+      "queue_drops": 0,
+      "gate_rejections": 1,
+      "frame_rejections": 0,
+      "throttle_skips": 4,
+      "tracking_drops": 0,
+      "queue_depth_mean": 0.0,
+      "queue_depth_max": 0,
+      "t_total_ms": 272.3,
+      "t_seg_ms": 96.9,
+      "t_heur_ms": 91.8,
+      "t_scoring_ms": 0.3,
+      "t_clip_ms": 69.9,
+      "t_assoc_ms": 10.6,
+      "frames_in_bucket": 1,
+      "assoc_matched": 6,
+      "assoc_created": 9,
+      "wm_total": 93,
+      "wm_confirmed": 29,
+      "wm_proto": 64
+    },
+    {
+      "wall_ts": 1788777500.4788342,
+      "input_hz": 5.9,
+      "processing_hz": 0.98,
+      "effective_ratio": 0.167,
+      "queue_drops": 0,
+      "gate_rejections": 1,
+      "frame_rejections": 0,
+      "throttle_skips": 4,
+      "tracking_drops": 0,
+      "queue_depth_mean": 0.0,
+      "queue_depth_max": 0,
+      "t_total_ms": 285.1,
+      "t_seg_ms": 118.6,
+      "t_heur_ms": 96.3,
+      "t_scoring_ms": 0.2,
+      "t_clip_ms": 57.2,
+      "t_assoc_ms": 9.6,
+      "frames_in_bucket": 1,
+      "assoc_matched": 10,
+      "assoc_created": 5,
+      "wm_total": 98,
+      "wm_confirmed": 29,
+      "wm_proto": 69
+    },
+    {
+      "wall_ts": 1788777501.5613928,
+      "input_hz": 3.7,
+      "processing_hz": 0.0,
+      "effective_ratio": 0.0,
+      "queue_drops": 0,
+      "gate_rejections": 1,
+      "frame_rejections": 0,
+      "throttle_skips": 2,
+      "tracking_drops": 0,
+      "queue_depth_mean": 0.0,
+      "queue_depth_max": 0,
+      "t_total_ms": 0.0,
+      "t_seg_ms": 0.0,
+      "t_heur_ms": 0.0,
+      "t_scoring_ms": 0.0,
+      "t_clip_ms": 0.0,
+      "t_assoc_ms": 0.0,
+      "frames_in_bucket": 0,
+      "assoc_matched": 0,
+      "assoc_created": 0,
+      "wm_total": 98,
+      "wm_confirmed": 29,
+      "wm_proto": 69
+    },
+    {
+      "wall_ts": 1788777503.3412924,
+      "input_hz": 5.1,
+      "processing_hz": 1.12,
+      "effective_ratio": 0.222,
+      "queue_drops": 0,
+      "gate_rejections": 1,
+      "frame_rejections": 0,
+      "throttle_skips": 6,
+      "tracking_drops": 0,
+      "queue_depth_mean": 0.0,
+      "queue_depth_max": 0,
+      "t_total_ms": 245.6,
+      "t_seg_ms": 101.4,
+      "t_heur_ms": 76.9,
+      "t_scoring_ms": 0.2,
+      "t_clip_ms": 57.5,
+      "t_assoc_ms": 6.8,
+      "frames_in_bucket": 2,
+      "assoc_matched": 15,
+      "assoc_created": 7,
+      "wm_total": 87,
+      "wm_confirmed": 35,
+      "wm_proto": 52
+    },
+    {
+      "wall_ts": 1788777504.3624077,
+      "input_hz": 4.8,
+      "processing_hz": 0.97,
+      "effective_ratio": 0.2,
+      "queue_drops": 0,
+      "gate_rejections": 1,
+      "frame_rejections": 0,
+      "throttle_skips": 3,
+      "tracking_drops": 0,
+      "queue_depth_mean": 0.0,
+      "queue_depth_max": 0,
+      "t_total_ms": 224.8,
+      "t_seg_ms": 117.0,
+      "t_heur_ms": 57.9,
+      "t_scoring_ms": 0.1,
+      "t_clip_ms": 37.9,
+      "t_assoc_ms": 3.4,
+      "frames_in_bucket": 1,
+      "assoc_matched": 3,
+      "assoc_created": 4,
+      "wm_total": 91,
+      "wm_confirmed": 35,
+      "wm_proto": 56
+    },
+    {
+      "wall_ts": 1788777505.3748324,
+      "input_hz": 5.0,
+      "processing_hz": 1.0,
+      "effective_ratio": 0.2,
+      "queue_drops": 0,
+      "gate_rejections": 0,
+      "frame_rejections": 0,
+      "throttle_skips": 3,
+      "tracking_drops": 0,
+      "queue_depth_mean": 0.0,
+      "queue_depth_max": 0,
+      "t_total_ms": 196.4,
+      "t_seg_ms": 91.5,
+      "t_heur_ms": 56.3,
+      "t_scoring_ms": 0.2,
+      "t_clip_ms": 39.2,
+      "t_assoc_ms": 5.7,
+      "frames_in_bucket": 1,
+      "assoc_matched": 5,
+      "assoc_created": 4,
+      "wm_total": 92,
+      "wm_confirmed": 36,
+      "wm_proto": 56
+    },
+    {
+      "wall_ts": 1788777506.3945975,
+      "input_hz": 4.8,
+      "processing_hz": 0.97,
+      "effective_ratio": 0.2,
+      "queue_drops": 0,
+      "gate_rejections": 0,
+      "frame_rejections": 0,
+      "throttle_skips": 4,
+      "tracking_drops": 0,
+      "queue_depth_mean": 0.0,
+      "queue_depth_max": 0,
+      "t_total_ms": 225.4,
+      "t_seg_ms": 75.5,
+      "t_heur_ms": 84.9,
+      "t_scoring_ms": 0.2,
+      "t_clip_ms": 55.6,
+      "t_assoc_ms": 5.8,
+      "frames_in_bucket": 1,
+      "assoc_matched": 2,
+      "assoc_created": 7,
+      "wm_total": 97,
+      "wm_confirmed": 36,
+      "wm_proto": 61
+    },
+    {
+      "wall_ts": 1788777507.414202,
+      "input_hz": 4.9,
+      "processing_hz": 0.99,
+      "effective_ratio": 0.2,
+      "queue_drops": 0,
+      "gate_rejections": 0,
+      "frame_rejections": 0,
+      "throttle_skips": 3,
+      "tracking_drops": 0,
+      "queue_depth_mean": 0.0,
+      "queue_depth_max": 0,
+      "t_total_ms": 250.7,
+      "t_seg_ms": 105.1,
+      "t_heur_ms": 64.4,
+      "t_scoring_ms": 0.2,
+      "t_clip_ms": 73.1,
+      "t_assoc_ms": 5.5,
+      "frames_in_bucket": 1,
+      "assoc_matched": 3,
+      "assoc_created": 8,
+      "wm_total": 99,
+      "wm_confirmed": 37,
+      "wm_proto": 62
+    },
+    {
+      "wall_ts": 1788777508.857664,
+      "input_hz": 3.5,
+      "processing_hz": 0.7,
+      "effective_ratio": 0.2,
+      "queue_drops": 0,
+      "gate_rejections": 1,
+      "frame_rejections": 0,
+      "throttle_skips": 2,
+      "tracking_drops": 0,
+      "queue_depth_mean": 0.0,
+      "queue_depth_max": 0,
+      "t_total_ms": 325.8,
+      "t_seg_ms": 102.5,
+      "t_heur_ms": 111.7,
+      "t_scoring_ms": 0.3,
+      "t_clip_ms": 92.8,
+      "t_assoc_ms": 12.8,
+      "frames_in_bucket": 1,
+      "assoc_matched": 10,
+      "assoc_created": 5,
+      "wm_total": 106,
+      "wm_confirmed": 40,
+      "wm_proto": 66
+    }
+  ],
+  "segmentation": {
+    "frame_count": 53,
+    "backend": "dual",
+    "dual_rate": 0.268,
+    "fastsam_only_rate": 0.597,
+    "yoloe_only_rate": 0.135,
+    "mean_total": 25.9,
+    "mean_fastsam_raw": 22.4,
+    "mean_yoloe_raw": 10.4,
+    "staged_survival_rate": 0.594,
+    "selected_rate_by_source": {
+      "dual": 0.318,
+      "fastsam_only": 0.606,
+      "yoloe_only": 0.076
+    }
+  },
+  "segmentation_hourly": [
+    {
+      "wall_ts": 1788777479.0939221,
+      "backend": "dual",
+      "dual_rate": 0.0,
+      "fastsam_only_rate": 0.0,
+      "yoloe_only_rate": 0.0,
+      "mean_total": 0.0,
+      "mean_fastsam_raw": 0.0,
+      "mean_yoloe_raw": 0.0,
+      "staged_survival_rate": 0.0,
+      "frames_in_bucket": 0
+    },
+    {
+      "wall_ts": 1788777480.1064394,
+      "backend": "unknown",
+      "dual_rate": 0.0,
+      "fastsam_only_rate": 0.0,
+      "yoloe_only_rate": 0.0,
+      "mean_total": 0.0,
+      "mean_fastsam_raw": 0.0,
+      "mean_yoloe_raw": 0.0,
+      "staged_survival_rate": 0.0,
+      "frames_in_bucket": 0
+    },
+    {
+      "wall_ts": 1788777481.1147382,
+      "backend": "unknown",
+      "dual_rate": 0.0,
+      "fastsam_only_rate": 0.0,
+      "yoloe_only_rate": 0.0,
+      "mean_total": 0.0,
+      "mean_fastsam_raw": 0.0,
+      "mean_yoloe_raw": 0.0,
+      "staged_survival_rate": 0.0,
+      "frames_in_bucket": 0
+    },
+    {
+      "wall_ts": 1788777482.1217308,
+      "backend": "dual",
+      "dual_rate": 0.294,
+      "fastsam_only_rate": 0.588,
+      "yoloe_only_rate": 0.118,
+      "mean_total": 17.0,
+      "mean_fastsam_raw": 15.0,
+      "mean_yoloe_raw": 7.0,
+      "staged_survival_rate": 0.882,
+      "frames_in_bucket": 1
+    },
+    {
+      "wall_ts": 1788777483.1211042,
+      "backend": "unknown",
+      "dual_rate": 0.0,
+      "fastsam_only_rate": 0.0,
+      "yoloe_only_rate": 0.0,
+      "mean_total": 0.0,
+      "mean_fastsam_raw": 0.0,
+      "mean_yoloe_raw": 0.0,
+      "staged_survival_rate": 0.0,
+      "frames_in_bucket": 0
+    },
+    {
+      "wall_ts": 1788777484.1140008,
+      "backend": "dual",
+      "dual_rate": 0.222,
+      "fastsam_only_rate": 0.667,
+      "yoloe_only_rate": 0.111,
+      "mean_total": 18.0,
+      "mean_fastsam_raw": 16.0,
+      "mean_yoloe_raw": 6.0,
+      "staged_survival_rate": 0.722,
+      "frames_in_bucket": 1
+    },
+    {
+      "wall_ts": 1788777485.130766,
+      "backend": "unknown",
+      "dual_rate": 0.0,
+      "fastsam_only_rate": 0.0,
+      "yoloe_only_rate": 0.0,
+      "mean_total": 0.0,
+      "mean_fastsam_raw": 0.0,
+      "mean_yoloe_raw": 0.0,
+      "staged_survival_rate": 0.0,
+      "frames_in_bucket": 0
+    },
+    {
+      "wall_ts": 1788777486.1482487,
+      "backend": "unknown",
+      "dual_rate": 0.0,
+      "fastsam_only_rate": 0.0,
+      "yoloe_only_rate": 0.0,
+      "mean_total": 0.0,
+      "mean_fastsam_raw": 0.0,
+      "mean_yoloe_raw": 0.0,
+      "staged_survival_rate": 0.0,
+      "frames_in_bucket": 0
+    },
+    {
+      "wall_ts": 1788777487.169271,
+      "backend": "dual",
+      "dual_rate": 0.483,
+      "fastsam_only_rate": 0.517,
+      "yoloe_only_rate": 0.0,
+      "mean_total": 14.5,
+      "mean_fastsam_raw": 14.5,
+      "mean_yoloe_raw": 7.0,
+      "staged_survival_rate": 0.69,
+      "frames_in_bucket": 2
+    },
+    {
+      "wall_ts": 1788777488.1879292,
+      "backend": "dual",
+      "dual_rate": 0.455,
+      "fastsam_only_rate": 0.455,
+      "yoloe_only_rate": 0.091,
+      "mean_total": 11.0,
+      "mean_fastsam_raw": 10.0,
+      "mean_yoloe_raw": 6.0,
+      "staged_survival_rate": 0.636,
+      "frames_in_bucket": 1
+    },
+    {
+      "wall_ts": 1788777489.196499,
+      "backend": "unknown",
+      "dual_rate": 0.0,
+      "fastsam_only_rate": 0.0,
+      "yoloe_only_rate": 0.0,
+      "mean_total": 0.0,
+      "mean_fastsam_raw": 0.0,
+      "mean_yoloe_raw": 0.0,
+      "staged_survival_rate": 0.0,
+      "frames_in_bucket": 0
+    },
+    {
+      "wall_ts": 1788777490.336039,
+      "backend": "dual",
+      "dual_rate": 0.406,
+      "fastsam_only_rate": 0.406,
+      "yoloe_only_rate": 0.188,
+      "mean_total": 16.0,
+      "mean_fastsam_raw": 13.0,
+      "mean_yoloe_raw": 9.5,
+      "staged_survival_rate": 0.719,
+      "frames_in_bucket": 2
+    },
+    {
+      "wall_ts": 1788777491.3680303,
+      "backend": "dual",
+      "dual_rate": 0.316,
+      "fastsam_only_rate": 0.579,
+      "yoloe_only_rate": 0.105,
+      "mean_total": 19.0,
+      "mean_fastsam_raw": 17.0,
+      "mean_yoloe_raw": 8.0,
+      "staged_survival_rate": 0.632,
+      "frames_in_bucket": 1
+    },
+    {
+      "wall_ts": 1788777492.3737051,
+      "backend": "unknown",
+      "dual_rate": 0.0,
+      "fastsam_only_rate": 0.0,
+      "yoloe_only_rate": 0.0,
+      "mean_total": 0.0,
+      "mean_fastsam_raw": 0.0,
+      "mean_yoloe_raw": 0.0,
+      "staged_survival_rate": 0.0,
+      "frames_in_bucket": 0
+    },
+    {
+      "wall_ts": 1788777493.3931441,
+      "backend": "dual",
+      "dual_rate": 0.267,
+      "fastsam_only_rate": 0.7,
+      "yoloe_only_rate": 0.033,
+      "mean_total": 30.0,
+      "mean_fastsam_raw": 29.0,
+      "mean_yoloe_raw": 9.0,
+      "staged_survival_rate": 0.633,
+      "frames_in_bucket": 1
+    },
+    {
+      "wall_ts": 1788777494.395417,
+      "backend": "unknown",
+      "dual_rate": 0.0,
+      "fastsam_only_rate": 0.0,
+      "yoloe_only_rate": 0.0,
+      "mean_total": 0.0,
+      "mean_fastsam_raw": 0.0,
+      "mean_yoloe_raw": 0.0,
+      "staged_survival_rate": 0.0,
+      "frames_in_bucket": 0
+    },
+    {
+      "wall_ts": 1788777495.4007404,
+      "backend": "dual",
+      "dual_rate": 0.26,
+      "fastsam_only_rate": 0.575,
+      "yoloe_only_rate": 0.164,
+      "mean_total": 36.5,
+      "mean_fastsam_raw": 30.5,
+      "mean_yoloe_raw": 15.5,
+      "staged_survival_rate": 0.575,
+      "frames_in_bucket": 2
+    },
+    {
+      "wall_ts": 1788777496.407455,
+      "backend": "dual",
+      "dual_rate": 0.133,
+      "fastsam_only_rate": 0.667,
+      "yoloe_only_rate": 0.2,
+      "mean_total": 30.0,
+      "mean_fastsam_raw": 24.0,
+      "mean_yoloe_raw": 10.0,
+      "staged_survival_rate": 0.6,
+      "frames_in_bucket": 1
+    },
+    {
+      "wall_ts": 1788777497.4203897,
+      "backend": "dual",
+      "dual_rate": 0.143,
+      "fastsam_only_rate": 0.671,
+      "yoloe_only_rate": 0.186,
+      "mean_total": 35.0,
+      "mean_fastsam_raw": 28.5,
+      "mean_yoloe_raw": 11.5,
+      "staged_survival_rate": 0.5,
+      "frames_in_bucket": 2
+    },
+    {
+      "wall_ts": 1788777498.439738,
+      "backend": "dual",
+      "dual_rate": 0.212,
+      "fastsam_only_rate": 0.662,
+      "yoloe_only_rate": 0.125,
+      "mean_total": 40.0,
+      "mean_fastsam_raw": 35.0,
+      "mean_yoloe_raw": 13.5,
+      "staged_survival_rate": 0.537,
+      "frames_in_bucket": 2
+    },
+    {
+      "wall_ts": 1788777499.4606795,
+      "backend": "dual",
+      "dual_rate": 0.219,
+      "fastsam_only_rate": 0.562,
+      "yoloe_only_rate": 0.219,
+      "mean_total": 32.0,
+      "mean_fastsam_raw": 25.0,
+      "mean_yoloe_raw": 14.0,
+      "staged_survival_rate": 0.562,
+      "frames_in_bucket": 1
+    },
+    {
+      "wall_ts": 1788777500.4788342,
+      "backend": "dual",
+      "dual_rate": 0.171,
+      "fastsam_only_rate": 0.657,
+      "yoloe_only_rate": 0.171,
+      "mean_total": 35.0,
+      "mean_fastsam_raw": 29.0,
+      "mean_yoloe_raw": 12.0,
+      "staged_survival_rate": 0.457,
+      "frames_in_bucket": 1
+    },
+    {
+      "wall_ts": 1788777501.5613928,
+      "backend": "unknown",
+      "dual_rate": 0.0,
+      "fastsam_only_rate": 0.0,
+      "yoloe_only_rate": 0.0,
+      "mean_total": 0.0,
+      "mean_fastsam_raw": 0.0,
+      "mean_yoloe_raw": 0.0,
+      "staged_survival_rate": 0.0,
+      "frames_in_bucket": 0
+    },
+    {
+      "wall_ts": 1788777503.3412924,
+      "backend": "dual",
+      "dual_rate": 0.2,
+      "fastsam_only_rate": 0.66,
+      "yoloe_only_rate": 0.14,
+      "mean_total": 25.0,
+      "mean_fastsam_raw": 21.5,
+      "mean_yoloe_raw": 8.5,
+      "staged_survival_rate": 0.44,
+      "frames_in_bucket": 2
+    },
+    {
+      "wall_ts": 1788777504.3629947,
+      "backend": "dual",
+      "dual_rate": 0.316,
+      "fastsam_only_rate": 0.526,
+      "yoloe_only_rate": 0.158,
+      "mean_total": 19.0,
+      "mean_fastsam_raw": 16.0,
+      "mean_yoloe_raw": 9.0,
+      "staged_survival_rate": 0.368,
+      "frames_in_bucket": 1
+    },
+    {
+      "wall_ts": 1788777505.3748324,
+      "backend": "dual",
+      "dual_rate": 0.385,
+      "fastsam_only_rate": 0.462,
+      "yoloe_only_rate": 0.154,
+      "mean_total": 13.0,
+      "mean_fastsam_raw": 11.0,
+      "mean_yoloe_raw": 7.0,
+      "staged_survival_rate": 0.692,
+      "frames_in_bucket": 1
+    },
+    {
+      "wall_ts": 1788777506.3945975,
+      "backend": "dual",
+      "dual_rate": 0.455,
+      "fastsam_only_rate": 0.364,
+      "yoloe_only_rate": 0.182,
+      "mean_total": 11.0,
+      "mean_fastsam_raw": 9.0,
+      "mean_yoloe_raw": 7.0,
+      "staged_survival_rate": 0.818,
+      "frames_in_bucket": 1
+    },
+    {
+      "wall_ts": 1788777507.414202,
+      "backend": "dual",
+      "dual_rate": 0.222,
+      "fastsam_only_rate": 0.722,
+      "yoloe_only_rate": 0.056,
+      "mean_total": 18.0,
+      "mean_fastsam_raw": 17.0,
+      "mean_yoloe_raw": 5.0,
+      "staged_survival_rate": 0.667,
+      "frames_in_bucket": 1
+    },
+    {
+      "wall_ts": 1788777508.857664,
+      "backend": "dual",
+      "dual_rate": 0.333,
+      "fastsam_only_rate": 0.5,
+      "yoloe_only_rate": 0.167,
+      "mean_total": 24.0,
+      "mean_fastsam_raw": 20.0,
+      "mean_yoloe_raw": 12.0,
+      "staged_survival_rate": 0.708,
+      "frames_in_bucket": 1
+    }
+  ],
+  "working_memory": {
+    "objects": 107,
+    "confirmed": 70,
+    "avg_hits": 4.607476635514018,
+    "upserts_total": 101,
+    "robot_pose": {
+      "xyz": [
+        -1.1896884441375732,
+        0.6059783697128296,
+        -0.8103014826774597
+      ],
+      "quaternion_xyzw": [
+        0.21286404132843018,
+        0.23926477134227753,
+        -0.6493202447891235,
+        0.6898003220558167
+      ],
+      "timestamp": 1776124691.236178
+    },
+    "ingest_q": 0,
+    "pose_conversion_failures": 0
+  },
+  "detailed": {
+    "working_memory": {
+      "objects": 107,
+      "confirmed": 70,
+      "avg_hits": 4.607476635514018,
+      "upserts_total": 101,
+      "robot_pose": {
+        "xyz": [
+          -1.1896884441375732,
+          0.6059783697128296,
+          -0.8103014826774597
+        ],
+        "quaternion_xyzw": [
+          0.21286404132843018,
+          0.23926477134227753,
+          -0.6493202447891235,
+          0.6898003220558167
+        ],
+        "timestamp": 1776124691.236178
+      }
+    },
+    "sweep_cache": {
+      "cells": 0,
+      "objects": 0,
+      "view_states": 34,
+      "cam_snapshots": 34,
+      "look_lrus": 0
+    },
+    "visualization": {
+      "keyframes": 0,
+      "total_points": 0,
+      "poses_set": 0
+    },
+    "extra": {
+      "ingest_q": 0,
+      "pose_conversion_failures": 0
+    }
+  },
+  "objects": {
+    "total": 107,
+    "offset": 0,
+    "limit": 100,
+    "count": 100,
+    "objects": [
+      {
+        "id": "4dea28359ffb4429",
+        "xyz_world": [
+          -0.8711988925933838,
+          -0.30278027057647705,
+          2.574042320251465
+        ],
+        "created_wall_utc": 1788777479.2695456,
+        "created_mono": 54960.125,
+        "stability": 0.9879253576597204,
+        "hits": 10,
+        "confirmed": true,
+        "label_primary": "snowflake",
+        "view_bins": 1,
+        "last_seen_mono": 55008.093
+      },
+      {
+        "id": "e022ae19a2164060",
+        "xyz_world": [
+          -1.113959789276123,
+          -0.2789233922958374,
+          2.3604393005371094
+        ],
+        "created_wall_utc": 1788777479.2700708,
+        "created_mono": 54960.125,
+        "stability": 0.9956154462100093,
+        "hits": 12,
+        "confirmed": true,
+        "label_primary": "stuffed toy",
+        "view_bins": 1,
+        "last_seen_mono": 55008.078
+      },
+      {
+        "id": "53b8bfa5027540c0",
+        "xyz_world": [
+          -0.6294060945510864,
+          -0.2798078954219818,
+          2.74119234085083
+        ],
+        "created_wall_utc": 1788777479.2706134,
+        "created_mono": 54960.125,
+        "stability": 0.9902967878941749,
+        "hits": 11,
+        "confirmed": true,
+        "label_primary": "shoe",
+        "view_bins": 1,
+        "last_seen_mono": 55008.093
+      },
+      {
+        "id": "59de973079f44187",
+        "xyz_world": [
+          -0.3075403869152069,
+          -0.35516175627708435,
+          2.490267038345337
+        ],
+        "created_wall_utc": 1788777479.2706134,
+        "created_mono": 54960.125,
+        "stability": 0.9853598440209665,
+        "hits": 10,
+        "confirmed": true,
+        "label_primary": "pet toy",
+        "view_bins": 1,
+        "last_seen_mono": 55008.093
+      },
+      {
+        "id": "5f031f6aac7e4b0e",
+        "xyz_world": [
+          -1.6248433589935303,
+          -0.20984399318695068,
+          2.0490052700042725
+        ],
+        "created_wall_utc": 1788777481.8825142,
+        "created_mono": 54962.734,
+        "stability": 0.9276227159752886,
+        "hits": 6,
+        "confirmed": true,
+        "label_primary": "pillow",
+        "view_bins": 1,
+        "last_seen_mono": 55008.093
+      },
+      {
+        "id": "efa17707e926421e",
+        "xyz_world": [
+          -1.5488625764846802,
+          -0.6933594942092896,
+          0.7972241044044495
+        ],
+        "created_wall_utc": 1788777483.833377,
+        "created_mono": 54964.687,
+        "stability": 0.9731398730140767,
+        "hits": 8,
+        "confirmed": true,
+        "label_primary": "amplifier",
+        "view_bins": 1,
+        "last_seen_mono": 54972.234
+      },
+      {
+        "id": "b0584238bca54959",
+        "xyz_world": [
+          -1.6119072437286377,
+          -0.6178666949272156,
+          0.8914250731468201
+        ],
+        "created_wall_utc": 1788777483.8374739,
+        "created_mono": 54964.687,
+        "stability": 0.9990670912594277,
+        "hits": 15,
+        "confirmed": true,
+        "label_primary": "keycard",
+        "view_bins": 2,
+        "last_seen_mono": 55008.093
+      },
+      {
+        "id": "2ec811db98e64f21",
+        "xyz_world": [
+          -1.5090367794036865,
+          -0.8093159198760986,
+          0.7514536380767822
+        ],
+        "created_wall_utc": 1788777483.8384793,
+        "created_mono": 54964.687,
+        "stability": 0.8043117503280786,
+        "hits": 4,
+        "confirmed": true,
+        "label_primary": "sheet",
+        "view_bins": 1,
+        "last_seen_mono": 54970.89
+      },
+      {
+        "id": "dbf3f1b68f624ac7",
+        "xyz_world": [
+          -2.178082227706909,
+          -0.892961859703064,
+          1.6424779891967773
+        ],
+        "created_wall_utc": 1788777483.8389835,
+        "created_mono": 54964.687,
+        "stability": 0.9947662296794051,
+        "hits": 12,
+        "confirmed": true,
+        "label_primary": "night light",
+        "view_bins": 2,
+        "last_seen_mono": 55008.093
+      },
+      {
+        "id": "07564ba118bc4965",
+        "xyz_world": [
+          -2.3327136039733887,
+          -0.9300677180290222,
+          1.4684747457504272
+        ],
+        "created_wall_utc": 1788777486.3636723,
+        "created_mono": 54967.218,
+        "stability": 0.916502144667779,
+        "hits": 6,
+        "confirmed": true,
+        "label_primary": "night light",
+        "view_bins": 2,
+        "last_seen_mono": 55006.703
+      },
+      {
+        "id": "62a76ec95f704621",
+        "xyz_world": [
+          -2.581268787384033,
+          -0.7970879077911377,
+          1.1526323556900024
+        ],
+        "created_wall_utc": 1788777486.9671555,
+        "created_mono": 54967.812,
+        "stability": 0.9145670191159829,
+        "hits": 6,
+        "confirmed": true,
+        "label_primary": "clock",
+        "view_bins": 2,
+        "last_seen_mono": 55005.453
+      },
+      {
+        "id": "b984fc8ce8c847b5",
+        "xyz_world": [
+          -3.3560760021209717,
+          -0.6269713044166565,
+          0.3655252456665039
+        ],
+        "created_wall_utc": 1788777490.0440154,
+        "created_mono": 54970.89,
+        "stability": 0.885964746365632,
+        "hits": 5,
+        "confirmed": true,
+        "label_primary": "solar battery",
+        "view_bins": 1,
+        "last_seen_mono": 54973.437
+      },
+      {
+        "id": "c4538d2fddd143f3",
+        "xyz_world": [
+          -3.3032939434051514,
+          -0.30514395236968994,
+          0.9388349056243896
+        ],
+        "created_wall_utc": 1788777490.0470695,
+        "created_mono": 54970.89,
+        "stability": 0.8207402961195931,
+        "hits": 5,
+        "confirmed": true,
+        "label_primary": "speaker",
+        "view_bins": 1,
+        "last_seen_mono": 54973.437
+      },
+      {
+        "id": "a70930c04d63475a",
+        "xyz_world": [
+          -3.186680555343628,
+          -0.3302849531173706,
+          -0.2191125601530075
+        ],
+        "created_wall_utc": 1788777490.8384404,
+        "created_mono": 54971.687,
+        "stability": 0.685858333745426,
+        "hits": 3,
+        "confirmed": true,
+        "label_primary": "edge",
+        "view_bins": 1,
+        "last_seen_mono": 54973.984
+      },
+      {
+        "id": "1533154bade0499e",
+        "xyz_world": [
+          -2.497335195541382,
+          -0.8033052682876587,
+          -0.5117692947387695
+        ],
+        "created_wall_utc": 1788777491.3906655,
+        "created_mono": 54972.234,
+        "stability": 0.9948393590855212,
+        "hits": 12,
+        "confirmed": true,
+        "label_primary": "pillow",
+        "view_bins": 2,
+        "last_seen_mono": 54980.843
+      },
+      {
+        "id": "97180975e5ba41b6",
+        "xyz_world": [
+          -2.6083061695098877,
+          -0.0103097939863801,
+          -0.6172460317611694
+        ],
+        "created_wall_utc": 1788777492.5894406,
+        "created_mono": 54973.437,
+        "stability": 0.9515906478756694,
+        "hits": 7,
+        "confirmed": true,
+        "label_primary": "keycard",
+        "view_bins": 1,
+        "last_seen_mono": 54978.64
+      },
+      {
+        "id": "ccf51d06fe18453c",
+        "xyz_world": [
+          -2.4049227237701416,
+          -0.4066171944141388,
+          -0.6678411364555359
+        ],
+        "created_wall_utc": 1788777492.590349,
+        "created_mono": 54973.437,
+        "stability": 0.9465650590601266,
+        "hits": 7,
+        "confirmed": true,
+        "label_primary": "assemble",
+        "view_bins": 1,
+        "last_seen_mono": 54979.187
+      },
+      {
+        "id": "6133cdefcb254a6c",
+        "xyz_world": [
+          -2.7151589393615723,
+          0.055635225027799606,
+          -0.617760181427002
+        ],
+        "created_wall_utc": 1788777492.5908601,
+        "created_mono": 54973.437,
+        "stability": 0.9234612853733977,
+        "hits": 6,
+        "confirmed": true,
+        "label_primary": "soap",
+        "view_bins": 1,
+        "last_seen_mono": 54978.125
+      },
+      {
+        "id": "b84e3a91a1c54a35",
+        "xyz_world": [
+          -2.538825750350952,
+          -0.315879762172699,
+          -0.5180976390838623
+        ],
+        "created_wall_utc": 1788777492.5918663,
+        "created_mono": 54973.437,
+        "stability": 0.8736130300363567,
+        "hits": 5,
+        "confirmed": true,
+        "label_primary": "fan",
+        "view_bins": 1,
+        "last_seen_mono": 54976.906
+      },
+      {
+        "id": "e69d763e5d724e79",
+        "xyz_world": [
+          -2.128782033920288,
+          -0.7416667938232422,
+          -0.6345415115356445
+        ],
+        "created_wall_utc": 1788777492.5938816,
+        "created_mono": 54973.437,
+        "stability": 0.9911776329872058,
+        "hits": 11,
+        "confirmed": true,
+        "label_primary": "amplifier",
+        "view_bins": 2,
+        "last_seen_mono": 54983.421
+      },
+      {
+        "id": "83a6a4c4c4364453",
+        "xyz_world": [
+          -2.306772232055664,
+          0.10195217281579971,
+          -0.9168108701705933
+        ],
+        "created_wall_utc": 1788777493.132875,
+        "created_mono": 54973.984,
+        "stability": 0.942532640927355,
+        "hits": 7,
+        "confirmed": true,
+        "label_primary": "paper towel",
+        "view_bins": 1,
+        "last_seen_mono": 54980.828
+      },
+      {
+        "id": "1140d32c844b4679",
+        "xyz_world": [
+          -2.3493778705596924,
+          0.13504956662654877,
+          -1.070315957069397
+        ],
+        "created_wall_utc": 1788777494.806602,
+        "created_mono": 54975.656,
+        "stability": 0.8003411501325207,
+        "hits": 4,
+        "confirmed": true,
+        "label_primary": "socket",
+        "view_bins": 1,
+        "last_seen_mono": 54982.64
+      },
+      {
+        "id": "72d54909f54a4116",
+        "xyz_world": [
+          -3.228597402572632,
+          -0.38622748851776123,
+          -0.18290162086486816
+        ],
+        "created_wall_utc": 1788777494.8133807,
+        "created_mono": 54975.656,
+        "stability": 0.9612950568130239,
+        "hits": 7,
+        "confirmed": true,
+        "label_primary": "drawer",
+        "view_bins": 1,
+        "last_seen_mono": 54979.187
+      },
+      {
+        "id": "8c52d34a114b4d85",
+        "xyz_world": [
+          -3.03452205657959,
+          -0.37622714042663574,
+          -0.41851451992988586
+        ],
+        "created_wall_utc": 1788777494.8143857,
+        "created_mono": 54975.656,
+        "stability": 0.9551706264263221,
+        "hits": 7,
+        "confirmed": true,
+        "label_primary": "drawer",
+        "view_bins": 1,
+        "last_seen_mono": 54979.187
+      },
+      {
+        "id": "d2ddc8c67de3400f",
+        "xyz_world": [
+          -2.04927921295166,
+          -0.6254383325576782,
+          -0.9518696069717407
+        ],
+        "created_wall_utc": 1788777495.317807,
+        "created_mono": 54976.171,
+        "stability": 0.6901595763478701,
+        "hits": 3,
+        "confirmed": true,
+        "label_primary": "storage box",
+        "view_bins": 2,
+        "last_seen_mono": 54977.593
+      },
+      {
+        "id": "8fa96a02b1bd425d",
+        "xyz_world": [
+          -2.1611297130584717,
+          -0.20989356935024261,
+          -0.819549024105072
+        ],
+        "created_wall_utc": 1788777495.321912,
+        "created_mono": 54976.171,
+        "stability": 0.9214819886157158,
+        "hits": 6,
+        "confirmed": true,
+        "label_primary": "mattress",
+        "view_bins": 1,
+        "last_seen_mono": 54982.656
+      },
+      {
+        "id": "271d2df01e8b45e5",
+        "xyz_world": [
+          -2.325085163116455,
+          -0.4617176353931427,
+          -0.7346606254577637
+        ],
+        "created_wall_utc": 1788777496.0586183,
+        "created_mono": 54976.906,
+        "stability": 0.7875193630312084,
+        "hits": 4,
+        "confirmed": true,
+        "label_primary": "assemble",
+        "view_bins": 1,
+        "last_seen_mono": 54980.843
+      },
+      {
+        "id": "7bcbe795ca3b4e7a",
+        "xyz_world": [
+          -2.7724857330322266,
+          -0.9460165500640869,
+          -2.1123478412628174
+        ],
+        "created_wall_utc": 1788777496.0621352,
+        "created_mono": 54976.906,
+        "stability": 0.9619105908571493,
+        "hits": 8,
+        "confirmed": true,
+        "label_primary": "door",
+        "view_bins": 1,
+        "last_seen_mono": 54984.0
+      },
+      {
+        "id": "903792ee6e074036",
+        "xyz_world": [
+          -2.0388808250427246,
+          -0.6151808500289917,
+          -0.9101224541664124
+        ],
+        "created_wall_utc": 1788777497.2692854,
+        "created_mono": 54978.125,
+        "stability": 0.7968319873616994,
+        "hits": 4,
+        "confirmed": true,
+        "label_primary": "printer",
+        "view_bins": 1,
+        "last_seen_mono": 54982.656
+      },
+      {
+        "id": "96a8a3646c184e97",
+        "xyz_world": [
+          -1.1676087379455566,
+          -0.5298116207122803,
+          -1.6922870874404907
+        ],
+        "created_wall_utc": 1788777499.4469974,
+        "created_mono": 54980.296,
+        "stability": 0.9834853480376688,
+        "hits": 9,
+        "confirmed": true,
+        "label_primary": "shoe",
+        "view_bins": 2,
+        "last_seen_mono": 54986.984
+      },
+      {
+        "id": "2408e2f91f2c4cfa",
+        "xyz_world": [
+          -2.0505740642547607,
+          -0.6961866021156311,
+          -0.9414385557174683
+        ],
+        "created_wall_utc": 1788777499.4500787,
+        "created_mono": 54980.296,
+        "stability": 0.7988923450220735,
+        "hits": 4,
+        "confirmed": true,
+        "label_primary": "cowbell",
+        "view_bins": 2,
+        "last_seen_mono": 54984.0
+      },
+      {
+        "id": "ffce72644c604cff",
+        "xyz_world": [
+          -1.1441867351531982,
+          0.23819735646247864,
+          -1.9502767324447632
+        ],
+        "created_wall_utc": 1788777499.4500787,
+        "created_mono": 54980.296,
+        "stability": 0.8120884004594332,
+        "hits": 4,
+        "confirmed": true,
+        "label_primary": "shoe",
+        "view_bins": 1,
+        "last_seen_mono": 54986.343
+      },
+      {
+        "id": "9eb741f6af5d4c30",
+        "xyz_world": [
+          -1.0746605396270752,
+          0.111835777759552,
+          -1.985670804977417
+        ],
+        "created_wall_utc": 1788777499.4515996,
+        "created_mono": 54980.296,
+        "stability": 0.8753490615910591,
+        "hits": 5,
+        "confirmed": true,
+        "label_primary": "handbag",
+        "view_bins": 1,
+        "last_seen_mono": 54985.734
+      },
+      {
+        "id": "0643d1e8c3db413a",
+        "xyz_world": [
+          -1.0991475582122803,
+          -0.05259251222014427,
+          -1.9109588861465454
+        ],
+        "created_wall_utc": 1788777499.4546335,
+        "created_mono": 54980.296,
+        "stability": 0.9683730148521914,
+        "hits": 8,
+        "confirmed": true,
+        "label_primary": "diaper bag",
+        "view_bins": 1,
+        "last_seen_mono": 54986.343
+      },
+      {
+        "id": "d48a3a149f8f4882",
+        "xyz_world": [
+          -0.9248735904693604,
+          0.186613991856575,
+          -2.124270439147949
+        ],
+        "created_wall_utc": 1788777499.9860723,
+        "created_mono": 54980.828,
+        "stability": 0.6947300069402935,
+        "hits": 3,
+        "confirmed": true,
+        "label_primary": "blanket",
+        "view_bins": 1,
+        "last_seen_mono": 54984.0
+      },
+      {
+        "id": "6439b07de4fb458c",
+        "xyz_world": [
+          -2.2377240657806396,
+          -0.6926614046096802,
+          -2.6808559894561768
+        ],
+        "created_wall_utc": 1788777499.9906363,
+        "created_mono": 54980.843,
+        "stability": 0.670445048213587,
+        "hits": 3,
+        "confirmed": true,
+        "label_primary": "printer",
+        "view_bins": 1,
+        "last_seen_mono": 54985.734
+      },
+      {
+        "id": "6fce17035302480a",
+        "xyz_world": [
+          -0.5382649302482605,
+          -0.6119918823242188,
+          -1.3443059921264648
+        ],
+        "created_wall_utc": 1788777505.4921024,
+        "created_mono": 54986.343,
+        "stability": 0.9545321213808914,
+        "hits": 7,
+        "confirmed": true,
+        "label_primary": "speaker",
+        "view_bins": 1,
+        "last_seen_mono": 54990.453
+      },
+      {
+        "id": "df2307eb59a04132",
+        "xyz_world": [
+          -0.22442394495010376,
+          -0.4795534908771515,
+          -0.758307158946991
+        ],
+        "created_wall_utc": 1788777506.1341758,
+        "created_mono": 54986.984,
+        "stability": 0.9508669478539966,
+        "hits": 7,
+        "confirmed": true,
+        "label_primary": "remove",
+        "view_bins": 2,
+        "last_seen_mono": 54991.687
+      },
+      {
+        "id": "561d151a640a4310",
+        "xyz_world": [
+          0.08753713965415955,
+          -0.22642216086387634,
+          -0.9562468528747559
+        ],
+        "created_wall_utc": 1788777506.13619,
+        "created_mono": 54986.984,
+        "stability": 0.9409060535169786,
+        "hits": 7,
+        "confirmed": true,
+        "label_primary": "towel",
+        "view_bins": 1,
+        "last_seen_mono": 54991.687
+      },
+      {
+        "id": "9917b8f0c11a414f",
+        "xyz_world": [
+          -0.2750658094882965,
+          -0.12420465052127838,
+          -0.595823347568512
+        ],
+        "created_wall_utc": 1788777506.75105,
+        "created_mono": 54987.593,
+        "stability": 0.8095585935718339,
+        "hits": 4,
+        "confirmed": true,
+        "label_primary": "tube",
+        "view_bins": 1,
+        "last_seen_mono": 54989.953
+      },
+      {
+        "id": "4b38b6195d0644c5",
+        "xyz_world": [
+          -0.3913033902645111,
+          -0.45745235681533813,
+          -1.5514309406280518
+        ],
+        "created_wall_utc": 1788777507.455797,
+        "created_mono": 54988.312,
+        "stability": 0.7191023887600061,
+        "hits": 3,
+        "confirmed": true,
+        "label_primary": "sofa",
+        "view_bins": 1,
+        "last_seen_mono": 54989.937
+      },
+      {
+        "id": "cee9509d908f46df",
+        "xyz_world": [
+          0.33617591857910156,
+          0.10373993217945099,
+          -0.4871427118778229
+        ],
+        "created_wall_utc": 1788777509.092331,
+        "created_mono": 54989.937,
+        "stability": 0.8065008626691585,
+        "hits": 4,
+        "confirmed": true,
+        "label_primary": "laptop",
+        "view_bins": 1,
+        "last_seen_mono": 54991.687
+      },
+      {
+        "id": "8ecc6e13823f431a",
+        "xyz_world": [
+          0.1619568020105362,
+          -0.2042914777994156,
+          -0.36661195755004883
+        ],
+        "created_wall_utc": 1788777509.0938525,
+        "created_mono": 54989.937,
+        "stability": 0.7986207430214076,
+        "hits": 4,
+        "confirmed": true,
+        "label_primary": "accordion",
+        "view_bins": 1,
+        "last_seen_mono": 54995.64
+      },
+      {
+        "id": "48a16ad973b84dae",
+        "xyz_world": [
+          0.7572965621948242,
+          -0.08132494986057281,
+          -0.2538541853427887
+        ],
+        "created_wall_utc": 1788777509.5963209,
+        "created_mono": 54990.453,
+        "stability": 0.87310041385303,
+        "hits": 5,
+        "confirmed": true,
+        "label_primary": "zoom lens",
+        "view_bins": 1,
+        "last_seen_mono": 54997.921
+      },
+      {
+        "id": "e2043bb6e8b04379",
+        "xyz_world": [
+          0.21617738902568817,
+          -0.2087276577949524,
+          -0.31682801246643066
+        ],
+        "created_wall_utc": 1788777509.5978322,
+        "created_mono": 54990.453,
+        "stability": 0.6628508288622159,
+        "hits": 3,
+        "confirmed": true,
+        "label_primary": "domino",
+        "view_bins": 1,
+        "last_seen_mono": 54993.984
+      },
+      {
+        "id": "fdbd0746e00645dd",
+        "xyz_world": [
+          -0.05297958478331566,
+          -0.8421201705932617,
+          -0.6115601062774658
+        ],
+        "created_wall_utc": 1788777509.6008716,
+        "created_mono": 54990.453,
+        "stability": 0.6897595175949243,
+        "hits": 3,
+        "confirmed": true,
+        "label_primary": "knife",
+        "view_bins": 1,
+        "last_seen_mono": 54991.687
+      },
+      {
+        "id": "8810938b125f4530",
+        "xyz_world": [
+          0.8531296253204346,
+          0.3093428313732147,
+          0.15149301290512085
+        ],
+        "created_wall_utc": 1788777510.1815145,
+        "created_mono": 54991.031,
+        "stability": 0.6593170195501404,
+        "hits": 3,
+        "confirmed": true,
+        "label_primary": "extrude",
+        "view_bins": 1,
+        "last_seen_mono": 54999.687
+      },
+      {
+        "id": "354666ff85a74602",
+        "xyz_world": [
+          0.03494202345609665,
+          0.016938060522079468,
+          -0.605815052986145
+        ],
+        "created_wall_utc": 1788777510.1830199,
+        "created_mono": 54991.031,
+        "stability": 0.6792963588744123,
+        "hits": 3,
+        "confirmed": true,
+        "label_primary": "mousepad",
+        "view_bins": 1,
+        "last_seen_mono": 54993.984
+      },
+      {
+        "id": "9c9d7ad4e7624c3b",
+        "xyz_world": [
+          0.9557627439498901,
+          -0.17088758945465088,
+          0.3864333927631378
+        ],
+        "created_wall_utc": 1788777510.837614,
+        "created_mono": 54991.687,
+        "stability": 0.6953135134315129,
+        "hits": 3,
+        "confirmed": true,
+        "label_primary": "bag",
+        "view_bins": 1,
+        "last_seen_mono": 54995.39
+      },
+      {
+        "id": "ff8aacfe45f84b06",
+        "xyz_world": [
+          0.8801500201225281,
+          0.2880910634994507,
+          0.127133309841156
+        ],
+        "created_wall_utc": 1788777510.840149,
+        "created_mono": 54991.687,
+        "stability": 0.969618334716992,
+        "hits": 8,
+        "confirmed": true,
+        "label_primary": "album cover",
+        "view_bins": 1,
+        "last_seen_mono": 54999.062
+      },
+      {
+        "id": "7a64aaa8a46c43ab",
+        "xyz_world": [
+          0.4068198502063751,
+          -0.5675580501556396,
+          1.1359796524047852
+        ],
+        "created_wall_utc": 1788777513.1315837,
+        "created_mono": 54993.984,
+        "stability": 0.9816998984079732,
+        "hits": 9,
+        "confirmed": true,
+        "label_primary": "app icon",
+        "view_bins": 2,
+        "last_seen_mono": 55003.046
+      },
+      {
+        "id": "f90d81389d6447ca",
+        "xyz_world": [
+          0.5497990250587463,
+          0.18860922753810883,
+          -0.39260900020599365
+        ],
+        "created_wall_utc": 1788777513.13462,
+        "created_mono": 54993.984,
+        "stability": 0.700549254755588,
+        "hits": 3,
+        "confirmed": true,
+        "label_primary": "speaker",
+        "view_bins": 1,
+        "last_seen_mono": 54995.64
+      },
+      {
+        "id": "d74b8312452e4295",
+        "xyz_world": [
+          1.060364842414856,
+          -0.18360857665538788,
+          0.5353614091873169
+        ],
+        "created_wall_utc": 1788777513.13462,
+        "created_mono": 54993.984,
+        "stability": 0.7965933362213331,
+        "hits": 4,
+        "confirmed": true,
+        "label_primary": "car battery",
+        "view_bins": 1,
+        "last_seen_mono": 54996.734
+      },
+      {
+        "id": "cd8c7f65f1664a57",
+        "xyz_world": [
+          0.42709702253341675,
+          -0.5315727591514587,
+          1.157199501991272
+        ],
+        "created_wall_utc": 1788777513.136138,
+        "created_mono": 54993.984,
+        "stability": 0.9950269513374725,
+        "hits": 12,
+        "confirmed": true,
+        "label_primary": "fax",
+        "view_bins": 2,
+        "last_seen_mono": 55003.046
+      },
+      {
+        "id": "2b31a9392ebc4391",
+        "xyz_world": [
+          0.3614228665828705,
+          -0.5606909394264221,
+          1.1863545179367065
+        ],
+        "created_wall_utc": 1788777513.1376626,
+        "created_mono": 54993.984,
+        "stability": 0.9876993280900987,
+        "hits": 10,
+        "confirmed": true,
+        "label_primary": "light switch",
+        "view_bins": 2,
+        "last_seen_mono": 55003.046
+      },
+      {
+        "id": "f83fdad5bbdb46e9",
+        "xyz_world": [
+          0.4565610885620117,
+          -0.568389356136322,
+          1.072163462638855
+        ],
+        "created_wall_utc": 1788777513.1376626,
+        "created_mono": 54993.984,
+        "stability": 0.9533107942450963,
+        "hits": 7,
+        "confirmed": true,
+        "label_primary": "folder",
+        "view_bins": 2,
+        "last_seen_mono": 55000.843
+      },
+      {
+        "id": "9800d754990d4200",
+        "xyz_world": [
+          0.48888781666755676,
+          -0.2754351496696472,
+          1.1917965412139893
+        ],
+        "created_wall_utc": 1788777513.1392064,
+        "created_mono": 54993.984,
+        "stability": 0.9934802337669497,
+        "hits": 11,
+        "confirmed": true,
+        "label_primary": "speaker",
+        "view_bins": 1,
+        "last_seen_mono": 55001.687
+      },
+      {
+        "id": "b10a9b50f8094222",
+        "xyz_world": [
+          1.116635799407959,
+          -0.2301599234342575,
+          1.1391973495483398
+        ],
+        "created_wall_utc": 1788777513.1397762,
+        "created_mono": 54993.984,
+        "stability": 0.9966703764063352,
+        "hits": 13,
+        "confirmed": true,
+        "label_primary": "fan",
+        "view_bins": 1,
+        "last_seen_mono": 55001.703
+      },
+      {
+        "id": "b0f15168a5ed47a1",
+        "xyz_world": [
+          0.9384018182754517,
+          -0.07647402584552765,
+          1.3345444202423096
+        ],
+        "created_wall_utc": 1788777513.1408322,
+        "created_mono": 54993.984,
+        "stability": 0.991530719564353,
+        "hits": 11,
+        "confirmed": true,
+        "label_primary": "comb",
+        "view_bins": 1,
+        "last_seen_mono": 55001.687
+      },
+      {
+        "id": "35c5cdf9867d4422",
+        "xyz_world": [
+          0.599928617477417,
+          -0.8952776789665222,
+          1.888688564300537
+        ],
+        "created_wall_utc": 1788777515.8920379,
+        "created_mono": 54996.734,
+        "stability": 0.9205537050275009,
+        "hits": 6,
+        "confirmed": true,
+        "label_primary": "knife",
+        "view_bins": 1,
+        "last_seen_mono": 55003.625
+      },
+      {
+        "id": "c8893cc6472845ef",
+        "xyz_world": [
+          0.7582707405090332,
+          0.1952812820672989,
+          -0.18698233366012573
+        ],
+        "created_wall_utc": 1788777515.8935845,
+        "created_mono": 54996.75,
+        "stability": 0.5160169999095292,
+        "hits": 2,
+        "confirmed": false,
+        "label_primary": "speaker",
+        "view_bins": 1,
+        "last_seen_mono": 54998.5
+      },
+      {
+        "id": "8749d0bb684c4df1",
+        "xyz_world": [
+          -0.07799986004829407,
+          -0.8963361978530884,
+          0.040454838424921036
+        ],
+        "created_wall_utc": 1788777515.8951616,
+        "created_mono": 54996.75,
+        "stability": 0.8742129970236799,
+        "hits": 5,
+        "confirmed": true,
+        "label_primary": "wrench",
+        "view_bins": 1,
+        "last_seen_mono": 54999.687
+      },
+      {
+        "id": "9a407a7734574309",
+        "xyz_world": [
+          1.100321650505066,
+          -0.11535114794969559,
+          1.2729488611221313
+        ],
+        "created_wall_utc": 1788777517.072931,
+        "created_mono": 54997.921,
+        "stability": 0.7040820859467423,
+        "hits": 3,
+        "confirmed": true,
+        "label_primary": "pillow",
+        "view_bins": 1,
+        "last_seen_mono": 54999.078
+      },
+      {
+        "id": "ef729ade2cea477c",
+        "xyz_world": [
+          0.6889978051185608,
+          -0.3815857470035553,
+          1.1911122798919678
+        ],
+        "created_wall_utc": 1788777517.0744436,
+        "created_mono": 54997.921,
+        "stability": 0.7988991323041761,
+        "hits": 4,
+        "confirmed": true,
+        "label_primary": "system",
+        "view_bins": 1,
+        "last_seen_mono": 55001.703
+      },
+      {
+        "id": "5c7dd9c3f4a44c00",
+        "xyz_world": [
+          1.1242579221725464,
+          -0.22000692784786224,
+          0.6398370862007141
+        ],
+        "created_wall_utc": 1788777517.648443,
+        "created_mono": 54998.5,
+        "stability": 0.25,
+        "hits": 1,
+        "confirmed": false,
+        "label_primary": "cassette deck",
+        "view_bins": 1,
+        "last_seen_mono": 54998.5
+      },
+      {
+        "id": "9edde2573b894634",
+        "xyz_world": [
+          0.29655763506889343,
+          -0.9494411945343018,
+          0.18225567042827606
+        ],
+        "created_wall_utc": 1788777517.6511786,
+        "created_mono": 54998.5,
+        "stability": 0.6870692419744355,
+        "hits": 3,
+        "confirmed": true,
+        "label_primary": "hammer",
+        "view_bins": 1,
+        "last_seen_mono": 54999.687
+      },
+      {
+        "id": "e902250a22864425",
+        "xyz_world": [
+          1.746435284614563,
+          0.6685778498649597,
+          -0.047032903879880905
+        ],
+        "created_wall_utc": 1788777517.6538641,
+        "created_mono": 54998.5,
+        "stability": 0.25,
+        "hits": 1,
+        "confirmed": false,
+        "label_primary": "edge",
+        "view_bins": 1,
+        "last_seen_mono": 54998.5
+      },
+      {
+        "id": "bf5a8be5abf947ca",
+        "xyz_world": [
+          0.08396013081073761,
+          -0.921544075012207,
+          -0.03292527049779892
+        ],
+        "created_wall_utc": 1788777517.6538641,
+        "created_mono": 54998.5,
+        "stability": 0.5240686206612112,
+        "hits": 2,
+        "confirmed": false,
+        "label_primary": "tool",
+        "view_bins": 1,
+        "last_seen_mono": 54999.078
+      },
+      {
+        "id": "dfd07236b6534222",
+        "xyz_world": [
+          0.46119675040245056,
+          -0.5772562623023987,
+          1.0794275999069214
+        ],
+        "created_wall_utc": 1788777518.2193627,
+        "created_mono": 54999.062,
+        "stability": 0.5291618559531549,
+        "hits": 2,
+        "confirmed": false,
+        "label_primary": "binder",
+        "view_bins": 2,
+        "last_seen_mono": 54999.687
+      },
+      {
+        "id": "8e37c01072584317",
+        "xyz_world": [
+          0.9834953546524048,
+          -0.09870180487632751,
+          1.3809205293655396
+        ],
+        "created_wall_utc": 1788777518.2203863,
+        "created_mono": 54999.062,
+        "stability": 0.5212687071553217,
+        "hits": 2,
+        "confirmed": false,
+        "label_primary": "foam roller",
+        "view_bins": 1,
+        "last_seen_mono": 54999.687
+      },
+      {
+        "id": "3f0f2bffecad4a83",
+        "xyz_world": [
+          0.7449196577072144,
+          0.40689265727996826,
+          1.7500678300857544
+        ],
+        "created_wall_utc": 1788777518.2224073,
+        "created_mono": 54999.078,
+        "stability": 0.25,
+        "hits": 1,
+        "confirmed": false,
+        "label_primary": "squeeze",
+        "view_bins": 1,
+        "last_seen_mono": 54999.078
+      },
+      {
+        "id": "3a36c9a6cd504fe8",
+        "xyz_world": [
+          0.11564658582210541,
+          -0.9281310439109802,
+          0.09040280431509018
+        ],
+        "created_wall_utc": 1788777518.2229102,
+        "created_mono": 54999.078,
+        "stability": 0.25,
+        "hits": 1,
+        "confirmed": false,
+        "label_primary": "handsaw",
+        "view_bins": 1,
+        "last_seen_mono": 54999.078
+      },
+      {
+        "id": "46cddb575bd74e97",
+        "xyz_world": [
+          0.007764244917780161,
+          -0.8599279522895813,
+          -0.2825140953063965
+        ],
+        "created_wall_utc": 1788777518.2229102,
+        "created_mono": 54999.078,
+        "stability": 0.25,
+        "hits": 1,
+        "confirmed": false,
+        "label_primary": "cable",
+        "view_bins": 1,
+        "last_seen_mono": 54999.078
+      },
+      {
+        "id": "ba01f926d62e46fc",
+        "xyz_world": [
+          0.6527608036994934,
+          0.10998205840587616,
+          2.0081429481506348
+        ],
+        "created_wall_utc": 1788777518.2254233,
+        "created_mono": 54999.078,
+        "stability": 0.25,
+        "hits": 1,
+        "confirmed": false,
+        "label_primary": "bedroom window",
+        "view_bins": 1,
+        "last_seen_mono": 54999.078
+      },
+      {
+        "id": "ea725127b49e4626",
+        "xyz_world": [
+          0.23823416233062744,
+          -0.2941741943359375,
+          2.223762273788452
+        ],
+        "created_wall_utc": 1788777518.8363736,
+        "created_mono": 54999.687,
+        "stability": 0.976418162647766,
+        "hits": 9,
+        "confirmed": true,
+        "label_primary": "tree frog",
+        "view_bins": 1,
+        "last_seen_mono": 55008.078
+      },
+      {
+        "id": "c18b93d1ceea4e1e",
+        "xyz_world": [
+          0.41847264766693115,
+          -0.5702312588691711,
+          1.1322243213653564
+        ],
+        "created_wall_utc": 1788777518.8363736,
+        "created_mono": 54999.687,
+        "stability": 0.25,
+        "hits": 1,
+        "confirmed": false,
+        "label_primary": "binder",
+        "view_bins": 1,
+        "last_seen_mono": 54999.687
+      },
+      {
+        "id": "f821b621e5364771",
+        "xyz_world": [
+          0.7231456637382507,
+          0.4100978672504425,
+          1.714690923690796
+        ],
+        "created_wall_utc": 1788777518.840989,
+        "created_mono": 54999.687,
+        "stability": 0.25,
+        "hits": 1,
+        "confirmed": false,
+        "label_primary": "welder",
+        "view_bins": 1,
+        "last_seen_mono": 54999.687
+      },
+      {
+        "id": "fefcfd19bc734500",
+        "xyz_world": [
+          -0.5955894589424133,
+          -0.601543128490448,
+          1.1753755807876587
+        ],
+        "created_wall_utc": 1788777518.8419926,
+        "created_mono": 54999.687,
+        "stability": 0.25,
+        "hits": 1,
+        "confirmed": false,
+        "label_primary": "ceiling",
+        "view_bins": 1,
+        "last_seen_mono": 54999.687
+      },
+      {
+        "id": "0fc48fdfd3224a0c",
+        "xyz_world": [
+          1.2381609678268433,
+          0.15927918255329132,
+          1.284021019935608
+        ],
+        "created_wall_utc": 1788777518.8419926,
+        "created_mono": 54999.687,
+        "stability": 0.25,
+        "hits": 1,
+        "confirmed": false,
+        "label_primary": "window",
+        "view_bins": 1,
+        "last_seen_mono": 54999.687
+      },
+      {
+        "id": "26df57ff6c8f4a42",
+        "xyz_world": [
+          0.08197174221277237,
+          0.5401299595832825,
+          2.4985809326171875
+        ],
+        "created_wall_utc": 1788777520.0013182,
+        "created_mono": 55000.843,
+        "stability": 0.25,
+        "hits": 1,
+        "confirmed": false,
+        "label_primary": "squeeze",
+        "view_bins": 1,
+        "last_seen_mono": 55000.843
+      },
+      {
+        "id": "57671ef38d874d3d",
+        "xyz_world": [
+          -1.4400767087936401,
+          -0.7255792617797852,
+          0.8027833700180054
+        ],
+        "created_wall_utc": 1788777520.0013182,
+        "created_mono": 55000.843,
+        "stability": 0.25,
+        "hits": 1,
+        "confirmed": false,
+        "label_primary": "storage box",
+        "view_bins": 1,
+        "last_seen_mono": 55000.843
+      },
+      {
+        "id": "baab526ab8994d5f",
+        "xyz_world": [
+          -1.206112027168274,
+          -0.8976466655731201,
+          0.9143695831298828
+        ],
+        "created_wall_utc": 1788777520.002323,
+        "created_mono": 55000.859,
+        "stability": 0.980672299829399,
+        "hits": 9,
+        "confirmed": true,
+        "label_primary": "fork",
+        "view_bins": 1,
+        "last_seen_mono": 55008.093
+      },
+      {
+        "id": "23e5622d00d746ac",
+        "xyz_world": [
+          0.7411401867866516,
+          0.532576322555542,
+          1.696427345275879
+        ],
+        "created_wall_utc": 1788777520.0029445,
+        "created_mono": 55000.859,
+        "stability": 0.25,
+        "hits": 1,
+        "confirmed": false,
+        "label_primary": "tube",
+        "view_bins": 1,
+        "last_seen_mono": 55000.859
+      },
+      {
+        "id": "ff5dadd2d32d4cbe",
+        "xyz_world": [
+          0.45207861065864563,
+          -0.557956874370575,
+          1.0627161264419556
+        ],
+        "created_wall_utc": 1788777520.8445737,
+        "created_mono": 55001.687,
+        "stability": 0.25,
+        "hits": 1,
+        "confirmed": false,
+        "label_primary": "book",
+        "view_bins": 1,
+        "last_seen_mono": 55001.687
+      },
+      {
+        "id": "d9d57b25797b470c",
+        "xyz_world": [
+          -1.1740312576293945,
+          -0.8973301649093628,
+          0.9402998089790344
+        ],
+        "created_wall_utc": 1788777520.84558,
+        "created_mono": 55001.687,
+        "stability": 0.8654057062411671,
+        "hits": 5,
+        "confirmed": true,
+        "label_primary": "brake",
+        "view_bins": 1,
+        "last_seen_mono": 55005.468
+      },
+      {
+        "id": "38177892dee34311",
+        "xyz_world": [
+          -0.28672632575035095,
+          -0.34347108006477356,
+          2.4758570194244385
+        ],
+        "created_wall_utc": 1788777520.8460844,
+        "created_mono": 55001.703,
+        "stability": 0.25,
+        "hits": 1,
+        "confirmed": false,
+        "label_primary": "pet toy",
+        "view_bins": 1,
+        "last_seen_mono": 55001.703
+      },
+      {
+        "id": "3aa99b979d854414",
+        "xyz_world": [
+          -1.4945114850997925,
+          -0.6706898808479309,
+          0.7781870365142822
+        ],
+        "created_wall_utc": 1788777520.8466003,
+        "created_mono": 55001.703,
+        "stability": 0.25,
+        "hits": 1,
+        "confirmed": false,
+        "label_primary": "storage box",
+        "view_bins": 1,
+        "last_seen_mono": 55001.703
+      },
+      {
+        "id": "e2191d403e0e408c",
+        "xyz_world": [
+          -0.18791422247886658,
+          -0.9010735750198364,
+          0.06887117028236389
+        ],
+        "created_wall_utc": 1788777520.8491733,
+        "created_mono": 55001.703,
+        "stability": 0.25,
+        "hits": 1,
+        "confirmed": false,
+        "label_primary": "monkey wrench",
+        "view_bins": 1,
+        "last_seen_mono": 55001.703
+      },
+      {
+        "id": "2673e417e4f74961",
+        "xyz_world": [
+          -1.6031403541564941,
+          -0.7120208740234375,
+          0.7838200926780701
+        ],
+        "created_wall_utc": 1788777522.190911,
+        "created_mono": 55003.046,
+        "stability": 0.9566412371193743,
+        "hits": 7,
+        "confirmed": true,
+        "label_primary": "amplifier",
+        "view_bins": 1,
+        "last_seen_mono": 55008.078
+      },
+      {
+        "id": "6ca4dc58f0d047d8",
+        "xyz_world": [
+          0.6545695066452026,
+          0.37124574184417725,
+          1.6760231256484985
+        ],
+        "created_wall_utc": 1788777522.1939912,
+        "created_mono": 55003.046,
+        "stability": 0.25,
+        "hits": 1,
+        "confirmed": false,
+        "label_primary": "cowbell",
+        "view_bins": 1,
+        "last_seen_mono": 55003.046
+      },
+      {
+        "id": "5fbc8c9519684cff",
+        "xyz_world": [
+          0.11099545657634735,
+          0.5575729608535767,
+          2.509565591812134
+        ],
+        "created_wall_utc": 1788777522.195507,
+        "created_mono": 55003.046,
+        "stability": 0.25,
+        "hits": 1,
+        "confirmed": false,
+        "label_primary": "dagger",
+        "view_bins": 1,
+        "last_seen_mono": 55003.046
+      },
+      {
+        "id": "fe3876aa1aa84634",
+        "xyz_world": [
+          -0.5675876140594482,
+          -0.6781029105186462,
+          1.207655668258667
+        ],
+        "created_wall_utc": 1788777522.1965368,
+        "created_mono": 55003.046,
+        "stability": 0.8127317873691671,
+        "hits": 5,
+        "confirmed": true,
+        "label_primary": "knife",
+        "view_bins": 2,
+        "last_seen_mono": 55007.25
+      },
+      {
+        "id": "e9300dba6edd4c62",
+        "xyz_world": [
+          -1.1172689199447632,
+          -0.2902783155441284,
+          2.319735288619995
+        ],
+        "created_wall_utc": 1788777522.765106,
+        "created_mono": 55003.609,
+        "stability": 0.25,
+        "hits": 1,
+        "confirmed": false,
+        "label_primary": "pet toy",
+        "view_bins": 1,
+        "last_seen_mono": 55003.609
+      },
+      {
+        "id": "635c9ffad2df47a8",
+        "xyz_world": [
+          0.11220920830965042,
+          0.5528838634490967,
+          2.486018419265747
+        ],
+        "created_wall_utc": 1788777522.768196,
+        "created_mono": 55003.625,
+        "stability": 0.25,
+        "hits": 1,
+        "confirmed": false,
+        "label_primary": "dagger",
+        "view_bins": 1,
+        "last_seen_mono": 55003.625
+      },
+      {
+        "id": "742613f6c81e4049",
+        "xyz_world": [
+          0.3343513309955597,
+          -0.7814786434173584,
+          1.2214010953903198
+        ],
+        "created_wall_utc": 1788777522.7687073,
+        "created_mono": 55003.625,
+        "stability": 0.25,
+        "hits": 1,
+        "confirmed": false,
+        "label_primary": "old photo",
+        "view_bins": 1,
+        "last_seen_mono": 55003.625
+      },
+      {
+        "id": "c6651416bac84372",
+        "xyz_world": [
+          0.2596987783908844,
+          0.5860306620597839,
+          2.3688344955444336
+        ],
+        "created_wall_utc": 1788777522.7687073,
+        "created_mono": 55003.625,
+        "stability": 0.25,
+        "hits": 1,
+        "confirmed": false,
+        "label_primary": "airplane window",
+        "view_bins": 1,
+        "last_seen_mono": 55003.625
+      },
+      {
+        "id": "089e826de2b14a19",
+        "xyz_world": [
+          0.10481100529432297,
+          0.5509109497070312,
+          2.4647557735443115
+        ],
+        "created_wall_utc": 1788777523.3613086,
+        "created_mono": 55004.203,
+        "stability": 0.25,
+        "hits": 1,
+        "confirmed": false,
+        "label_primary": "dagger",
+        "view_bins": 1,
+        "last_seen_mono": 55004.203
+      },
+      {
+        "id": "1ad658eebc924d73",
+        "xyz_world": [
+          -1.9458422660827637,
+          0.6272739768028259,
+          2.026398181915283
+        ],
+        "created_wall_utc": 1788777523.3643274,
+        "created_mono": 55004.218,
+        "stability": 0.25,
+        "hits": 1,
+        "confirmed": false,
+        "label_primary": "sheet",
+        "view_bins": 1,
+        "last_seen_mono": 55004.218
+      },
+      {
+        "id": "f8b7709380684ac4",
+        "xyz_world": [
+          -0.9490732550621033,
+          -0.14705991744995117,
+          2.7305591106414795
+        ],
+        "created_wall_utc": 1788777524.6058998,
+        "created_mono": 55005.453,
+        "stability": 0.6964915531162597,
+        "hits": 3,
+        "confirmed": true,
+        "label_primary": "hassock",
+        "view_bins": 1,
+        "last_seen_mono": 55008.078
+      },
+      {
+        "id": "2cdbfd7895dd4ed0",
+        "xyz_world": [
+          -2.029888868331909,
+          -0.3249569237232208,
+          1.6039599180221558
+        ],
+        "created_wall_utc": 1788777524.610741,
+        "created_mono": 55005.453,
+        "stability": 0.25,
+        "hits": 1,
+        "confirmed": false,
+        "label_primary": "bungee",
+        "view_bins": 1,
+        "last_seen_mono": 55005.453
+      }
+    ]
+  },
+  "_gpu_info": "NVIDIA GeForce RTX 5090, 32607 MiB"
+}

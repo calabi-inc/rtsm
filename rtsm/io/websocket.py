@@ -96,6 +96,33 @@ def decode_rgb(raw: bytes, fmt: str, width: int, height: int) -> np.ndarray:
         raise ValueError(f"Unsupported rgb_format: {fmt!r}")
 
 
+def forward_clearance_from_depth(depth_m: Optional[np.ndarray],
+                                 min_valid_frac: float = 0.2) -> Tuple[float, float]:
+    """Meters of open space ahead of the camera, from one decoded depth
+    frame. RECEIVE-TIME wall-guard sensing (2026-08-16): lives here in the
+    io layer — frame-packet level, before the ingest queue/gate and any
+    GPU work — so it updates at stream rate regardless of pipeline load,
+    and keeps updating for stationary frames the keyframe gate drops.
+
+    Returns (clearance_m, valid_frac). Central band of the image (rows
+    30-55%, cols 33-66% — above the floor line for a roughly level
+    camera, so the floor doesn't read as an obstacle); clearance is the
+    10th percentile of valid depths (robust nearest-surface estimate).
+    Fail-closed: a mostly-invalid band (LiDAR too close / no return)
+    returns 0.0 — blind agents must not walk on a blind sensor."""
+    if depth_m is None or depth_m.size == 0:
+        return 0.0, 0.0
+    h, w = depth_m.shape[:2]
+    band = depth_m[int(h * 0.30):int(h * 0.55), int(w * 0.33):int(w * 0.66)]
+    if band.size == 0:
+        return 0.0, 0.0
+    valid = band[np.isfinite(band) & (band > 0.05)]
+    frac = float(valid.size) / float(band.size)
+    if frac < min_valid_frac:
+        return 0.0, frac
+    return float(np.percentile(valid, 10)), frac
+
+
 def decode_depth(
     raw: bytes,
     fmt: Optional[str],
@@ -221,6 +248,7 @@ class WebSocketReceiver:
         on_raw_message: Optional[callable] = None,
         on_handshake_done: Optional[callable] = None,
         pose_sink: Optional[callable] = None,
+        clearance_sink: Optional[callable] = None,
         latency_analytics: Optional[Any] = None,
     ) -> None:
         self.ingest_q = ingest_queue
@@ -237,11 +265,22 @@ class WebSocketReceiver:
         self._on_pose_corrections_batch = on_pose_corrections_batch
         self._on_raw_message = on_raw_message
         self._on_handshake_done = on_handshake_done
-        # Called as pose_sink(t_wc, q_wc_xyzw, unix_ts) for EVERY frame with
-        # normal tracking — including frames the keyframe/interval throttle
-        # skips — so consumers (e.g. WorkingMemory.update_robot_pose) see
-        # pose at the full input rate, not the pipeline processing rate.
+        # Called as pose_sink(t_wc, q_wc_xyzw, unix_ts, frame_epoch) for
+        # EVERY frame with normal tracking — including frames the
+        # keyframe/interval throttle skips — so consumers (e.g.
+        # WorkingMemory.update_robot_pose) see pose at the full input rate,
+        # not the pipeline processing rate.
         self._pose_sink = pose_sink
+        # Called as clearance_sink(clearance_m, valid_frac, wall_ts) for
+        # every frame that passes the tracking filter and the non-KF
+        # throttle (every DECODED frame, whether or not the ingest queue
+        # then accepts it), right after depth decode — receive-time
+        # like the pose sink, so the wall-guard signal updates at stream
+        # rate and never stalls behind GPU processing (agent-level safety
+        # consumers read it before blind motion). Added 2026-08-16.
+        # Wired by rtsm/run.py only when io.clearance.enable is true; None
+        # (the default) skips the depth statistic entirely.
+        self._clearance_sink = clearance_sink
         self._latency_analytics = latency_analytics
 
         # Per-session state (reset on each new client connection)
@@ -255,6 +294,15 @@ class WebSocketReceiver:
         self.last_rx_mono: Optional[float] = None
         self.last_enqueue_mono: Optional[float] = None
         self.tracking_drops: int = 0
+
+        # Frame epoch — SERVER-lifetime, never reset per connection. Bumps
+        # when a hello carries a new session_id: the sender re-created its
+        # streaming session, so its ARKit world origin may have moved and
+        # poses across the boundary must not be assumed to share a world
+        # frame. Same-id reconnects keep the epoch. Delivered to the pose
+        # sink with every pose so consumers can detect the boundary.
+        self._frame_epoch: int = 0
+        self._epoch_session_id: Optional[str] = None
 
         # Threading
         self._server_thread: Optional[threading.Thread] = None
@@ -274,6 +322,18 @@ class WebSocketReceiver:
             await self._handle_stream(ws)
 
         return app
+
+    # ── Frame epoch ──
+
+    def _note_session(self, session_id: str) -> int:
+        """Advance the frame epoch iff ``session_id`` differs from the last
+        session seen. Calabi Lens mints a fresh UUID per connect and resets
+        ARKit tracking per app lifecycle, so a new id marks a potential
+        world-origin change; a same-id reconnect keeps the epoch."""
+        if session_id != self._epoch_session_id:
+            self._epoch_session_id = session_id
+            self._frame_epoch += 1
+        return self._frame_epoch
 
     # ── Handshake + receive loop ──
 
@@ -317,6 +377,7 @@ class WebSocketReceiver:
         session_id = hello.get("session_id", "unknown")
         device_name = hello.get("device_name", "unknown")
         self._active_session_id = session_id
+        self._note_session(session_id)
 
         ack = {
             "type": "hello_ack",
@@ -584,7 +645,7 @@ class WebSocketReceiver:
         # FramePacket carries, so consumers see one consistent convention.
         if self._pose_sink is not None:
             try:
-                self._pose_sink(t_wc, q_xyzw, unix_ts)
+                self._pose_sink(t_wc, q_xyzw, unix_ts, self._frame_epoch)
             except Exception as e:
                 logger.error(f"[websocket] pose_sink callback error: {e}")
 
@@ -620,6 +681,19 @@ class WebSocketReceiver:
             depth_bytes, fmt=depth_fmt, width=depth_w, height=depth_h,
             depth_scale=depth_scale,
         )
+
+        # 8b. Forward-clearance wall guard (opt-in: io.clearance.enable;
+        # sink is None otherwise): computed here at RECEIVE time
+        # (frame-packet level, before any heavy processing) so the signal
+        # tracks the stream rate, not the GPU's mood. Reads depth_m BEFORE
+        # the confidence filter in step 13 masks low-confidence pixels --
+        # keep that order if steps are reshuffled (P1 admit-before-decode).
+        if self._clearance_sink is not None:
+            try:
+                c_m, c_frac = forward_clearance_from_depth(depth_m)
+                self._clearance_sink(c_m, c_frac, unix_ts)
+            except Exception as e:  # noqa: BLE001 — guard telemetry never breaks ingest
+                logger.error(f"[websocket] clearance_sink error: {e}")
 
         # 9. Pose already parsed (+ convention flip) in step 5b above; the
         # same t_wc / q_xyzw feed both the pose sink and the FramePacket.

@@ -13,6 +13,14 @@ Usage:
     python scripts/benchmark_datasheet.py                 # all backends
     python scripts/benchmark_datasheet.py fastsam         # subset
     python scripts/benchmark_datasheet.py fastsam yoloe dual grounded_sam2
+    python scripts/benchmark_datasheet.py grounded_sam2 \
+        --profile examples/rc_car_agent/e1-demo2.profile.yaml   # E1 tuning
+
+Options (everything else on the command line is a backend name):
+    --profile PATH   pass `--profile PATH` to every `python -m rtsm --replay`
+                     launch (repeatable). Raw JSON is then written as
+                     datasheet_raw_<backend>.<profile-stem>.json so it never
+                     clobbers the default-config run.
 
 Runs are SEQUENTIAL by necessity: concurrent GPU jobs would contend and
 corrupt per-frame latency. Each backend's raw JSON is written immediately
@@ -249,7 +257,11 @@ RTSM analytics API, same deterministic replay input across all backends.*
 
 
 def main():
-    requested = sys.argv[1:]
+    common, requested = bb.parse_common_args(sys.argv[1:])
+    # Keep the historical file names for default-config runs (the bisect and
+    # baseline tooling reads datasheet_raw_<backend>.json); profile runs get
+    # a suffix so the two never overwrite each other.
+    suffix = "".join(f".{Path(p).stem}" for p in common.profile)
     if requested:
         backends = [b for b in DEFAULT_BACKENDS if b["name"] in requested]
         # allow names not in default list too
@@ -263,7 +275,8 @@ def main():
     REPORT_DIR.mkdir(exist_ok=True)
     gpu = bb.get_gpu_info()
     print(f"GPU: {gpu}")
-    print(f"Backends: {[b['name'] for b in backends]}\n")
+    print(f"Backends: {[b['name'] for b in backends]}")
+    print(f"RTSM extra args: {bb.RTSM_EXTRA_ARGS or '(none: packaged yaml)'}\n")
 
     # Per-PID backup name so concurrent/overlapping runs can't clobber each
     # other's backup (a shared name leaves a run unable to restore the config).
@@ -276,7 +289,7 @@ def main():
             res = bb.run_one_backend(b)
             res["_gpu_info"] = gpu
             results.append(res)
-            raw_path = REPORT_DIR / f"datasheet_raw_{b['name']}.json"
+            raw_path = REPORT_DIR / f"datasheet_raw_{b['name']}{suffix}.json"
             with open(raw_path, "w") as f:
                 json.dump(res, f, indent=2, default=str)
             print(f"  saved {raw_path.name}"

@@ -188,7 +188,11 @@ def main():
         else:
             from rtsm.stores.vectors.faiss_client import FaissClient
             vectors = FaissClient(cfg)
-            logger.info(f"Faiss vectors successfully initialized")
+            vs = vectors.stats()
+            logger.info(
+                f"Faiss vectors initialized (dim={vs['dim']}, "
+                f"loaded={vs['count']}, persist={vs['persist_path']})"
+            )
 
     # Prepare ingest plumbing
     # Note: Intrinsics are now dynamic per-frame from camera.rgbd topic
@@ -229,6 +233,17 @@ def main():
     units_cfg = cfg.get("units", {})
     ws_cfg = io_cfg.get("websocket", {})
     recorder = None
+    # Receive-time forward clearance (io.clearance.enable, default false).
+    # WorkingMemory owns the flag: it decides whether /stats carries the
+    # forward_clearance key, and the websocket receiver only gets a sink
+    # when it does. Flag off => the receiver never computes depth statistics
+    # and /stats is identical to a build without the feature.
+    clearance_enabled = bool(getattr(wm, "clearance_enabled", False))
+    if clearance_enabled and (args.replay or receiver_type != "websocket"):
+        logger.warning(
+            "io.clearance.enable=true but no receive-time clearance source: "
+            "only the live websocket receiver computes it (replay=%s, receiver=%s); "
+            "/stats.forward_clearance will stay null", bool(args.replay), receiver_type)
 
     # Will be set to FrameWindow or None depending on receiver
     frame_window_for_reset = None
@@ -279,6 +294,11 @@ def main():
             # get input-rate freshness (~5 Hz) instead of the pipeline's
             # sweep-gated processing rate (~1 Hz).
             pose_sink=wm.update_robot_pose,
+            # Receive-time depth clearance (wall guard for blind agent
+            # motion) — same freshness rationale as pose_sink. Opt-in via
+            # io.clearance.enable (see clearance_enabled above); None makes
+            # the receiver skip the depth statistic entirely.
+            clearance_sink=wm.set_forward_clearance if clearance_enabled else None,
             latency_analytics=latency_analytics,
         )
         ws_receiver.start()
@@ -458,3 +478,6 @@ def main():
     finally:
         if recorder is not None:
             recorder.close()
+
+if __name__ == "__main__":
+    main()

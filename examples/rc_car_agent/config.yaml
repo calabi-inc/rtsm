@@ -1,0 +1,127 @@
+﻿# RC-car agent configuration (Demo 2)
+# Every tunable lives here â€” code contains no magic numbers.
+
+rtsm:
+  url: "http://127.0.0.1:8002"        # RTSM REST API â€” IP literal, NOT "localhost": Python requests tries IPv6 ::1 first and eats ~2 s per fresh connection (uvicorn binds IPv4 only)
+  lifecycle: "attach"                  # attach | spawn | off  (spawn: launch RTSM if healthz is down)
+  # Interpreter + args for spawn mode. MUST be the RTSM/GPU env's python â€”
+  # NOT this example's .venv (which deliberately has no rtsm/torch installed;
+  # the agent is a pure REST customer). E.g. the repo-root env's python.
+  # --set io.clearance.enable=true: RTSM's receive-time depth clearance is
+  # opt-in (default off). nav.py's drive-phase obstacle guard and
+  # baseline_search's relocation-walk gate read /stats.forward_clearance and
+  # are blind without it (guard fail-open, walk fail-closed); preflight_check
+  # refuses to start without the field. Pass the same flag when starting
+  # RTSM by hand (lifecycle: attach).
+  spawn_cmd: "python -m rtsm --set io.clearance.enable=true"       # canonical entry (rtsm/__main__.py â€” also configures logging)
+  kill_on_exit: false                  # NEVER default true â€” condition (a) memory must survive agent restarts
+  diagnostics_for_trials: true         # spawn RTSM with event-log diagnostics on (paper failure-analysis data)
+
+esp32:
+  url: "http://192.168.1.204"          # from the ESP32 boot log (board #2, replaced 2026-08-16 after short-circuit killed the original; give this MAC a DHCP reservation)
+  drive_rate_hz: 10                    # cap â€” Arduino WebServer has no keep-alive; >10 Hz exhausts sockets
+  heartbeat_s: 0.25                    # re-send held command to feed the 300 ms firmware watchdog
+  change_epsilon: 0.04                 # only send /drive when command changed by more than this
+  http_timeout_s: 0.6
+  battery_min_mv: 6800                 # preflight refuses below this
+
+server:
+  host: "127.0.0.1"
+  port: 8010
+  default_condition: "rtsm"            # rtsm | baseline (per-command override in POST /command)
+  require_verified_estop: true         # protocol live-fire rule, enforced (test_config pins this shipped default; a temporary local override turns that test red on purpose)
+  api_token: null                      # set a secret when binding --host 0.0.0.0: POST endpoints then require X-Auth-Token (the console prompts once)
+
+nav:
+  arrival_threshold_m: 0.40            # E1 success radius (judged by TAPE, this is the controller stop radius)
+  rotate_in_place_deg: 90              # |heading err| above this â†’ rotate in place before translating
+  max_speed: 0.5                       # fraction of TELEOP_MAX_SPEED sent to /drive
+  max_turn: 0.5
+  kp_steer: 1.2                        # proportional steer gain on heading error (rad â†’ differential)
+  tick_s: 0.05                         # control-loop period; MUST be < esp32.heartbeat_s (validated)
+  poll_hz: 10                          # RTSM pose-poll rate inside the nav loop (input is ~5 Hz)
+  pose_frozen_polls: 8                 # DIAGNOSTIC ONLY: polls with identical timestamp before the hold is labeled "frozen" in logs; the safety bound is stale_abort_s
+  stale_abort_s: 2.5                   # no fresh pose for this long â†’ SAFE STOP + abort (bounded blind-driving)
+  drift_margin_m: 0.8                  # ground-dist exceeds best-so-far by this â†’ drift verdict â†’ safe stop
+  discontinuity_base_m: 0.5            # pose jump beyond base + rate*dt between fresh poses â†’ frame_reset
+  discontinuity_rate_mps: 1.0          # generous upper bound on real car speed for the jump threshold
+  timeout_rtsm_s: 900                  # trial timeout, condition (a) — 15 min (2026-08-10: calibrated speed 0.04 m/s effective made 60 s impossible; symmetric with (b))
+  timeout_baseline_s: 900              # trial timeout, condition (b) — same budget both conditions (cleaner comparison; timeout only binds on failures)
+
+planner:
+  model: "claude-opus-5"               # selection arbiter, BOTH arms (2026-08-30: haiku->opus after the L1 pilot — 4 wrong-object confirmations on marginal crops; ~$0.11/pick vs $0.02, ~$25/campaign; drop back to claude-haiku-4-5 to A/B)
+  api_timeout_s: 30                    # 2026-08-10: 10 s caused timeout->retry loops (~48 s planning); slow first call now succeeds in one attempt
+  fallback: "top1"                     # deterministic fallback if the API is down (logged per trial)
+  snapshot_max_candidates: 10          # must cover baseline.query_top_k (validated) — every batched candidate carries its crop; labels/scores are non-discriminative in the flat band
+  retrieval: "label_first"             # 2026-08-28: detector-label search first (prompted GDINO vocab; reaches protos), semantic fallback — SHARED policy with the baseline (see baseline.retrieval)
+
+baseline:
+  freshness_gate_s: 4.0                # only objects seen within this window count as "currently visible". 2026-08-11: 2.0 was inside the real upsert lag under ingest load (bear invisible while the camera stared at it, t20260811-233410-001); 4.0 ~ one sweep-step cycle, so each poll covers the whole previous step — still unambiguously "now" vs 900 s trials
+  rng_seed: 0                          # per-trial seed is logged; 0 â†’ derive from trial_id (v1 policy uses it only for sweep direction)
+  sweep_step_turn: 0.65                # rotate-step differential — 0.4 was AT the measured motor stall floor (car hummed, 0 sweeps in 310 s, t20260811-233410-001); 0.65 is the calibration-proven rotation command (~12 deg/s)
+  sweep_step_s: 2.5                    # one rotate step ~30 deg at the CALIBRATED turn rate (0.65 x 0.327 rad/s); the old 0.5 s gave 3.7 deg/step
+  dwell_s: 1.2                         # observe pause after each step (frames must arrive + pipeline must process)
+  steps_per_sweep: 12                  # 12 x ~30 deg = a true 360 deg sweep before relocating
+  walk_speed: 0.5                      # forward relocation — 0.3 was below the ~0.4 stall floor; 0.5 is the calibrated straight-drive command
+  walk_s: 3.0                          # ~12 cm relocation at the calibrated 0.04 m/s effective speed
+  query_top_k: 10                      # candidates per batched confirm — the true target measured rank ~6 in clutter (2026-08-28), so top-5 could exclude it
+  gate_fetch_k: 50                     # fetch depth for the round query â€” top-k over ALL memory would let stale objects crowd out a visible target
+  clock_skew_tol_s: 0.5                # stamps ahead of our clock beyond this are rejected (backward wall-clock step guard)
+  # Depth wall guard (2026-08-16): the relocate walk needs this many
+  # meters of measured open space ahead (live 10th-pct depth clearance
+  # served by RTSM /stats). Blocked -> the searcher rotates step-by-step
+  # and walks the first open direction; a full circle with none -> stays
+  # put, keeps sweeping. Session-free: no setup, survives stream
+  # restarts. <=0 disables.
+  min_walk_clearance_m: 0.60
+  clearance_max_age_s: 2.0
+  # Steered stride (2026-08-17): walk HALF the measured open depth toward
+  # the most open heading (next sweep happens mid-open-area), capped/
+  # floored, in chunks with a clearance re-check between chunks.
+  walk_max_m: 1.0                      # user-set for the ~4.9x3 m venue
+  walk_min_m: 0.12
+  walk_chunk_m: 0.30
+  # Leash: stay within this radius of the trial START pose (car starts
+  # centered; depth sees past the venue tape). Outbound strides are
+  # trimmed; all-outbound -> walk back toward start. <=0 disables.
+  search_leash_m: 2.0
+  # Relevance floor — DISABLED (measured 2026-08-28: single-standpoint
+  # scores are a flat 0.028-0.045 band with the true target mid-pack; any
+  # usable floor also kills the target). Ranking + one batched
+  # image-verified call per round is the selection pressure. <=0 off.
+  min_candidate_score: 0.0
+  # Observe-then-confirm rounds (2026-08-28): full 360° sweeps per round
+  # BEFORE the single batched selection call. Reduced 3 -> 1 (operator):
+  # label search reaches protos within seconds, so one spin per decision
+  # point — spin, pause, agent decides found-vs-relocate ~1 m.
+  sweeps_per_round: 1
+  # Acquisition-phase cap (2026-08-28): search exceeding this concludes
+  # NOT FOUND (explicit outcome; remainder of the 900 s stays reserved
+  # for a completable drive at the rig's ~0.04 m/s). 8 min, operator-set.
+  search_cap_s: 480
+  # Round-query retrieval (2026-08-28): the detector's prompted label is
+  # the reliable signal on this rig (SigLIP scores flat; protos invisible
+  # to semantic search until confirmed+indexed — observed live: 82
+  # tissue-box detections while /search/semantic surfaced nothing).
+  # Semantic remains the fallback on label miss/error/off-vocab goals.
+  retrieval: "label_first"
+  # Label early-exit (2026-08-28): every dwell ends with a cheap
+  # label-only peek (no LLM); a goal-labeled round-fresh hit breaks the
+  # sweep straight to the batched confirm (~10 s lock vs ~45 s full
+  # sweep). A rejected early candidate re-observes IN PLACE (the sweep
+  # never finished). Semantic-only candidates still wait for sweep end.
+  label_early_exit: true
+
+calibration:
+  # Written by calibrate.py â€” do not hand-edit. Units: rad / m / dimensionless.
+  yaw_offset_rad: -0.003085                  # camera forward â†’ car forward, about world up
+  lever_arm_right_m: 0.012272               # camera â†’ drive center, car body frame (right)
+  lever_arm_forward_m: -0.258536             # camera â†’ drive center, car body frame (forward)
+  speed_scale_mps: 0.081654                 # measured velocity at /drive magnitude 1.0
+  turn_scale_rps: 0.327006                  # measured yaw rate at full differential
+  provenance:
+    calibrated_at: "2026-08-10T23:18:44"                # ISO timestamp, written by calibrate.py
+    rig_id: "hiwonder4wd-iphone-tray-v1"                       # e.g. "hiwonder4wd-iphone13-tray-v1"
+
+trials:
+  output_dir: "paper/demo2_data"       # trial JSONLs + videos + stop photos + event logs
