@@ -165,7 +165,17 @@ def run_demo(argv: list[str] | None = None) -> None:
         up_axis=up_axis,
     )
     proximity_index = ProximityIndex(pi_grid)
-    wm = WorkingMemory(cfg, index=proximity_index)
+    # Ingest clock (ingest.clock: auto|wall|sensor). The demo always replays a
+    # recording, so `auto` resolves to sensor: memory timing follows the frames'
+    # own timestamps and the result does not depend on replay pacing.
+    from rtsm.core.clock import make_clock, resolve_clock_mode
+    try:
+        clock_mode = resolve_clock_mode((cfg.get("ingest") or {}).get("clock", "auto"), replay=True)
+    except ValueError as exc:
+        parser.error(str(exc))
+    clock = make_clock(clock_mode)
+    logger.info("Ingest clock: %s (ingest.clock=%s)", clock_mode, (cfg.get("ingest") or {}).get("clock", "auto"))
+    wm = WorkingMemory(cfg, index=proximity_index, clock=clock)
     assoc = Associator(cfg)
     ingest_gate = IngestGate(cfg)
 
@@ -222,6 +232,7 @@ def run_demo(argv: list[str] | None = None) -> None:
     event_log = EventLogWriter(
         enabled=bool(diag_cfg.get("enabled", False)),
         configured_path=diag_cfg.get("event_log_path"),
+        extra_meta={"ingest_clock": clock_mode},
     )
     event_sink = event_log.sink()
 
@@ -240,6 +251,7 @@ def run_demo(argv: list[str] | None = None) -> None:
         on_pose_corrections_batch=vis_server.handle_pose_corrections_batch if vis_server else None,
         latency_analytics=latency_analytics,
         event_sink=event_sink,
+        throttle_clock=clock_mode,
     )
 
     pipe = Pipeline(
@@ -257,6 +269,7 @@ def run_demo(argv: list[str] | None = None) -> None:
         seg_analytics=seg_analytics,
         latency_analytics=latency_analytics,
         event_log=event_log,
+        clock=clock,
     )
 
     # ── Start API + viz WebSocket + static frontend on single port ──
@@ -271,7 +284,7 @@ def run_demo(argv: list[str] | None = None) -> None:
         clip_adapter=clip,
         vectors=vectors,
         extra_stats_provider=lambda: {"ingest_q": ingest_q.qsize()},
-        reset_components=ResetComponents(sweep_cache=sweep_cache, vis_server=vis_server),
+        reset_components=ResetComponents(sweep_cache=sweep_cache, vis_server=vis_server, clock=clock),
         seg_analytics=seg_analytics,
         latency_analytics=latency_analytics,
         mcp_enabled=bool(mcp_cfg.get("enable", False)),

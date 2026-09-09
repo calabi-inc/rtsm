@@ -7,6 +7,9 @@ generates a comprehensive comparison report suitable for publication.
 
 Usage:
     python scripts/benchmark_backends.py
+    python scripts/benchmark_backends.py --profile path.yaml   # sparse config profile per launch
+    python scripts/benchmark_backends.py --set ingest.clock=wall --replay-speed 5   # runner pass-throughs
+    python scripts/benchmark_backends.py --viz                 # keep the viz server (headless is the default)
 
 Backends compared:
     A) dual        — FastSAM + YOLOE (AGPL, IoU-merge)
@@ -668,11 +671,20 @@ def parse_common_args(argv: Optional[List[str]] = None):
     parser.add_argument("--viz", action="store_true",
                         help="keep the visualization server (and its browser tab) on for "
                              "human review; default is headless (--no-viz)")
+    parser.add_argument("--replay-speed", type=float, default=None,
+                        help="pass --replay-speed X to the runner (G1-B determinism runs "
+                             "replay the same recording at 1x and 5x)")
+    parser.add_argument("--set", dest="config_sets", action="append", default=[], metavar="PATH=VALUE",
+                        help="pass --set PATH=VALUE to the runner (repeatable), e.g. ingest.clock=wall")
     args, rest = parser.parse_known_args(argv)
     VIZ = bool(args.viz)
     RTSM_EXTRA_ARGS.clear()
     for p in args.profile:
         RTSM_EXTRA_ARGS.extend(["--profile", p])
+    for kv in args.config_sets:
+        RTSM_EXTRA_ARGS.extend(["--set", kv])
+    if args.replay_speed is not None:
+        RTSM_EXTRA_ARGS.extend(["--replay-speed", str(args.replay_speed)])
     if not VIZ:
         RTSM_EXTRA_ARGS.append("--no-viz")
     return args, rest

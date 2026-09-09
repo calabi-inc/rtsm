@@ -27,6 +27,12 @@ Options (everything else on the command line is a backend name):
                      are empty and object counts differ slightly from viz-on
                      runs (compare against headless anchors only; see
                      benchmark_backends.patch_config).
+    --set K=V        pass `--set K=V` to the runner (repeatable), e.g.
+                     --set ingest.clock=wall for a G1-A parity run.
+    --replay-speed X pass `--replay-speed X` to the runner (G1-B: 1x vs 5x).
+    Raw JSON names carry a slug for each of these, e.g.
+    datasheet_raw_dual.ingest.clock-wall.json, datasheet_raw_dual.x5.json;
+    only a bare default-config run writes datasheet_raw_<backend>.json.
 
 Runs are SEQUENTIAL by necessity: concurrent GPU jobs would contend and
 corrupt per-frame latency. Each backend's raw JSON is written immediately
@@ -265,9 +271,14 @@ RTSM analytics API, same deterministic replay input across all backends.*
 def main():
     common, requested = bb.parse_common_args(sys.argv[1:])
     # Keep the historical file names for default-config runs (the bisect and
-    # baseline tooling reads datasheet_raw_<backend>.json); profile runs get
-    # a suffix so the two never overwrite each other.
+    # baseline tooling reads datasheet_raw_<backend>.json); runs with a
+    # profile, --set overrides or a replay speed get a slug so the wall-mode,
+    # sensor-mode and 5x runs of a gate never overwrite each other.
+    import re as _re
     suffix = "".join(f".{Path(p).stem}" for p in common.profile)
+    suffix += "".join("." + _re.sub(r"[^A-Za-z0-9._-]+", "-", kv.replace("=", "-")) for kv in common.config_sets)
+    if common.replay_speed is not None:
+        suffix += f".x{common.replay_speed:g}"
     if requested:
         backends = [b for b in DEFAULT_BACKENDS if b["name"] in requested]
         # allow names not in default list too

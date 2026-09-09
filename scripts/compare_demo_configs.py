@@ -64,7 +64,12 @@ def run_config(config_name: str, replay_dir: str) -> dict:
         up_axis=up_axis,
     )
     proximity_index = ProximityIndex(pi_grid)
-    wm = WorkingMemory(cfg, index=proximity_index)
+    # Same ingest clock as `python -m rtsm --replay` (ingest.clock auto -> sensor
+    # under replay), so A/B comparisons here use the runner's admission policy.
+    from rtsm.core.clock import make_clock, resolve_clock_mode
+    clock_mode = resolve_clock_mode((cfg.get("ingest") or {}).get("clock", "auto"), replay=True)
+    clock = make_clock(clock_mode)
+    wm = WorkingMemory(cfg, index=proximity_index, clock=clock)
     assoc = Associator(cfg)
     ingest_gate = IngestGate(cfg)
 
@@ -99,6 +104,7 @@ def run_config(config_name: str, replay_dir: str) -> dict:
         vectors=vectors,
         ingest_q=ingest_q,
         sweep_cache=sweep_cache,
+        clock=clock,
     )
 
     # Start replay
@@ -112,6 +118,7 @@ def run_config(config_name: str, replay_dir: str) -> dict:
         nonkf_min_interval_s=float(ws_cfg.get("nonkf_min_interval_s", 0.5)),
         confidence_threshold=int(ws_cfg.get("confidence_threshold", 1)),
         apply_camera_flip=bool(vis_cfg.get("apply_camera_flip", False)),
+        throttle_clock=clock_mode,
     )
 
     replay.start()

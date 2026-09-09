@@ -23,6 +23,7 @@ from rtsm.stores.sweep_cache import SweepCache
 from rtsm.io.ingest_queue import IngestQueue
 from rtsm.core.datamodel import FramePacket
 from rtsm.core.watchdog import PipelineHeartbeat
+from rtsm.core.clock import Clock, WallClock
 from rtsm.evaluation.event_log import (
     DQ_DROPPED, DQ_FRAME_REJECTED, DQ_GATE_REJECTED, DQ_PROCESSED,
     DQ_REASON_GATE_ERROR, DQ_REASON_KEYFRAME, DQ_REASON_NO_POSE, DQ_REASON_POSE_CONVERSION,
@@ -130,9 +131,15 @@ class Pipeline:
         seg_analytics: Optional[Any] = None,
         latency_analytics: Optional[Any] = None,
         event_log: Optional[EventLogWriter] = None,
+        clock: Optional[Clock] = None,
     ):
         self.cfg = cfg
         self.segmenter = segmenter
+        # Ingest clock (rtsm/core/clock.py). The pipeline is the dispatcher:
+        # it advances a SensorClock to each dequeued frame's sensor time and
+        # hands `clock.now_mono()` to the ingest gate / sweep policy. Wall by
+        # default (unchanged behaviour).
+        self.clock: Clock = clock if clock is not None else WallClock()
         self.clip = clip
         self.working_mem = working_mem
         self.proximity_index = proximity_index
@@ -219,7 +226,12 @@ class Pipeline:
             time.sleep(0.01)
             return
         self.heartbeat.beat_frame()
-        t_deq = time.monotonic()   # dequeue instant for the frame-flow trace (age_s)
+        t_deq = time.monotonic()   # dequeue instant for the frame-flow trace (queue wait)
+        # Advance the ingest clock to this frame (no-op for WallClock). Every
+        # timing decision below — gate grace / TTL / parallax, proto expiry,
+        # LTM scheduling — reads this value.
+        self.clock.advance(pkt.time.t_sensor_ns if pkt is not None else None,
+                           getattr(pkt, "frame_epoch", None))
 
         # Ingest gate: accept keyframes unconditionally, gate non-KFs with policy
         accept = True
@@ -250,7 +262,7 @@ class Pipeline:
                         fwd_unit=fwd,
                         Z=Z,
                         look_cell=None,
-                        now_mono=time.monotonic(),
+                        now_mono=self.clock.now_mono(),
                     )
                     accept = True
                     gate_reason = str(getattr(dec, "reason", DQ_REASON_KEYFRAME) or DQ_REASON_KEYFRAME)
@@ -265,7 +277,7 @@ class Pipeline:
                         fwd_unit=fwd,
                         Z=Z,
                         look_cell=None,
-                        now_mono=time.monotonic(),
+                        now_mono=self.clock.now_mono(),
                     )
                     accept = bool(getattr(dec, 'accept', True))
                     gate_reason = str(getattr(dec, "reason", "") or "")
@@ -551,7 +563,7 @@ class Pipeline:
                     vbin=vbin,
                     cam_pos=twc,
                     look_cell=None,
-                    now_mono=time.monotonic(),
+                    now_mono=self.clock.now_mono(),
                 )
                 # Store latest robot pose for API queries
                 timestamp = float(pkt.time.t_wall_utc_s or pkt.time.t_mono_s or 0.0)
@@ -631,6 +643,7 @@ class Pipeline:
                 queue_depth=(int(self.ingest_q.qsize()) if self.ingest_q is not None else 0),
                 outcome=outcome,
                 reason=reason,
+                clock_s=round(float(self.clock.now_mono()), 6),
             ))
         except Exception:
             logger.debug("frame-flow trace (dequeue) failed", exc_info=True)

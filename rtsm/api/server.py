@@ -18,6 +18,7 @@ class ResetComponents:
     sweep_cache: Any = None
     frame_window: Any = None
     vis_server: Any = None  # VisualizationServer with registry
+    clock: Any = None       # ingest clock (rtsm/core/clock.py); SensorClock re-anchors on the next frame
 
 
 def create_app(
@@ -495,6 +496,17 @@ def create_app(
                 result["cleared"]["frame_window"] = fw_result
             except Exception as e:
                 result["cleared"]["frame_window"] = {"error": str(e)}
+
+        # Ingest clock: a SensorClock must forget its anchor, or the next
+        # session's (earlier) sensor stamps would be clamped and every timing
+        # gate would stall (WallClock has no reset).
+        clk = reset_components.clock if reset_components else None
+        if clk is not None and hasattr(clk, "reset"):
+            try:
+                clk.reset()
+                result["cleared"]["ingest_clock"] = getattr(clk, "name", type(clk).__name__)
+            except Exception as e:
+                result["cleared"]["ingest_clock"] = {"error": str(e)}
 
         # Clear VisualizationServer (registry + TSDF + broadcast clear to clients)
         if reset_components and reset_components.vis_server:

@@ -257,8 +257,13 @@ class WebSocketReceiver:
         event_sink: Optional[callable] = None,
         event_source: str = "websocket",
         trace_queue: Optional[IngestQueue] = None,
+        throttle_clock: str = "wall",
     ) -> None:
         self.ingest_q = ingest_queue
+        # Non-keyframe throttle clock (ingest.clock): "wall" compares process
+        # time between admitted non-KFs (live default); "sensor" compares the
+        # header timestamps, so the admitted set is independent of replay speed.
+        self._throttle_clock = "sensor" if str(throttle_clock).lower() == "sensor" else "wall"
         # Frame-flow trace: called with a ReceiverEvent for every decision
         # (enqueued / dropped + reason). None (the default) skips it entirely.
         # trace_queue: the queue whose depth the lines report (the replayer's
@@ -301,7 +306,11 @@ class WebSocketReceiver:
 
         # Per-session state (reset on each new client connection)
         self._frame_count: int = 0
+        # Throttle stamps: advanced on the ADMIT decision (step 6), never on
+        # enqueue, so a full ingest queue cannot stop the throttle from
+        # thinning. Wall stamp (process-monotonic) and sensor stamp (header ns).
         self._last_nonkf_enq_mono: float = 0.0
+        self._last_nonkf_admit_sensor_ns: Optional[int] = None
         self._last_enq_ts_ns: Optional[int] = None
         self._active_session_id: Optional[str] = None
 
@@ -416,6 +425,7 @@ class WebSocketReceiver:
         # Reset per-session state
         self._frame_count = 0
         self._last_nonkf_enq_mono = 0.0
+        self._last_nonkf_admit_sensor_ns = None
         self._last_enq_ts_ns = None
         frames_received = 0
         frames_enqueued = 0
@@ -454,8 +464,8 @@ class WebSocketReceiver:
                                     self._trace_rx(RX_ENQUEUED, "", pkt=pkt)
                                     self.last_enqueue_mono = time.monotonic()
                                     self._last_enq_ts_ns = pkt.time.t_sensor_ns
-                                    if not pkt.is_keyframe:
-                                        self._last_nonkf_enq_mono = time.monotonic()
+                                    # (throttle stamp advanced at the admit decision in
+                                    #  _parse_binary_message step 6, not here)
                                     if pkt.is_keyframe and self._on_keyframe is not None:
                                         try:
                                             self._on_keyframe(pkt)
@@ -559,6 +569,35 @@ class WebSocketReceiver:
         else:
             logger.warning(f"[websocket] pose_corrections: unexpected {len(pose_data)} elements, skipping")
             return None
+
+    # ── Non-keyframe throttle ──
+
+    def _admit_nonkf(self, sensor_ts_ns: Any) -> bool:
+        """Decide whether a non-keyframe passes the min-interval throttle, and
+        stamp the decision if it does.
+
+        sensor mode: compare the header timestamp with the last ADMITTED
+        non-KF's; a negative delta (new session / restarted clock) admits and
+        re-stamps. Falls back to wall when the header carries no timestamp.
+        wall mode: compare process-monotonic time, as before.
+        """
+        interval = self._nonkf_min_interval_s
+        if self._throttle_clock == "sensor" and sensor_ts_ns:
+            try:
+                ts = int(sensor_ts_ns)
+            except (TypeError, ValueError):
+                ts = 0
+            if ts > 0:
+                last = self._last_nonkf_admit_sensor_ns
+                if last is not None and 0 <= (ts - last) < int(interval * 1e9):
+                    return False
+                self._last_nonkf_admit_sensor_ns = ts
+                return True
+        now_mono = time.monotonic()
+        if (now_mono - self._last_nonkf_enq_mono) < interval:
+            return False
+        self._last_nonkf_enq_mono = now_mono
+        return True
 
     # ── Frame-flow trace ──
 
@@ -738,10 +777,18 @@ class WebSocketReceiver:
             or self._frame_count % self._keyframe_every_n == 0
         )
 
-        # 6. Non-KF throttle
+        # 6. Non-KF throttle (ingest clock). The stamp advances on the admit
+        # decision, here, before decode and enqueue — a full ingest queue must
+        # not stop the throttle from thinning (the E1 wedge). Sensor mode
+        # compares header timestamps so the admitted set does not depend on
+        # replay speed. Wall mode therefore stamps ~3 ms EARLIER than before
+        # this change (decode latency); a non-KF landing inside that window of
+        # the 0.5 s boundary can flip from throttled to admitted. On Windows /
+        # Python 3.12 the 15.6 ms monotonic tick absorbs it (G1-A was exact);
+        # on a ns-resolution clock wall replays were never bit-reproducible,
+        # which is why the sensor anchor is the reference.
         if not is_keyframe:
-            now_mono = time.monotonic()
-            if (now_mono - self._last_nonkf_enq_mono) < self._nonkf_min_interval_s:
+            if not self._admit_nonkf(hdr_ts):
                 if self._latency_analytics:
                     self._latency_analytics.record_throttle_skip()
                 return self._trace_rx(RX_DROPPED, RX_THROTTLE, seq=hdr_seq, ts=hdr_ts,
@@ -844,6 +891,7 @@ class WebSocketReceiver:
             is_keyframe=is_keyframe,
             confidence=confidence_m,
             rgb_jpeg=raw_jpeg,
+            frame_epoch=self._frame_epoch,
         )
 
     # ── Server lifecycle ──

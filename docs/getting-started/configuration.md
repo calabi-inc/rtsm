@@ -72,22 +72,6 @@ the visualization server and the browser auto-open; headless replay, eval,
 CI). The demo's `--port` and either runner's `--no-viz` take precedence over
 configuration values.
 
-```bash
-rtsm config show --profile room.yaml --set object.promote_hits=3 > trial.yaml
-rtsm --replay recordings/my-room --config trial.yaml
-```
-
-`show` writes valid YAML to stdout and advisories to stderr. Each resolved
-configuration has a SHA-256 fingerprint, also printed at runner startup.
-Keep the snapshot with the recording and evaluation results. The fingerprint
-identifies settings, not model weights, input data or code version.
-
-Profiles and `--set` reject unknown paths to catch typos. They accept settings
-from the shipped configurations, documented tuning controls, and any additional
-expert settings already declared in your complete `--config` file. Validation
-covers the documented tuning controls; it is not a complete schema or a check
-of hardware/model compatibility.
-
 Restart to apply a profile. There is no live-update API yet: component
 constructors cache some values. Change one suspected cause, compare against the
 same replay, and inspect wrong identities, misses, position error and stage
@@ -267,6 +251,50 @@ units:
 ```
 
 ---
+
+## Ingest Clock & Admission Timing
+
+Frame admission and memory timing (the receiver's non-keyframe throttle, the
+ingest gate's grace / TTL / parallax ages, proto-object expiry and vector-store
+upsert scheduling) all read one clock:
+
+- `wall` — process time. Decisions follow real elapsed seconds. The live default.
+- `sensor` — the frames' own timestamps, advanced per dequeued frame. A replay
+  admits the same frames and builds the same memory at any `--replay-speed`,
+  which is what evaluation and A/A regression gates need.
+- `auto` (packaged default) — `sensor` under `--replay` and `rtsm demo`, `wall`
+  for live receivers.
+
+`rtsm --replay recordings/session1 --set ingest.clock=wall` reproduces the
+old wall-clock behaviour; latency analytics, the watchdog, recorder/replayer
+pacing and vector-flush cadence always stay on wall time. Object `created_mono`
+/ `last_seen_mono` fields in `/objects` are stamped on this clock.
+
+```bash
+rtsm config show --profile room.yaml --set object.promote_hits=3 > trial.yaml
+rtsm --replay recordings/my-room --config trial.yaml
+```
+
+`show` writes valid YAML to stdout and advisories to stderr. Each resolved
+configuration has a SHA-256 fingerprint, also printed at runner startup.
+Keep the snapshot with the recording and evaluation results. The fingerprint
+identifies settings, not model weights, input data or code version.
+
+Profiles and `--set` reject unknown paths to catch typos. They accept settings
+from the shipped configurations, documented tuning controls, and any additional
+expert settings already declared in your complete `--config` file. Validation
+covers the documented tuning controls; it is not a complete schema or a check
+of hardware/model compatibility.
+
+```yaml
+ingest:
+  clock: auto                # auto | wall | sensor (see above)
+  dup_window_ns: 200000000   # a non-keyframe within this sensor-time window of the last keyframe is skipped
+  non_kf_grace_s: 0.03       # non-keyframe grace right after a keyframe arrives (on the ingest clock)
+```
+
+`dup_window_ns` and `non_kf_grace_s` were always read by the ingest gate with
+these defaults; shipping them makes them `--set`-able.
 
 ## Frame-Quality Gate
 
