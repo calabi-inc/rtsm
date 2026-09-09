@@ -17,6 +17,7 @@ from typing import List, Optional
 
 from rtsm.io.ingest_queue import IngestQueue
 from rtsm.io.websocket import WebSocketReceiver
+from rtsm.evaluation.event_log import RX_DROPPED, RX_ENQUEUED, RX_QUEUE_FULL
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +47,7 @@ class ReplayReceiver:
         on_pose_corrections_batch: Optional[callable] = None,
         latency_analytics=None,
         replay_speed: float = 1.0,
+        event_sink: Optional[callable] = None,
     ) -> None:
         self._recording_dir = os.path.abspath(recording_dir)
         self._ingest_q = ingest_queue
@@ -78,6 +80,13 @@ class ReplayReceiver:
             on_pose_corrections=on_pose_corrections,
             on_pose_corrections_batch=on_pose_corrections_batch,
             latency_analytics=latency_analytics,  # passed to decoder for frame_received/tracking/throttle hooks
+            # Frame-flow trace: the decoder emits the parse-side decisions
+            # (malformed / parse_error / tracking_state / throttle) tagged
+            # source="replay"; the enqueue decisions are emitted below. Depth
+            # is read from the REAL ingest queue, not the decoder's dummy.
+            event_sink=event_sink,
+            event_source="replay",
+            trace_queue=ingest_queue,
         )
 
         self._replay_speed = max(0.1, replay_speed)  # <1 = slower, >1 = faster
@@ -174,6 +183,7 @@ class ReplayReceiver:
                         ok = self._ingest_q.put(pkt, block=False)
                         if ok:
                             frames_enqueued += 1
+                            self._decoder._trace_rx(RX_ENQUEUED, "", pkt=pkt)
                             # Mirror _handle_stream state update for non-KF throttle
                             if not pkt.is_keyframe:
                                 self._decoder._last_nonkf_enq_mono = time.monotonic()
@@ -186,6 +196,7 @@ class ReplayReceiver:
                             if self._latency_analytics:
                                 self._latency_analytics.record_queue_drop()
                             logger.warning("[replay] ingest queue full; dropping frame")
+                            self._decoder._trace_rx(RX_DROPPED, RX_QUEUE_FULL, pkt=pkt)
 
                 elif kind == "text":
                     try:

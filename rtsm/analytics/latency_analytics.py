@@ -297,6 +297,29 @@ class PipelineLatencyBuffer:
                 entries = entries[-last_n:]
             # Grab recent Tier 2 buckets for input_hz estimation
             recent_t2 = [b for b in self._second_buckets if b.frames_in_bucket > 0][-10:]
+            # Lifetime (process-monotonic) counters. Reported cumulatively so a
+            # headless run — no viz client, hence no Tier-2 rollup — still
+            # exposes every drop point.
+            counters = {
+                "received": self._received_count,
+                "processed": total_appended,
+                "gate_rejections": self._gate_rejections,
+                "frame_rejections": self._frame_rejections,
+                "queue_drops": self._queue_drops,
+                "throttle_skips": self._throttle_skips,
+                "tracking_drops": self._tracking_drops,
+            }
+
+        # Lifetime acceptance of DEQUEUED frames by the two pipeline gates
+        # (ingest gate + frame-quality gate), i.e. admitted / (admitted +
+        # gate-rejected + frame-gate-rejected). Lifetime and cumulative, unlike
+        # the windowed rates around it; frames dropped for a failed pose
+        # conversion never reach the gates and are counted on the pipeline
+        # (/stats.pose_conversion_failures), not here. Was hardcoded to 1.0
+        # ("Tier 1 only has accepted frames"), which misled the datasheet: it
+        # read as "nothing was ever gated".
+        dequeued = total_appended + counters["gate_rejections"] + counters["frame_rejections"]
+        gate_acceptance_rate = round(total_appended / dequeued, 4) if dequeued > 0 else 0.0
 
         # For percentile stats, skip warmup frames (only matters early in session)
         # Warmup frames are the first N globally appended, not per-window
@@ -315,7 +338,8 @@ class PipelineLatencyBuffer:
                 "input_hz": 0.0,
                 "processing_hz": 0.0,
                 "effective_ratio": 0.0,
-                "gate_acceptance_rate": 0.0,
+                "gate_acceptance_rate": gate_acceptance_rate,
+                "counters": counters,
                 "t_segmentation": empty_timing,
                 "t_heuristics": empty_timing,
                 "t_scoring": empty_timing,
@@ -345,7 +369,8 @@ class PipelineLatencyBuffer:
             "input_hz": round(input_hz, 1),
             "processing_hz": round(processing_hz, 2),
             "effective_ratio": round(processing_hz / max(0.001, input_hz), 3),
-            "gate_acceptance_rate": 1.0,  # Tier 1 only has accepted frames
+            "gate_acceptance_rate": gate_acceptance_rate,
+            "counters": counters,
             "warmup_skipped": len(entries) - len(entries_for_timing),
             "t_segmentation": _timing_stats([e.t_segmentation for e in entries_for_timing]),
             "t_heuristics": _timing_stats([e.t_heuristics for e in entries_for_timing]),

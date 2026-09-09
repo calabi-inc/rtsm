@@ -31,6 +31,10 @@ from fastapi.responses import JSONResponse
 
 from rtsm.io.ingest_queue import IngestQueue
 from rtsm.utils.transforms import rotmat_to_quat_xyzw
+from rtsm.evaluation.event_log import (
+    RX_DROPPED, RX_ENQUEUED, RX_MALFORMED, RX_PARSE_ERROR, RX_QUEUE_FULL, RX_THROTTLE, RX_TRACKING,
+    ReceiverEvent,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -250,8 +254,20 @@ class WebSocketReceiver:
         pose_sink: Optional[callable] = None,
         clearance_sink: Optional[callable] = None,
         latency_analytics: Optional[Any] = None,
+        event_sink: Optional[callable] = None,
+        event_source: str = "websocket",
+        trace_queue: Optional[IngestQueue] = None,
     ) -> None:
         self.ingest_q = ingest_queue
+        # Frame-flow trace: called with a ReceiverEvent for every decision
+        # (enqueued / dropped + reason). None (the default) skips it entirely.
+        # trace_queue: the queue whose depth the lines report (the replayer's
+        # decoder-only instance owns a dummy queue and passes the real one).
+        self._event_sink = event_sink
+        self._event_source = str(event_source)
+        self._trace_queue = trace_queue if trace_queue is not None else ingest_queue
+        self._hdr_seq: Any = None     # header ids of the message being parsed (for parse_error lines)
+        self._hdr_ts: Any = None
         self._host = host
         self._port = port
         self._require_tracking_normal = require_tracking_normal
@@ -435,6 +451,7 @@ class WebSocketReceiver:
                                 ok = self.ingest_q.put(pkt, block=False)
                                 if ok:
                                     frames_enqueued += 1
+                                    self._trace_rx(RX_ENQUEUED, "", pkt=pkt)
                                     self.last_enqueue_mono = time.monotonic()
                                     self._last_enq_ts_ns = pkt.time.t_sensor_ns
                                     if not pkt.is_keyframe:
@@ -455,7 +472,10 @@ class WebSocketReceiver:
                                     logger.warning(
                                         "[websocket] ingest queue full; dropping frame"
                                     )
+                                    self._trace_rx(RX_DROPPED, RX_QUEUE_FULL, pkt=pkt)
                         except Exception as e:
+                            # (the parse_error trace line is emitted inside
+                            # _parse_binary_message, with the header ids)
                             logger.error(f"[websocket] frame parse error: {e}")
                     elif "text" in msg and msg["text"]:
                         # Text message (pose_corrections, etc.)
@@ -540,49 +560,110 @@ class WebSocketReceiver:
             logger.warning(f"[websocket] pose_corrections: unexpected {len(pose_data)} elements, skipping")
             return None
 
+    # ── Frame-flow trace ──
+
+    def _trace_rx(self, decision: str, reason: str = "", *, pkt: Optional[FramePacket] = None,
+                  seq: Any = None, ts: Any = None, is_kf: Optional[bool] = None,
+                  frame_count: Optional[int] = None, queue_depth: Optional[int] = None) -> None:
+        """Emit one ReceiverEvent to the event sink (no-op when unset).
+
+        Returns None so drop sites can `return self._trace_rx(...)`. When a
+        FramePacket is given, its seq / t_sensor_ns / is_keyframe are used.
+        Never raises into the receive path.
+        """
+        sink = self._event_sink
+        if sink is None:
+            return None
+        try:
+            if pkt is not None:
+                seq, ts, is_kf = pkt.time.seq, pkt.time.t_sensor_ns, bool(pkt.is_keyframe)
+                if frame_count is None:
+                    frame_count = self._frame_count
+            if queue_depth is None:
+                q = self._trace_queue
+                queue_depth = int(q.qsize()) if q is not None else None
+            sink(ReceiverEvent(
+                timestamp=time.monotonic(),
+                source=self._event_source,
+                decision=decision,
+                reason=reason,
+                frame_seq=(int(seq) if seq is not None else None),
+                t_sensor_ns=(int(ts) if ts is not None else None),
+                is_keyframe=is_kf,
+                frame_count=frame_count,
+                queue_depth=queue_depth,
+            ))
+        except Exception:
+            logger.debug("[websocket] frame-flow trace failed", exc_info=True)
+        return None
+
     # ── Binary message parsing ──
 
     def _parse_binary_message(self, data: bytes) -> Optional[FramePacket]:
-        """Parse a single binary WebSocket message into a FramePacket."""
+        """Parse a single binary WebSocket message into a FramePacket.
+
+        Thin wrapper around `_parse_binary_message_impl`: when parsing raises
+        after the header was read (malformed T_wc, decode failure, missing
+        field), one 'dropped / parse_error' trace line is emitted with the
+        header ids, then the exception is re-raised so every caller keeps its
+        existing behaviour (the stream loop logs and continues; the replayer
+        propagates as before).
+        """
+        self._hdr_seq = None
+        self._hdr_ts = None
+        try:
+            return self._parse_binary_message_impl(data)
+        except Exception:
+            self._trace_rx(RX_DROPPED, RX_PARSE_ERROR, seq=self._hdr_seq, ts=self._hdr_ts,
+                           frame_count=self._frame_count)
+            raise
+
+    def _parse_binary_message_impl(self, data: bytes) -> Optional[FramePacket]:
         if self._latency_analytics:
             self._latency_analytics.record_frame_received()
 
         offset = 0
         n = len(data)
+        hdr_seq = None   # header frame_id / timestamp_ns for the frame-flow trace
+        hdr_ts = None
 
         # 1. JSON header
         if n < 4:
             logger.warning("[websocket] message too short for json_len")
-            return None
+            return self._trace_rx(RX_DROPPED, RX_MALFORMED)
         (json_len,) = struct.unpack_from("<I", data, offset)
         offset += 4
         if n < offset + json_len:
             logger.warning("[websocket] message truncated at JSON payload")
-            return None
+            return self._trace_rx(RX_DROPPED, RX_MALFORMED)
         header = json.loads(data[offset : offset + json_len].decode("utf-8"))
         offset += json_len
+        if isinstance(header, dict):
+            hdr_seq = header.get("frame_id")
+            hdr_ts = header.get("timestamp_ns")
+        self._hdr_seq, self._hdr_ts = hdr_seq, hdr_ts
 
         # 2. RGB payload
         if n < offset + 4:
             logger.warning("[websocket] message truncated at rgb_len")
-            return None
+            return self._trace_rx(RX_DROPPED, RX_MALFORMED, seq=hdr_seq, ts=hdr_ts)
         (rgb_len,) = struct.unpack_from("<I", data, offset)
         offset += 4
         if n < offset + rgb_len:
             logger.warning("[websocket] message truncated at RGB payload")
-            return None
+            return self._trace_rx(RX_DROPPED, RX_MALFORMED, seq=hdr_seq, ts=hdr_ts)
         rgb_bytes = data[offset : offset + rgb_len]
         offset += rgb_len
 
         # 3. Depth payload
         if n < offset + 4:
             logger.warning("[websocket] message truncated at depth_len")
-            return None
+            return self._trace_rx(RX_DROPPED, RX_MALFORMED, seq=hdr_seq, ts=hdr_ts)
         (depth_len,) = struct.unpack_from("<I", data, offset)
         offset += 4
         if n < offset + depth_len:
             logger.warning("[websocket] message truncated at depth payload")
-            return None
+            return self._trace_rx(RX_DROPPED, RX_MALFORMED, seq=hdr_seq, ts=hdr_ts)
         depth_bytes = data[offset : offset + depth_len]
         offset += depth_len
 
@@ -611,7 +692,7 @@ class WebSocketReceiver:
             logger.info(
                 f"[websocket] dropping frame: tracking_state={tracking_state}"
             )
-            return None
+            return self._trace_rx(RX_DROPPED, RX_TRACKING, seq=hdr_seq, ts=hdr_ts)
 
         # 5b. Parse pose + wall timestamp (hoisted above the keyframe/interval
         # throttle so the pose sink fires at the full input rate).
@@ -663,7 +744,8 @@ class WebSocketReceiver:
             if (now_mono - self._last_nonkf_enq_mono) < self._nonkf_min_interval_s:
                 if self._latency_analytics:
                     self._latency_analytics.record_throttle_skip()
-                return None
+                return self._trace_rx(RX_DROPPED, RX_THROTTLE, seq=hdr_seq, ts=hdr_ts,
+                                      is_kf=False, frame_count=self._frame_count)
 
         # 7. Decode RGB (capture raw JPEG for zero-copy viz forwarding)
         rgb_fmt = header.get("rgb_format", "jpeg")

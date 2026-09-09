@@ -152,3 +152,6 @@ examples/rc_car_agent/paper/demo2_data/session_*/photos/
 eval/baselines/**/*.log
 eval/baselines/**/*.stdout
 eval/baselines/**/bisect-dual/*/datasheet_raw_*.json
+
+# scripts/benchmark_*.py rewrite the packaged config in place and keep a per-PID backup while a run is live
+rtsm/cfg/rtsm.yaml.*bak*

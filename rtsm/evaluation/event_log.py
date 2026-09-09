@@ -1,8 +1,43 @@
 """
-Phase 0 diagnostic event log: append-only JSONL writer.
+Diagnostic event log: append-only JSONL writer (frame-flow trace).
 
-One line per processed frame. Off by default; opt in via cfg.diagnostics.enabled.
-Each pipeline run gets a fresh, auto-timestamped file (no appending across runs).
+Off by default; opt in via cfg.diagnostics.enabled. Each pipeline run gets a
+fresh, auto-timestamped file (no appending across runs). Every line is a JSON
+object with a ``kind`` field; the first line is ``kind: "meta"`` and carries
+``schema_version``.
+
+Line kinds (schema_version 2, 2026-09-09 — P1 task 0 of the Gate 4.5 plan):
+
+  meta      once per file: schema_version, wall time, pid.
+  receiver  one per RECEIVER DECISION (websocket / replay / zeromq thread):
+            enqueued, or dropped with the reason (malformed, parse_error,
+            tracking_state, throttle, duplicate_ts, no_camera_frame,
+            queue_full). Carries the source's seq / t_sensor_ns / is_keyframe
+            when the header parsed. ZeroMQ has no source seq: its join key is
+            (t_sensor_ns, is_keyframe).
+  dequeue   one per DEQUEUED frame (pipeline thread), including the frames the
+            ingest gate or the frame-quality gate rejects and the frames whose
+            present pose fails conversion: outcome (processed | gate_rejected
+            | frame_rejected | dropped), the reason (IngestDecision.reason,
+            FrameGateDecision.reason, "keyframe", "no_pose", "gate_error",
+            "pose_conversion_failed"), and queue_wait_s = dequeue time minus
+            TimeBundle.t_mono_s. That stamp is set when the FramePacket is
+            built (after decode, just before enqueue), so this is the ingest-
+            queue wait; sensor-clock age arrives with the P1 clock work.
+            outcome=processed means ADMITTED to processing: the line is written
+            before segmentation so a crash mid-frame still leaves it; join with
+            the frame line (same t_sensor_ns) for completion.
+  frame     one per PROCESSED frame: masks, filter, scoring, association,
+            timings (the schema_version-1 line, plus kind and t_sensor_ns;
+            timestamp is now time.monotonic() like the other kinds).
+
+A/A comparator contract: compare the receiver and dequeue streams PER KIND as
+ordered sequences of (frame_seq, t_sensor_ns, decision/outcome, reason); never
+compare file order across kinds (an enqueued line is written after put(), so
+the pipeline's dequeue line can precede it), and ignore timestamp,
+queue_wait_s, queue_depth, frame_count and the meta line, which are run-
+specific until the sensor-time clock lands. Writes are serialised with a lock
+because the receiver thread and the pipeline thread both write.
 
 Path resolution rules:
   - None / unset  -> eval_output/<YYYYMMDD_HHMMSS>/events.jsonl  (per-run, auto)
@@ -13,19 +48,46 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import asdict, dataclass, field
+import os
+import threading
+import time
+from dataclasses import asdict, dataclass, field, is_dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, Optional
 
 import numpy as np
 
 logger = logging.getLogger(__name__)
 
+SCHEMA_VERSION = 2
+
+# Receiver decisions
+RX_ENQUEUED = "enqueued"
+RX_DROPPED = "dropped"
+# Receiver drop reasons
+RX_MALFORMED = "malformed"            # truncated / unparseable framing (before or after the header)
+RX_PARSE_ERROR = "parse_error"        # header parsed, but pose / decode / field parsing raised
+RX_TRACKING = "tracking_state"
+RX_THROTTLE = "throttle"
+RX_DUPLICATE_TS = "duplicate_ts"
+RX_NO_CAMERA_FRAME = "no_camera_frame"
+RX_QUEUE_FULL = "queue_full"
+# Dequeue outcomes
+DQ_PROCESSED = "processed"            # admitted to processing (written before segmentation)
+DQ_GATE_REJECTED = "gate_rejected"
+DQ_FRAME_REJECTED = "frame_rejected"
+DQ_DROPPED = "dropped"                # dequeued and discarded before the gates (pose conversion failed)
+# Dequeue reasons that are not an IngestDecision / FrameGateDecision reason
+DQ_REASON_KEYFRAME = "keyframe"
+DQ_REASON_NO_POSE = "no_pose"
+DQ_REASON_GATE_ERROR = "gate_error"
+DQ_REASON_POSE_CONVERSION = "pose_conversion_failed"
+
 
 @dataclass
 class FrameEvent:
-    """One JSONL line. Numbers in milliseconds where named *_ms."""
+    """One line per PROCESSED frame. Numbers in milliseconds where named *_ms."""
     timestamp: float
     frame_seq: int
     is_keyframe: bool
@@ -36,6 +98,37 @@ class FrameEvent:
     n_created: int = 0
     n_objects_confirmed: int = 0
     timing_ms: Dict[str, float] = field(default_factory=dict)
+    t_sensor_ns: Optional[int] = None
+    kind: str = "frame"
+
+
+@dataclass
+class DequeueEvent:
+    """One line per DEQUEUED frame (pipeline thread), rejected or not."""
+    timestamp: float                 # time.monotonic() at dequeue
+    frame_seq: Optional[int]
+    t_sensor_ns: Optional[int]
+    is_keyframe: bool
+    queue_wait_s: float              # dequeue mono - FramePacket.time.t_mono_s (stamped at packet build, ~enqueue)
+    queue_depth: int                 # ingest queue depth right after this dequeue
+    outcome: str                     # processed | gate_rejected | frame_rejected | dropped
+    reason: str                      # gate reason, or one of the DQ_REASON_* labels
+    kind: str = "dequeue"
+
+
+@dataclass
+class ReceiverEvent:
+    """One line per RECEIVER DECISION (websocket / replay / zeromq thread)."""
+    timestamp: float                 # time.monotonic() at the decision
+    source: str                      # websocket | replay | zeromq
+    decision: str                    # enqueued | dropped
+    reason: str                      # "" when enqueued, else the drop reason
+    frame_seq: Optional[int] = None  # source seq (header frame_id) when parsed
+    t_sensor_ns: Optional[int] = None
+    is_keyframe: Optional[bool] = None
+    frame_count: Optional[int] = None  # receiver's running count after the tracking filter
+    queue_depth: Optional[int] = None  # ingest queue depth after the decision
+    kind: str = "receiver"
 
 
 def _json_default(o: Any) -> Any:
@@ -46,6 +139,8 @@ def _json_default(o: Any) -> Any:
         return int(o)
     if isinstance(o, np.ndarray):
         return o.tolist()
+    if isinstance(o, np.bool_):
+        return bool(o)
     raise TypeError(f"not JSON serializable: {type(o).__name__}")
 
 
@@ -66,15 +161,17 @@ def _resolve_path(configured: Optional[str], repo_root: Path) -> Path:
 
 
 class EventLogWriter:
-    """Append-only JSONL writer for per-frame diagnostic events.
+    """Append-only JSONL writer for diagnostic events.
 
-    When `enabled=False`, all calls are zero-cost no-ops.
+    When `enabled=False`, every call is a no-op and `sink()` returns None so
+    producers can skip building events entirely.
     """
 
     def __init__(self, enabled: bool, configured_path: Optional[str], repo_root: Optional[Path] = None):
         self._enabled = bool(enabled)
         self._fh = None
         self._path: Optional[Path] = None
+        self._lock = threading.Lock()
         if not self._enabled:
             return
 
@@ -88,6 +185,13 @@ class EventLogWriter:
         # WRITE mode (truncate) — each run starts fresh. Line-buffered so a
         # crash mid-run still preserves prior frames.
         self._fh = self._path.open("w", encoding="utf-8", buffering=1)
+        self.write({
+            "kind": "meta",
+            "schema_version": SCHEMA_VERSION,
+            "created_wall_utc_s": time.time(),
+            "created_mono_s": time.monotonic(),
+            "pid": os.getpid(),
+        })
         logger.info(f"event_log: writing diagnostics to {self._path}")
 
     @property
@@ -98,17 +202,29 @@ class EventLogWriter:
     def path(self) -> Optional[Path]:
         return self._path
 
-    def write(self, event: FrameEvent) -> None:
+    def write(self, event: Any) -> None:
+        """Write one event (a dataclass or a plain dict). No-op when disabled."""
         if not self._enabled or self._fh is None:
             return
-        self._fh.write(json.dumps(asdict(event), default=_json_default) + "\n")
+        payload = asdict(event) if is_dataclass(event) else dict(event)
+        line = json.dumps(payload, default=_json_default) + "\n"
+        with self._lock:
+            fh = self._fh
+            if fh is not None:
+                fh.write(line)
+
+    def sink(self) -> Optional[Callable[[Any], None]]:
+        """The callable receivers get as `event_sink`: None when disabled."""
+        return self.write if self._enabled else None
 
     def close(self) -> None:
-        if self._fh is not None:
+        with self._lock:
+            fh, self._fh = self._fh, None
+        if fh is not None:
             try:
-                self._fh.close()
-            finally:
-                self._fh = None
+                fh.close()
+            except Exception:  # noqa: BLE001 — closing a log must never raise
+                logger.debug("event_log: close failed", exc_info=True)
 
     def __enter__(self) -> "EventLogWriter":
         return self

@@ -215,6 +215,16 @@ def run_demo(argv: list[str] | None = None) -> None:
         vis_broadcaster = vis_server.broadcaster
         vis_server_registry = vis_server.registry
 
+    # ── Frame-flow trace (diagnostics.*): one writer shared by the replay
+    # thread and the pipeline thread; disabled => every hook is a no-op.
+    from rtsm.evaluation.event_log import EventLogWriter
+    diag_cfg = cfg.get("diagnostics", {}) or {}
+    event_log = EventLogWriter(
+        enabled=bool(diag_cfg.get("enabled", False)),
+        configured_path=diag_cfg.get("event_log_path"),
+    )
+    event_sink = event_log.sink()
+
     # ── Start replay ──
     replay = ReplayReceiver(
         recording_dir=demo_dir,
@@ -229,6 +239,7 @@ def run_demo(argv: list[str] | None = None) -> None:
         on_pose_corrections=vis_server.handle_kf_pose_update if vis_server else None,
         on_pose_corrections_batch=vis_server.handle_pose_corrections_batch if vis_server else None,
         latency_analytics=latency_analytics,
+        event_sink=event_sink,
     )
 
     pipe = Pipeline(
@@ -245,6 +256,7 @@ def run_demo(argv: list[str] | None = None) -> None:
         sweep_cache=sweep_cache,
         seg_analytics=seg_analytics,
         latency_analytics=latency_analytics,
+        event_log=event_log,
     )
 
     # ── Start API + viz WebSocket + static frontend on single port ──
@@ -326,6 +338,7 @@ def run_demo(argv: list[str] | None = None) -> None:
     except KeyboardInterrupt:
         pass
     finally:
+        event_log.close()   # no-op if the pipeline already closed it
         # Print summary
         all_objs = list(wm.iter_objects())
         confirmed = sum(1 for o in all_objs if o.confirmed)

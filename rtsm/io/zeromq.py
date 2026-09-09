@@ -27,6 +27,10 @@ from rtsm.stores.frame_window import FrameWindow
 from rtsm.core.datamodel import FramePacket, TimeBundle, PoseStamped, PinholeIntrinsics
 from rtsm.io.ingest_queue import IngestQueue
 from rtsm.utils.transforms import euler_to_quat_xyzw
+from rtsm.evaluation.event_log import (
+    RX_DROPPED, RX_DUPLICATE_TS, RX_ENQUEUED, RX_MALFORMED, RX_NO_CAMERA_FRAME, RX_QUEUE_FULL, RX_THROTTLE,
+    ReceiverEvent,
+)
 
 
 class ZeroMQSubscriber:
@@ -47,6 +51,7 @@ class ZeroMQSubscriber:
         on_kf_packet: Optional[Callable[..., Any]] = None,
         on_kf_pose_update: Optional[Callable[..., Any]] = None,
         latency_analytics: Optional[Any] = None,
+        event_sink: Optional[Callable[[Any], None]] = None,
     ) -> None:
         """
         Initialize dual-socket ZMQ subscriber.
@@ -115,6 +120,8 @@ class ZeroMQSubscriber:
 
         # Throttle non-keyframe enqueuing (pipeline can't keep up with 30Hz)
         self._last_nonkf_enq_mono: float = 0.0
+        # Frame-flow trace sink (ReceiverEvent per decision); None = off.
+        self._event_sink = event_sink
         self._nonkf_min_interval_s: float = 0.5  # Max ~2 non-KF per second
 
         # Frame-flow liveness stamps (read by the watchdog). The subscriber
@@ -248,6 +255,7 @@ class ZeroMQSubscriber:
         """
         if len(parts) != 2:
             logger.warning(f"[zeromq] tracking_pose: expected 2 parts, got {len(parts)}")
+            self._trace_rx(RX_DROPPED, RX_MALFORMED, None, False)
             return
 
         try:
@@ -265,6 +273,7 @@ class ZeroMQSubscriber:
 
         except Exception as e:
             logger.error(f"[zeromq] tracking_pose: parse error: {e}")
+            self._trace_rx(RX_DROPPED, RX_MALFORMED, None, False)
 
     def _handle_kf_pose(self, parts: List[bytes]) -> None:
         """
@@ -276,6 +285,7 @@ class ZeroMQSubscriber:
         """
         if len(parts) != 2:
             logger.warning(f"[zeromq] kf_pose: expected 2 parts, got {len(parts)}")
+            self._trace_rx(RX_DROPPED, RX_MALFORMED, None, True)
             return
 
         try:
@@ -291,6 +301,7 @@ class ZeroMQSubscriber:
 
         except Exception as e:
             logger.error(f"[zeromq] kf_pose: parse error: {e}")
+            self._trace_rx(RX_DROPPED, RX_MALFORMED, None, True)
 
     def _handle_kf_packet(self, parts: List[bytes]) -> None:
         """
@@ -468,6 +479,7 @@ class ZeroMQSubscriber:
 
         # Skip duplicates (except keyframes always get enqueued)
         if not is_keyframe and self._last_enq_ts_ns == ts_ns:
+            self._trace_rx(RX_DROPPED, RX_DUPLICATE_TS, ts_ns, is_keyframe)
             return
 
         # Throttle non-keyframes to avoid overwhelming the pipeline
@@ -475,12 +487,14 @@ class ZeroMQSubscriber:
         if not is_keyframe:
             elapsed = now_mono - self._last_nonkf_enq_mono
             if elapsed < self._nonkf_min_interval_s:
+                self._trace_rx(RX_DROPPED, RX_THROTTLE, ts_ns, is_keyframe)
                 return  # Skip, too soon since last non-KF
 
         # Assemble frame data from window
         rgb, depth, intr = self.fw.assemble_pair(ts_ns)
         if rgb is None:
             # No matching camera frame yet
+            self._trace_rx(RX_DROPPED, RX_NO_CAMERA_FRAME, ts_ns, is_keyframe)
             return
 
         # Build pose
@@ -520,11 +534,36 @@ class ZeroMQSubscriber:
                 self._last_nonkf_enq_mono = now_mono
             frame_type = "KF" if is_keyframe else "frame"
             logger.debug(f"[zmq] enqueued {frame_type} -> queue={self.ingest_q.qsize()}")
+            self._trace_rx(RX_ENQUEUED, "", ts_ns, is_keyframe)
         else:
             if self._latency_analytics:
                 self._latency_analytics.record_queue_drop()
             frame_type = "keyframe" if is_keyframe else "non-KF"
             logger.warning(f"[zeromq] ingest queue full; dropping {frame_type}")
+            self._trace_rx(RX_DROPPED, RX_QUEUE_FULL, ts_ns, is_keyframe)
+
+    def _trace_rx(self, decision: str, reason: str, ts_ns: Optional[int], is_keyframe: bool) -> None:
+        """Frame-flow trace: one ReceiverEvent per receiver decision (no-op when
+        no sink is set). ZeroMQ has no source seq; (t_sensor_ns, is_keyframe)
+        is the join key. Never raises into the receive path."""
+        sink = self._event_sink
+        if sink is None:
+            return
+        try:
+            q = self.ingest_q
+            sink(ReceiverEvent(
+                timestamp=time.monotonic(),
+                source="zeromq",
+                decision=decision,
+                reason=reason,
+                frame_seq=None,
+                t_sensor_ns=(int(ts_ns) if ts_ns is not None else None),
+                is_keyframe=bool(is_keyframe),
+                frame_count=None,
+                queue_depth=(int(q.qsize()) if q is not None else None),
+            ))
+        except Exception:
+            logger.debug("[zeromq] frame-flow trace failed", exc_info=True)
 
     def liveness(self) -> dict:
         """Frame-flow liveness snapshot for the watchdog."""
