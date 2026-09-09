@@ -14,7 +14,7 @@ Vec3 = NDArray[np.float32]
 Quat = NDArray[np.float32]       # xyzw (unit)
 Mat3 = NDArray[np.float32]
 Mat4 = NDArray[np.float32]
-RGB  = NDArray[np.uint8]         # (H,W,3) uint8, BGR or RGB (document in cfg)
+RGB  = NDArray[np.uint8]         # (H,W,3) uint8, BGR BY CONTRACT (OpenCV order); receivers convert at ingest
 Depth = NDArray[np.float32]      # (H,W) float32 meters, NaN = invalid
 
 __all__ = ["ClipTopK", "Observation", "ObjectState", "BBox", "StructType"]
@@ -69,7 +69,7 @@ Vec3 = NDArray[np.float32]
 Quat = NDArray[np.float32]       # xyzw (unit)
 Mat3 = NDArray[np.float32]
 Mat4 = NDArray[np.float32]
-RGB  = NDArray[np.uint8]         # (H,W,3) uint8, BGR or RGB (document in cfg)
+RGB  = NDArray[np.uint8]         # (H,W,3) uint8, BGR BY CONTRACT (OpenCV order); receivers convert at ingest
 Depth = NDArray[np.float32]      # (H,W) float32 meters, NaN = invalid
 
 # ---------- time bundle ----------
@@ -131,7 +131,15 @@ class PinholeIntrinsics:
 class FramePacket:
     """
     Canonical, ROS-free payload the CORE consumes.
-    - rgb:  HxWx3 uint8
+    - rgb:  HxWx3 uint8, **BGR** (OpenCV channel order) by contract. Every
+      receiver converts to BGR at ingest (websocket/replayer: cv2.imdecode,
+      BGRA->BGR, NV12->BGR; zeromq: cv2.imdecode); the pipeline flips to RGB
+      exactly once at the model boundary (PIL for segmenters, CLIP crops).
+      A source that delivers RGB natively (ROS 2 / MCAP sensor_msgs/Image
+      with encoding "rgb8") must convert in its receiver, keyed on the
+      message's encoding field -- never in the pipeline, never by guessing
+      from pixel statistics. Feeding RGB here silently degrades detection
+      and every embedding (found 2026-08-15, fixed in 120fe7c).
     - depth_m: HxW float32 meters with NaNs for invalids (or None if not provided)
     - pose:  PoseStamped at t_sensor_ns (or None)
     - intr:  camera intrinsics used to interpret rgb/depth

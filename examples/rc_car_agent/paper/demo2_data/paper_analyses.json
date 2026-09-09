@@ -1,0 +1,632 @@
+{
+ "pair_rows": [
+  {
+   "layout": "L1",
+   "object": "dumbbell",
+   "repeat": false,
+   "mem_tta": 25.14,
+   "mem_result": "arrived",
+   "search_tta": 34.516,
+   "search_result": "arrived",
+   "mem_eff": 25.14,
+   "search_eff": 34.516,
+   "memory_faster": true,
+   "ratio_eff": 1.37
+  },
+  {
+   "layout": "L1",
+   "object": "scissors",
+   "repeat": false,
+   "mem_tta": 26.344,
+   "mem_result": "arrived",
+   "search_tta": 252.781,
+   "search_result": "arrived",
+   "mem_eff": 26.344,
+   "search_eff": 252.781,
+   "memory_faster": true,
+   "ratio_eff": 9.6
+  },
+  {
+   "layout": "L1",
+   "object": "teddy bear",
+   "repeat": false,
+   "mem_tta": 38.859,
+   "mem_result": "arrived",
+   "search_tta": 37.922,
+   "search_result": "arrived",
+   "mem_eff": 38.859,
+   "search_eff": 37.922,
+   "memory_faster": false,
+   "ratio_eff": 0.98
+  },
+  {
+   "layout": "L1",
+   "object": "tissue box",
+   "repeat": false,
+   "mem_tta": 30.078,
+   "mem_result": "arrived",
+   "search_tta": 55.453,
+   "search_result": "arrived",
+   "mem_eff": 30.078,
+   "search_eff": 55.453,
+   "memory_faster": true,
+   "ratio_eff": 1.84
+  },
+  {
+   "layout": "L1",
+   "object": "water bottle",
+   "repeat": false,
+   "mem_tta": 33.796,
+   "mem_result": "arrived",
+   "search_tta": 55.829,
+   "search_result": "arrived",
+   "mem_eff": 33.796,
+   "search_eff": 55.829,
+   "memory_faster": true,
+   "ratio_eff": 1.65
+  },
+  {
+   "layout": "L1",
+   "object": "teddy bear",
+   "repeat": true,
+   "mem_tta": 34.766,
+   "mem_result": "arrived",
+   "search_tta": 40.532,
+   "search_result": "arrived",
+   "mem_eff": 34.766,
+   "search_eff": 40.532,
+   "memory_faster": true,
+   "ratio_eff": 1.17
+  },
+  {
+   "layout": "L2",
+   "object": "dumbbell",
+   "repeat": false,
+   "mem_tta": 33.359,
+   "mem_result": "arrived",
+   "search_tta": null,
+   "search_result": "drift",
+   "mem_eff": 33.359,
+   "search_eff": 900.0,
+   "memory_faster": true,
+   "ratio_eff": 26.98
+  },
+  {
+   "layout": "L2",
+   "object": "scissors",
+   "repeat": false,
+   "mem_tta": 33.187,
+   "mem_result": "arrived",
+   "search_tta": 196.75,
+   "search_result": "arrived",
+   "mem_eff": 33.187,
+   "search_eff": 196.75,
+   "memory_faster": true,
+   "ratio_eff": 5.93
+  },
+  {
+   "layout": "L2",
+   "object": "teddy bear",
+   "repeat": false,
+   "mem_tta": 24.094,
+   "mem_result": "arrived",
+   "search_tta": 49.266,
+   "search_result": "arrived",
+   "mem_eff": 24.094,
+   "search_eff": 49.266,
+   "memory_faster": true,
+   "ratio_eff": 2.04
+  },
+  {
+   "layout": "L2",
+   "object": "tissue box",
+   "repeat": false,
+   "mem_tta": 26.485,
+   "mem_result": "arrived",
+   "search_tta": 57.5,
+   "search_result": "arrived",
+   "mem_eff": 26.485,
+   "search_eff": 57.5,
+   "memory_faster": true,
+   "ratio_eff": 2.17
+  },
+  {
+   "layout": "L2",
+   "object": "water bottle",
+   "repeat": false,
+   "mem_tta": 38.937,
+   "mem_result": "arrived",
+   "search_tta": 54.407,
+   "search_result": "arrived",
+   "mem_eff": 38.937,
+   "search_eff": 54.407,
+   "memory_faster": true,
+   "ratio_eff": 1.4
+  },
+  {
+   "layout": "L2",
+   "object": "water bottle",
+   "repeat": true,
+   "mem_tta": 38.875,
+   "mem_result": "arrived",
+   "search_tta": 53.688,
+   "search_result": "arrived",
+   "mem_eff": 38.875,
+   "search_eff": 53.688,
+   "memory_faster": true,
+   "ratio_eff": 1.38
+  },
+  {
+   "layout": "L3",
+   "object": "dumbbell",
+   "repeat": false,
+   "mem_tta": 34.625,
+   "mem_result": "arrived",
+   "search_tta": null,
+   "search_result": "drift",
+   "mem_eff": 34.625,
+   "search_eff": 900.0,
+   "memory_faster": true,
+   "ratio_eff": 25.99
+  },
+  {
+   "layout": "L3",
+   "object": "scissors",
+   "repeat": false,
+   "mem_tta": 39.969,
+   "mem_result": "arrived",
+   "search_tta": 365.078,
+   "search_result": "arrived",
+   "mem_eff": 39.969,
+   "search_eff": 365.078,
+   "memory_faster": true,
+   "ratio_eff": 9.13
+  },
+  {
+   "layout": "L3",
+   "object": "teddy bear",
+   "repeat": false,
+   "mem_tta": 33.859,
+   "mem_result": "arrived",
+   "search_tta": 60.39,
+   "search_result": "arrived",
+   "mem_eff": 33.859,
+   "search_eff": 60.39,
+   "memory_faster": true,
+   "ratio_eff": 1.78
+  },
+  {
+   "layout": "L3",
+   "object": "tissue box",
+   "repeat": false,
+   "mem_tta": 36.515,
+   "mem_result": "arrived",
+   "search_tta": 152.469,
+   "search_result": "arrived",
+   "mem_eff": 36.515,
+   "search_eff": 152.469,
+   "memory_faster": true,
+   "ratio_eff": 4.18
+  },
+  {
+   "layout": "L3",
+   "object": "water bottle",
+   "repeat": false,
+   "mem_tta": null,
+   "mem_result": "not_found",
+   "search_tta": 30.672,
+   "search_result": "arrived",
+   "mem_eff": 900.0,
+   "search_eff": 30.672,
+   "memory_faster": false,
+   "ratio_eff": 0.03
+  },
+  {
+   "layout": "L3",
+   "object": "dumbbell",
+   "repeat": true,
+   "mem_tta": null,
+   "mem_result": "drift",
+   "search_tta": null,
+   "search_result": "drift",
+   "mem_eff": 900.0,
+   "search_eff": 900.0,
+   "memory_faster": false,
+   "ratio_eff": 1.0
+  },
+  {
+   "layout": "L4",
+   "object": "dumbbell",
+   "repeat": false,
+   "mem_tta": 43.204,
+   "mem_result": "arrived",
+   "search_tta": 87.812,
+   "search_result": "arrived",
+   "mem_eff": 43.204,
+   "search_eff": 87.812,
+   "memory_faster": true,
+   "ratio_eff": 2.03
+  },
+  {
+   "layout": "L4",
+   "object": "scissors",
+   "repeat": false,
+   "mem_tta": 29.203,
+   "mem_result": "arrived",
+   "search_tta": 120.172,
+   "search_result": "arrived",
+   "mem_eff": 29.203,
+   "search_eff": 120.172,
+   "memory_faster": true,
+   "ratio_eff": 4.12
+  },
+  {
+   "layout": "L4",
+   "object": "teddy bear",
+   "repeat": false,
+   "mem_tta": 31.781,
+   "mem_result": "arrived",
+   "search_tta": 58.016,
+   "search_result": "arrived",
+   "mem_eff": 31.781,
+   "search_eff": 58.016,
+   "memory_faster": true,
+   "ratio_eff": 1.83
+  },
+  {
+   "layout": "L4",
+   "object": "tissue box",
+   "repeat": false,
+   "mem_tta": 40.672,
+   "mem_result": "arrived",
+   "search_tta": 87.172,
+   "search_result": "arrived",
+   "mem_eff": 40.672,
+   "search_eff": 87.172,
+   "memory_faster": true,
+   "ratio_eff": 2.14
+  },
+  {
+   "layout": "L4",
+   "object": "water bottle",
+   "repeat": false,
+   "mem_tta": null,
+   "mem_result": "not_found",
+   "search_tta": 71.25,
+   "search_result": "arrived",
+   "mem_eff": 900.0,
+   "search_eff": 71.25,
+   "memory_faster": false,
+   "ratio_eff": 0.08
+  },
+  {
+   "layout": "L4",
+   "object": "tissue box",
+   "repeat": true,
+   "mem_tta": null,
+   "mem_result": "not_found",
+   "search_tta": null,
+   "search_result": "not_found",
+   "mem_eff": 900.0,
+   "search_eff": 900.0,
+   "memory_faster": false,
+   "ratio_eff": 1.0
+  },
+  {
+   "layout": "L5",
+   "object": "dumbbell",
+   "repeat": false,
+   "mem_tta": 37.453,
+   "mem_result": "arrived",
+   "search_tta": 71.75,
+   "search_result": "arrived",
+   "mem_eff": 37.453,
+   "search_eff": 71.75,
+   "memory_faster": true,
+   "ratio_eff": 1.92
+  },
+  {
+   "layout": "L5",
+   "object": "scissors",
+   "repeat": false,
+   "mem_tta": 31.344,
+   "mem_result": "arrived",
+   "search_tta": 486.078,
+   "search_result": "arrived",
+   "mem_eff": 31.344,
+   "search_eff": 486.078,
+   "memory_faster": true,
+   "ratio_eff": 15.51
+  },
+  {
+   "layout": "L5",
+   "object": "teddy bear",
+   "repeat": false,
+   "mem_tta": 36.219,
+   "mem_result": "arrived",
+   "search_tta": 44.578,
+   "search_result": "arrived",
+   "mem_eff": 36.219,
+   "search_eff": 44.578,
+   "memory_faster": true,
+   "ratio_eff": 1.23
+  },
+  {
+   "layout": "L5",
+   "object": "tissue box",
+   "repeat": false,
+   "mem_tta": 25.125,
+   "mem_result": "arrived",
+   "search_tta": 30.11,
+   "search_result": "arrived",
+   "mem_eff": 25.125,
+   "search_eff": 30.11,
+   "memory_faster": true,
+   "ratio_eff": 1.2
+  },
+  {
+   "layout": "L5",
+   "object": "water bottle",
+   "repeat": false,
+   "mem_tta": 28.203,
+   "mem_result": "arrived",
+   "search_tta": 41.859,
+   "search_result": "arrived",
+   "mem_eff": 28.203,
+   "search_eff": 41.859,
+   "memory_faster": true,
+   "ratio_eff": 1.48
+  },
+  {
+   "layout": "L5",
+   "object": "scissors",
+   "repeat": true,
+   "mem_tta": 34.547,
+   "mem_result": "arrived",
+   "search_tta": 372.968,
+   "search_result": "arrived",
+   "mem_eff": 34.547,
+   "search_eff": 372.968,
+   "memory_faster": true,
+   "ratio_eff": 10.8
+  }
+ ],
+ "layout_table": {
+  "L1": {
+   "pairs": 6,
+   "memory_wins": 5
+  },
+  "L2": {
+   "pairs": 6,
+   "memory_wins": 6
+  },
+  "L3": {
+   "pairs": 6,
+   "memory_wins": 4
+  },
+  "L4": {
+   "pairs": 6,
+   "memory_wins": 4
+  },
+  "L5": {
+   "pairs": 6,
+   "memory_wins": 6
+  }
+ },
+ "layouts_won_by_memory": 5,
+ "sign_test_p_one_sided": 0.0312,
+ "per_object": {
+  "dumbbell": {
+   "n_pairs": 5,
+   "mem_arrived": 5,
+   "search_arrived": 3,
+   "mem_median_eff": 34.6,
+   "search_median_eff": 87.8,
+   "median_ratio": 2.5
+  },
+  "scissors": {
+   "n_pairs": 5,
+   "mem_arrived": 5,
+   "search_arrived": 5,
+   "mem_median_eff": 31.3,
+   "search_median_eff": 252.8,
+   "median_ratio": 8.1
+  },
+  "teddy bear": {
+   "n_pairs": 5,
+   "mem_arrived": 5,
+   "search_arrived": 5,
+   "mem_median_eff": 33.9,
+   "search_median_eff": 49.3,
+   "median_ratio": 1.5
+  },
+  "tissue box": {
+   "n_pairs": 5,
+   "mem_arrived": 5,
+   "search_arrived": 5,
+   "mem_median_eff": 30.1,
+   "search_median_eff": 57.5,
+   "median_ratio": 1.9
+  },
+  "water bottle": {
+   "n_pairs": 5,
+   "mem_arrived": 3,
+   "search_arrived": 5,
+   "mem_median_eff": 38.9,
+   "search_median_eff": 54.4,
+   "median_ratio": 1.4
+  }
+ },
+ "per_object_ttas": {
+  "dumbbell": {
+   "mem": [
+    25.14,
+    33.359,
+    34.625,
+    43.204,
+    37.453
+   ],
+   "search": [
+    34.516,
+    null,
+    null,
+    87.812,
+    71.75
+   ]
+  },
+  "scissors": {
+   "mem": [
+    26.344,
+    33.187,
+    39.969,
+    29.203,
+    31.344
+   ],
+   "search": [
+    252.781,
+    196.75,
+    365.078,
+    120.172,
+    486.078
+   ]
+  },
+  "teddy bear": {
+   "mem": [
+    38.859,
+    24.094,
+    33.859,
+    31.781,
+    36.219
+   ],
+   "search": [
+    37.922,
+    49.266,
+    60.39,
+    58.016,
+    44.578
+   ]
+  },
+  "tissue box": {
+   "mem": [
+    30.078,
+    26.485,
+    36.515,
+    40.672,
+    25.125
+   ],
+   "search": [
+    55.453,
+    57.5,
+    152.469,
+    87.172,
+    30.11
+   ]
+  },
+  "water bottle": {
+   "mem": [
+    33.796,
+    38.937,
+    null,
+    null,
+    28.203
+   ],
+   "search": [
+    55.829,
+    54.407,
+    30.672,
+    71.25,
+    41.859
+   ]
+  }
+ },
+ "repeat_pairs": [
+  {
+   "layout": "L1",
+   "object": "teddy bear",
+   "mem_first_tta": 38.859,
+   "mem_repeat_tta": 34.766,
+   "mem_first_result": "arrived",
+   "mem_repeat_result": "arrived",
+   "search_first_tta": 37.922,
+   "search_repeat_tta": 40.532,
+   "search_first_result": "arrived",
+   "search_repeat_result": "arrived"
+  },
+  {
+   "layout": "L2",
+   "object": "water bottle",
+   "mem_first_tta": 38.937,
+   "mem_repeat_tta": 38.875,
+   "mem_first_result": "arrived",
+   "mem_repeat_result": "arrived",
+   "search_first_tta": 54.407,
+   "search_repeat_tta": 53.688,
+   "search_first_result": "arrived",
+   "search_repeat_result": "arrived"
+  },
+  {
+   "layout": "L3",
+   "object": "dumbbell",
+   "mem_first_tta": 34.625,
+   "mem_repeat_tta": null,
+   "mem_first_result": "arrived",
+   "mem_repeat_result": "drift",
+   "search_first_tta": null,
+   "search_repeat_tta": null,
+   "search_first_result": "drift",
+   "search_repeat_result": "drift"
+  },
+  {
+   "layout": "L4",
+   "object": "tissue box",
+   "mem_first_tta": 40.672,
+   "mem_repeat_tta": null,
+   "mem_first_result": "arrived",
+   "mem_repeat_result": "not_found",
+   "search_first_tta": 87.172,
+   "search_repeat_tta": null,
+   "search_first_result": "arrived",
+   "search_repeat_result": "not_found"
+  },
+  {
+   "layout": "L5",
+   "object": "scissors",
+   "mem_first_tta": 31.344,
+   "mem_repeat_tta": 34.547,
+   "mem_first_result": "arrived",
+   "mem_repeat_result": "arrived",
+   "search_first_tta": 486.078,
+   "search_repeat_tta": 372.968,
+   "search_first_result": "arrived",
+   "search_repeat_result": "arrived"
+  }
+ ],
+ "search_decomposition": {
+  "n": 26,
+  "search_median_s": 17.0,
+  "drive_median_s": 49.9
+ },
+ "memory_acquisition_median_s": 3.3,
+ "start_dist_m": {
+  "min": 0.97,
+  "max": 2.56,
+  "median": 1.78
+ },
+ "terminal_abs_err_m": {
+  "n": 52,
+  "median": 0.205,
+  "max": 0.265
+ },
+ "coordinate_age_s": {
+  "n": 27,
+  "median": 357.5,
+  "max": 1766.2
+ },
+ "scan_break_even": {
+  "scan_bound_s": 180.0,
+  "median_saving_s": 31.2,
+  "tasks_to_break_even_median": 5.8,
+  "mean_paired_saving_arrivals_s": 86.2,
+  "tasks_to_break_even_mean": 2.1
+ }
+}

@@ -38,6 +38,17 @@ RECORDING = ROOT / "recordings" / "session1"
 CONFIG_PATH = ROOT / "rtsm" / "cfg" / "rtsm.yaml"
 REPORT_DIR = ROOT / "reports"
 
+# Extra CLI arguments appended to every `python -m rtsm --replay ...` launch,
+# e.g. ["--profile", "examples/rc_car_agent/e1-demo2.profile.yaml"]. Set by
+# main() / benchmark_datasheet.py from --profile; empty = packaged yaml only.
+# Profiles are layered AFTER the base file, so patch_config()'s backend patch
+# still wins as long as the profile does not pin segmentation.backend.
+RTSM_EXTRA_ARGS: List[str] = []
+# Visualization server during benchmark runs. False = headless (default):
+# patch_config() writes visualization.enable=false AND --no-viz is passed to
+# the runner, so a profile cannot re-enable it by accident. --viz flips both.
+VIZ: bool = False
+
 API_PORT = 8002
 POLL_INTERVAL = 5          # seconds between API polls
 DRAIN_WAIT = 25            # extra seconds after replay finishes for pipeline to drain
@@ -80,9 +91,22 @@ def patch_config(backend: str) -> None:
     with open(CONFIG_PATH, "r") as f:
         cfg = yaml.safe_load(f)
     cfg["segmentation"]["backend"] = backend
-    # Keep visualization enabled so vis server does Tier 2 rollups,
-    # but we don't connect any clients
-    cfg["visualization"]["enable"] = True
+    # Headless by default (2026-09-08): the viz server auto-opens a browser
+    # tab per run and adds per-frame JPEG/broadcast work, and nothing the
+    # rendered datasheet reads (latency/segmentation aggregates,
+    # working_memory, /objects) needs it. Two consequences to know:
+    #  * The Tier-2 per-second rollup runs only inside the viz push loop
+    #    while a browser client is attached (the old comment here was wrong:
+    #    it came from the auto-opened tab, not from "keeping viz enabled").
+    #    Headless, the raw JSON's latency_hourly / segmentation_hourly lists
+    #    are empty and aggregate input_hz / effective_ratio read 0.0, until
+    #    the rollup moves to a headless timer (execution plan P1 task 5).
+    #  * Object counts are NOT viz-independent: a faster step shifts the
+    #    wall-clock non-KF admission, so headless runs carry a few extra
+    #    unconfirmed protos (confirmed set identical). Compare headless runs
+    #    only against headless anchors (eval/baselines/*-headless/).
+    # Pass --viz to the harness when a human wants to watch the run.
+    cfg["visualization"]["enable"] = bool(VIZ)
     # Increase analytics buffer to capture all frames (session1 has 162)
     cfg["analytics"]["buffer_frames"] = 500
     with open(CONFIG_PATH, "w") as f:
@@ -109,13 +133,15 @@ def run_one_backend(backend_info: Dict[str, str]) -> Dict[str, Any]:
     REPORT_DIR.mkdir(exist_ok=True)
     log_f = open(log_path, "w")
     proc = subprocess.Popen(
-        [sys.executable, "-u", "-m", "rtsm", "--replay", str(RECORDING)],
+        [sys.executable, "-u", "-m", "rtsm", "--replay", str(RECORDING), *RTSM_EXTRA_ARGS],
         cwd=str(ROOT),
         stdout=log_f,
         stderr=subprocess.STDOUT,
         env={**os.environ, "PYTHONUNBUFFERED": "1"},
     )
     print(f"  PID: {proc.pid}")
+    if RTSM_EXTRA_ARGS:
+        print(f"  RTSM args: {' '.join(RTSM_EXTRA_ARGS)}")
     print(f"  Waiting for API to come up...")
 
     try:
@@ -200,6 +226,11 @@ def run_one_backend(backend_info: Dict[str, str]) -> Dict[str, Any]:
         detailed = api_get("/stats/detailed") or {}
         basic_stats = api_get("/stats") or {}
         objects_all = api_get("/objects") or {}
+        # /objects defaults to the first 100 objects; the multiset anchors
+        # recorded in eval/baselines/ were computed over that page, so it is
+        # kept as-is. objects_full is the whole map (server max 500) for the
+        # post-reconcile anchors -- do not compare it against the old shas.
+        objects_full = api_get("/objects?limit=500") or {}
 
         result = {
             "label": label,
@@ -212,6 +243,8 @@ def run_one_backend(backend_info: Dict[str, str]) -> Dict[str, Any]:
             "working_memory": basic_stats,
             "detailed": detailed,
             "objects": objects_all,
+            "objects_full": objects_full,
+            "rtsm_extra_args": list(RTSM_EXTRA_ARGS),
         }
 
         print(f"  Done. Shutting down...")
@@ -619,12 +652,41 @@ def _ratio(num: int, denom: int) -> str:
 
 # ─────────────────────── Main ───────────────────────
 
+def parse_common_args(argv: Optional[List[str]] = None):
+    """--profile PATH (repeatable) -> RTSM_EXTRA_ARGS; returns (args, rest).
+
+    Shared with benchmark_datasheet.py so both harnesses accept the same
+    pass-through. Unknown arguments are returned untouched (the datasheet
+    treats them as backend names).
+    """
+    import argparse
+    global VIZ
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument("--profile", action="append", default=[],
+                        help="sparse config profile passed to `python -m rtsm --profile` "
+                             "(repeatable; resolved relative to the repo root)")
+    parser.add_argument("--viz", action="store_true",
+                        help="keep the visualization server (and its browser tab) on for "
+                             "human review; default is headless (--no-viz)")
+    args, rest = parser.parse_known_args(argv)
+    VIZ = bool(args.viz)
+    RTSM_EXTRA_ARGS.clear()
+    for p in args.profile:
+        RTSM_EXTRA_ARGS.extend(["--profile", p])
+    if not VIZ:
+        RTSM_EXTRA_ARGS.append("--no-viz")
+    return args, rest
+
+
 def main():
+    parse_common_args()
     print("=" * 60)
     print("  RTSM Backend Comparison Benchmark")
     print("=" * 60)
     print(f"  Recording: {RECORDING}")
     print(f"  Backends:  {', '.join(b['name'] for b in BACKENDS)}")
+    if RTSM_EXTRA_ARGS:
+        print(f"  RTSM args: {' '.join(RTSM_EXTRA_ARGS)}")
     print()
 
     if not RECORDING.exists():

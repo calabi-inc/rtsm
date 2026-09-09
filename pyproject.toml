@@ -58,6 +58,18 @@ mcp = [
     "mcp[cli]>=1.0.0",
     "httpx>=0.27.0",
 ]
+# Test-only dependencies for the canonical command
+#   python -m pytest tests examples/rc_car_agent/tests -q -m "not gpu and not hardware and not models"
+# (pytest-asyncio: 16 async tests fail, not skip, on pytest>=8.4 without it;
+#  respx: tests/test_mcp_server.py; httpx: fastapi TestClient + [mcp];
+#  websockets is already pulled by uvicorn[standard], pinned here for test_websocket_e2e.)
+dev = [
+    "pytest>=8.2",
+    "pytest-asyncio>=0.24",
+    "respx>=0.21",
+    "httpx>=0.27.0",
+    "websockets>=12",
+]
 all = [
     "rtsm[gpu,viz,mcp]",
 ]
@@ -83,3 +95,18 @@ exclude = [
 
 [tool.setuptools.package-data]
 rtsm = ["cfg/**/*.yaml", "static/**", "data/demo_clip/*"]
+
+[tool.pytest.ini_options]
+# Explicit roots: a bare `python -m pytest` from the repo root collects exactly
+# the two suites (core + rc_car_agent).
+testpaths = ["tests", "examples/rc_car_agent/tests"]
+# Collect ONLY test_*.py. pytest's default also matches *_test.py, and
+# examples/rc_car_agent/watchdog_test.py / spin_test.py are HARDWARE scripts
+# (watchdog_test.py drives the wheels at import time). Never collect them.
+python_files = ["test_*.py"]
+asyncio_mode = "strict"
+markers = [
+    "gpu: needs a CUDA device",
+    "models: needs local weights in model_store/ (and ultralytics for YOLOE/FastSAM)",
+    "hardware: needs a camera, robot, rosbridge or ZeroMQ publisher",
+]

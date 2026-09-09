@@ -1,2 +1,8 @@
 # Default owners for everything in the repo
 * @Vipipi @calabi-admin
+
+# Sealed E1 paper tree - frozen at demo2 f7a0880 (tree 81fec2ce91883e87e09cc774565ba520e925ba95).
+# Any change here must also update tests/test_frozen_paper_tree.py::FROZEN_TREE_OID in the
+# same commit, with the paper-side reason. Same owners as the default line: this entry
+# documents the freeze, it does not narrow ownership.
+/examples/rc_car_agent/paper/ @Vipipi @calabi-admin

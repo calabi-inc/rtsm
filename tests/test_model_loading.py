@@ -1,19 +1,31 @@
 """
 Smoke test: verify all model files exist and can be loaded from model_store/.
-Run from repo root:  python -m pytest tests/test_model_loading.py -v
+
+Marked ``models`` + ``gpu``: it needs the local weights, ultralytics (AGPL,
+not in the default ``[gpu]`` extra) and builds the configured segmenter on the
+configured device. The canonical command deselects it; opt in with
+
+    python -m pytest tests/test_model_loading.py -v -m "models or gpu"
+
+Paths in the packaged rtsm.yaml are repo-root-relative (model_store/...), so
+every test runs with cwd = repo root -- via a fixture, not an import-time
+os.chdir that would leak into every later test in the session.
 """
 import os
-import sys
-import yaml
+
+import pytest
+
+from rtsm.cfg import load_config as _load_config
+
+pytestmark = [pytest.mark.models, pytest.mark.gpu]
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, ROOT)
-os.chdir(ROOT)
 
 
-def _load_config():
-    with open(os.path.join(ROOT, "config", "rtsm.yaml")) as f:
-        return yaml.safe_load(f)
+@pytest.fixture(autouse=True)
+def _repo_root_cwd(monkeypatch):
+    """Resolve the yaml's relative model paths against the repo root."""
+    monkeypatch.chdir(ROOT)
 
 
 def test_yoloe_model_exists():
@@ -83,16 +95,21 @@ def test_clip_loads():
 
 
 def test_segmenter_factory():
-    """get_segmenter() resolves all paths correctly for dual backend."""
+    """get_segmenter() resolves all paths for the CONFIGURED backend."""
     cfg = _load_config()
     from rtsm.models.segmentation import get_segmenter
     segmenter = get_segmenter(cfg)
     assert segmenter is not None
-    assert segmenter.name == "dual"
+    # The packaged default is grounded_sam2 (was hard-coded to "dual" here,
+    # which made this test red on every default checkout).
+    assert segmenter.name == cfg["segmentation"]["backend"]
     print(f"  Segmenter factory OK: backend={segmenter.name}")
 
 
 if __name__ == "__main__":
+    import sys
+
+    os.chdir(ROOT)
     tests = [
         test_yoloe_model_exists,
         test_fastsam_model_exists,

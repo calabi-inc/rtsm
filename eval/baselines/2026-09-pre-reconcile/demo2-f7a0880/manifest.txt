@@ -1,0 +1,8 @@
+commit: f7a0880ffe926bfddb0e95b8fe43b22931e62fce
+branch: feature/demo2-rc-car-agent (expected feature/demo2-rc-car-agent)
+started: 2026-09-07T03:46:26-07:00
+rtsm.yaml sha256: 59f3851da262fbf90629ee20a9aa717863418c67bc99a7993d4b8d39a605532a
+python 3.12.10
+torch 2.11.0+cu128 cuda True 12.8
+NVIDIA GeForce RTX 5090, 616.64
+finished: 2026-09-07T03:57:33-07:00

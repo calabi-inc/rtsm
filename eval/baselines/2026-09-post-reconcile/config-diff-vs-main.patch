@@ -1,0 +1,78 @@
+diff --git a/rtsm/cfg/rtsm.yaml b/rtsm/cfg/rtsm.yaml
+index 6f00f67..8970b59 100644
+--- a/rtsm/cfg/rtsm.yaml
++++ b/rtsm/cfg/rtsm.yaml
+@@ -91,6 +91,20 @@ io:
+     nonkf_min_interval_s: 0.5                   # throttle non-KF to max ~2/s
+     confidence_threshold: 2                     # 0=accept all, 1=medium+high, 2=high only (2 matches official RTABMap)
+ 
++  # Receive-time forward clearance (websocket receiver only; opt-in). When
++  # enabled, every frame that passes the tracking filter and the non-KF
++  # throttle gets a 10th-percentile depth statistic over the central image
++  # band right after depth decode -- on the receiver thread, before the
++  # ingest queue and any GPU work -- published as /stats.forward_clearance
++  # {clearance_m, valid_frac, timestamp} (null until the first depth frame;
++  # 0.0 = blocked or unmeasurable, fail-closed). examples/rc_car_agent reads
++  # it as a drive-phase obstacle guard and a relocation-walk gate.
++  # Default false: the receiver does no extra per-frame work, takes no WM
++  # lock, and /stats carries no forward_clearance key at all -- identical
++  # to a build without the feature.
++  clearance:
++    enable: false
++
+ units:
+   # Convert incoming values to meters at ingestion
+   # If your dataset publishes millimeters, set to 0.001
+@@ -144,6 +158,14 @@ staging:
+   crop_pad_px: 6
+   clip_input: 224
+   bg_fill: mean                   # Background fill for masked crops: mean | white | black | blur
++  # Judgment crops (2026-08-30): the snapshot gallery stores a SECOND,
++  # unmasked, native-resolution cut of each detection (box padded by
++  # judge_crop_pad_frac of its own size, long side capped) — the crop
++  # the VLM selection arbiter and operator eyeball consume. The 224
++  # masked crop above remains the CLIP embedding input only; feeding it
++  # to a judge caused the L1 pilot's wrong-object confirmations.
++  judge_crop_pad_frac: 0.20
++  judge_crop_max_px: 640
+ 
+   # Priority weights
+   w_coverage: 1.0
+@@ -254,6 +276,19 @@ vectors:
+   #   collection: rtsm_objects
+   flush_period_s: 3.0
+ 
++# Long-term memory (vector store) upsert scheduling
++ltm:
++  ltm_min_view_bins: 1            # MUST be <= object.require_view_bins. With a
++                                  # stationary camera most objects only ever land
++                                  # in one 45° view bin; requiring 2 here silently
++                                  # starved the FAISS index while objects confirmed
++                                  # normally (2026-08-15: /search/semantic returned
++                                  # <=1 hit while WM held 49 confirmed objects).
++  min_period_s: 1.0               # min seconds between re-upserts of one object
++  force_period_s: 10.0            # re-upsert at least this often even if unchanged
++  reupsert_cos_max: 0.995         # re-upsert when embedding cosine drifts below this
++  reupsert_pos_m: 0.05            # re-upsert when position moves >= this (meters)
++
+ # -------------------- Visualization --------------------
+ visualization:
+   enable: true                    # Enable embedded visualization server
+@@ -334,6 +369,17 @@ analytics:
+   retention_s: 3600                 # Tier 2 wall-clock retention (seconds)
+   buffer_frames: 300                # Tier 1 per-frame ring buffer size
+ 
++# -------------------- Eval Diagnostics (Phase 0) --------------------
++# When enabled, writes one JSONL event per processed frame for offline analysis.
++# Each pipeline run gets a FRESH file (no appending across runs).
++# Path resolution: see rtsm/evaluation/event_log.py docstring.
++diagnostics:
++  enabled: false                  # Master switch. false = zero overhead, no file created.
++  track_drops: false              # Capture per-dropped-mask detail (~10us per drop). Counts always tracked.
++  event_log_path: null            # null = auto: eval_output/<YYYYMMDD_HHMMSS>/events.jsonl
++                                  # "my_dir/" = auto-name inside that dir
++                                  # "my_dir/run01.jsonl" = exact path (overwrites with warning if exists)
++
+ # -------------------- Runtime --------------------
+ logging:
+   periodic_summary: true          # Enable/disable periodic summary logs

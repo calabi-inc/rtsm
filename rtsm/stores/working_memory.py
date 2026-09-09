@@ -44,10 +44,15 @@ def _now_wall_utc() -> float:
 
 
 def _compress_crop_jpeg(crop: np.ndarray, quality: int = 75) -> bytes:
-    """Compress 224x224x3 uint8 crop to JPEG bytes.
+    """Compress an HxWx3 uint8 crop to JPEG bytes (224 embedding crops
+    or native-res judgment crops alike).
 
     Args:
-        crop: RGB image array (H, W, 3) uint8
+        crop: BGR image array (H, W, 3) uint8 — crops come straight from
+            the BGR ingest frame (io/websocket.decode_rgb contract), which
+            is exactly what cv2.imencode expects. The old code assumed RGB
+            and flipped, storing every snapshot with red/blue swapped
+            (found 2026-08-15: a red Coca-Cola can served as blue).
         quality: JPEG quality (1-100)
 
     Returns:
@@ -57,12 +62,7 @@ def _compress_crop_jpeg(crop: np.ndarray, quality: int = 75) -> bytes:
     if crop is None or crop.size == 0:
         return b''
     try:
-        # RGB -> BGR for cv2
-        if len(crop.shape) == 3 and crop.shape[-1] == 3:
-            crop_bgr = crop[..., ::-1].copy()
-        else:
-            crop_bgr = crop
-        ok, buf = cv2.imencode('.jpg', crop_bgr, [cv2.IMWRITE_JPEG_QUALITY, quality])
+        ok, buf = cv2.imencode('.jpg', crop, [cv2.IMWRITE_JPEG_QUALITY, quality])
         if ok:
             return bytes(buf)
     except Exception:
@@ -172,6 +172,24 @@ class WorkingMemory:
         self._latest_pose: Optional[Dict[str, Any]] = None
         # Process-monotonic arrival time of the stored pose (guard window).
         self._latest_pose_arrival_mono: float = 0.0
+        # Latest forward-clearance summary from the depth stream (meters of
+        # open space ahead of the camera). Written by the websocket receiver's
+        # clearance_sink at receive time (rtsm/io/websocket.py step 8b), and
+        # only when io.clearance.enable is true; consumed by agents as a wall
+        # guard before blind motion. The flag also decides whether stats()
+        # carries the forward_clearance key at all, so a default build
+        # publishes exactly the pre-feature /stats contract.
+        self.clearance_enabled: bool = bool(
+            ((cfg.get("io") or {}).get("clearance") or {}).get("enable", False)
+        )
+        self._latest_clearance: Optional[Dict[str, Any]] = None
+        # Rolling per-label detector tally (2026-08-28): with a PROMPTED
+        # backend (grounded_sam2 + roster vocab) the detector's label is
+        # meaningful, and confirmation/indexing lag can hide detections
+        # from semantic search for minutes — this answers "is the
+        # detector seeing X right now?" independently of memory state.
+        # label -> {n, last_seen_wall, last_score, max_score}
+        self._label_detections: Dict[str, Dict[str, Any]] = {}
         # Reverse index: frame_id -> set of object IDs last updated on that frame
         self._frame_to_objects: Dict[str, set] = {}
         # Min-heap of (deadline_mono, oid) for proto expiry (lazy re-schedule on matches)
@@ -205,7 +223,18 @@ class WorkingMemory:
         ltm_cfg = cfg.get("ltm", {})
         self.reupsert_cos_max: float = float(ltm_cfg.get("reupsert_cos_max", 0.995))
         self.reupsert_pos_m: float = float(ltm_cfg.get("reupsert_pos_m", 0.05))
-        self.ltm_min_view_bins: int = int(ltm_cfg.get("ltm_min_view_bins", 2))
+        # LTM view-diversity gate. Defaults to object.require_view_bins: an
+        # object that confirms with N view bins must also reach the vector
+        # store with N, otherwise it is confirmed-but-unsearchable forever
+        # (with a stationary camera most objects only ever occupy one bin).
+        self.ltm_min_view_bins: int = int(ltm_cfg.get("ltm_min_view_bins", self.require_view_bins))
+        if self.ltm_min_view_bins > self.require_view_bins:
+            logger.warning(
+                f"[WM] ltm.ltm_min_view_bins={self.ltm_min_view_bins} > "
+                f"object.require_view_bins={self.require_view_bins}: confirmed objects "
+                f"with fewer view bins will never be upserted to the vector store "
+                f"and stay invisible to /search/semantic"
+            )
         self.ltm_min_period_s: float = float(ltm_cfg.get("min_period_s", 1.0))
         self.ltm_force_period_s: float = float(ltm_cfg.get("force_period_s", 10.0))
 
@@ -587,6 +616,7 @@ class WorkingMemory:
                     "updated_at": wall_now,
                 }
                 out.append(payload)
+                is_first = o.last_upsert_emb is None
                 # mark last upsert snapshot
                 o.last_upsert_wall_utc = wall_now
                 o.last_upsert_mono = m_now
@@ -595,7 +625,7 @@ class WorkingMemory:
                 # telemetry & logging
                 self._upsert_count_total += 1
 
-                reason = "first_upsert" if o.last_upsert_emb is None else (
+                reason = "first_upsert" if is_first else (
                     "force_period" if elapsed_m >= self.ltm_force_period_s else (
                         "emb_changed" if cos_same <= self.reupsert_cos_max else "pos_changed"
                     )
@@ -608,6 +638,32 @@ class WorkingMemory:
                 # schedule next routine check
                 _schedule_next_due(o, m_now)
         return out
+
+    def mark_upsert_failed(self, object_ids: Iterable[str]) -> int:
+        """Roll back upsert bookkeeping for payloads the caller failed to
+        write to the vector store, and re-queue them for the next flush.
+
+        collect_ready_for_upsert() snapshots last_upsert_* optimistically at
+        collection time; without this rollback a failed store write leaves the
+        objects looking freshly upserted, so they would not retry until the
+        force period — or never, if their heap entries were consumed.
+
+        Returns the number of objects re-queued.
+        """
+        now_m = _now_mono()
+        requeued = 0
+        with self._lock:
+            for oid in object_ids:
+                o = self._map.get(oid)
+                if o is None:
+                    continue
+                o.last_upsert_mono = 0.0
+                o.last_upsert_wall_utc = 0.0
+                o.last_upsert_emb = None
+                o.last_upsert_xyz = None
+                heapq.heappush(self._ltm_heap, (now_m, oid))
+                requeued += 1
+        return requeued
 
     # ---------- expiry / pruning ----------
 
@@ -772,7 +828,13 @@ class WorkingMemory:
     # backward (new device, NTP) recovers instead of freezing the pose.
     _POSE_GUARD_WINDOW_S = 2.0
 
-    def update_robot_pose(self, t_wc: np.ndarray, q_wc_xyzw: np.ndarray, timestamp: float) -> None:
+    def update_robot_pose(
+        self,
+        t_wc: np.ndarray,
+        q_wc_xyzw: np.ndarray,
+        timestamp: float,
+        frame_epoch: Optional[int] = None,
+    ) -> None:
         """Store latest robot pose (passthrough from sensor).
 
         RTSM does NOT compute or filter pose — it stores what the sensor provides.
@@ -787,6 +849,12 @@ class WorkingMemory:
         clock discontinuity self-heals within the window rather than
         rejecting all future updates. Timestamps must come from the same
         clock per session (FramePacket wall time).
+
+        frame_epoch: opaque counter from the receiver that bumps when the
+        sender starts a new streaming session (world origin may have moved
+        — poses across a bump must not be assumed to share a world frame).
+        None means "this writer doesn't know the epoch" (pipeline writer,
+        ZMQ/replay) and PRESERVES the stored value rather than clearing it.
         """
         ts = float(timestamp)
         now_mono = time.monotonic()
@@ -798,10 +866,13 @@ class WorkingMemory:
                 and (now_mono - self._latest_pose_arrival_mono) < self._POSE_GUARD_WINDOW_S
             ):
                 return
+            if frame_epoch is None and lp is not None:
+                frame_epoch = lp.get("frame_epoch")
             self._latest_pose = {
                 "xyz": t_wc.tolist() if hasattr(t_wc, 'tolist') else list(t_wc),
                 "quaternion_xyzw": q_wc_xyzw.tolist() if hasattr(q_wc_xyzw, 'tolist') else list(q_wc_xyzw),
                 "timestamp": ts,
+                "frame_epoch": frame_epoch,
             }
             self._latest_pose_arrival_mono = now_mono
 
@@ -811,18 +882,84 @@ class WorkingMemory:
         *processed* frame)."""
         return self._latest_pose
 
+    def set_forward_clearance(self, clearance_m: float, valid_frac: float,
+                              timestamp: float) -> None:
+        """Store the latest depth-derived forward clearance (meters of open
+        space ahead of the camera). clearance_m = 0.0 means blocked or
+        unmeasurable (fail-closed)."""
+        with self._lock:
+            self._latest_clearance = {
+                "clearance_m": float(clearance_m),
+                "valid_frac": float(valid_frac),
+                "timestamp": float(timestamp),
+            }
+
+    def get_forward_clearance(self) -> Optional[Dict[str, Any]]:
+        return self._latest_clearance
+
+    def note_label_detections(self, labels, scores=None) -> None:
+        """Tally one frame's detector labels (see _label_detections).
+        Bounded: at most 64 distinct labels are tracked (vocab-prompted
+        backends emit a handful; the guard is for open-vocab defaults)."""
+        if not labels:
+            return
+        now = time.time()
+        with self._lock:
+            for i, label in enumerate(labels):
+                if label is None:
+                    continue
+                key = str(label)
+                rec = self._label_detections.get(key)
+                if rec is None:
+                    if len(self._label_detections) >= 64:
+                        continue
+                    rec = {"n": 0, "last_seen_wall": 0.0,
+                           "last_score": None, "max_score": None}
+                    self._label_detections[key] = rec
+                rec["n"] += 1
+                rec["last_seen_wall"] = now
+                s = None
+                if scores is not None:
+                    try:
+                        s = float(scores[i])
+                    except (IndexError, TypeError, ValueError):
+                        s = None
+                if s is not None:
+                    rec["last_score"] = round(s, 4)
+                    if rec["max_score"] is None or s > rec["max_score"]:
+                        rec["max_score"] = round(s, 4)
+
     def stats(self) -> Dict[str, Any]:
         with self._lock:
             n = len(self._map)
             c = sum(1 for o in self._map.values() if o.confirmed)
             avg_hits = (sum(o.hits for o in self._map.values()) / n) if n else 0.0
-            return {
+            # Confirmed objects that have never reached the vector store —
+            # should hover near 0 (flush latency only); a large steady value
+            # means semantic retrieval is starving.
+            never_upserted = sum(
+                1 for o in self._map.values()
+                if o.confirmed and float(o.last_upsert_mono or 0.0) == 0.0
+            )
+            out = {
                 "objects": n,
                 "confirmed": c,
                 "avg_hits": avg_hits,
                 "upserts_total": int(self._upsert_count_total),
+                "ltm_never_upserted": never_upserted,
                 "robot_pose": self._latest_pose,
+                "detections_by_label": {
+                    k: dict(v) for k, v in self._label_detections.items()
+                },
             }
+            # Published only when receive-time clearance sensing is enabled
+            # (io.clearance.enable): None until the first depth frame, then
+            # {clearance_m, valid_frac, timestamp}. Flag off => key absent,
+            # so /stats matches a build without the feature (the rc_car_agent
+            # client treats absent and None alike: no sample).
+            if self.clearance_enabled:
+                out["forward_clearance"] = self._latest_clearance
+            return out
 
     def clear(self) -> Dict[str, int]:
         """
@@ -848,6 +985,7 @@ class WorkingMemory:
 
             # Reset counters
             self._upsert_count_total = 0
+            self._label_detections = {}
 
             # Clear attached spatial index if present
             if self.index is not None:
@@ -858,6 +996,8 @@ class WorkingMemory:
             # (e.g. replaying a recording after a /reset).
             self._latest_pose = None
             self._latest_pose_arrival_mono = 0.0
+            # Drop the last clearance sample too (stale after a reset).
+            self._latest_clearance = None
 
             logger.info(f"[WM] Cleared {obj_count} objects ({confirmed_count} confirmed, {proto_count} proto)")
 

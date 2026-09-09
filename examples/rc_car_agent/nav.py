@@ -1,0 +1,290 @@
+"""
+Closed-loop navigation — deterministic steering + the control loop.
+
+Division of labor (locked): the monitor is the SOLE arrival/abort
+authority; nav converts the monitor's geometry into wheel commands and
+honors every interrupt. Nav NEVER declares arrival.
+
+════════════════════════════════════════════════════════════════════════
+STEER SIGN (load-bearing — hardware-verified conventions)
+════════════════════════════════════════════════════════════════════════
+Positive heading error err = wrap(desired_yaw − car_yaw) means the target
+is to the LEFT (CCW viewed from above; geometry.py fact #3). To turn CCW a
+differential-drive car speeds up the RIGHT wheel:
+
+    left  = base − kp_steer·err
+    right = base + kp_steer·err          # err > 0  →  right > left  →  CCW
+
+⚠ Do NOT reuse teleop's arcade_mix with steer=+err: teleop's positive
+steer is a RIGHT/CW turn (stick right), i.e. ANTI-ALIGNED with positive
+(CCW) yaw error. That sign flip drives away from the target and is the
+single most likely silent bug in this file — test_steer_sign pins it.
+
+Rotate-in-place (|err| > rotate_in_place_deg): throttle ≈ 0, pure
+differential with the SAME sign rule: err > 0 → left backward, right
+forward → CCW.
+
+════════════════════════════════════════════════════════════════════════
+HOLD RULE (the most-misimplemented rule, per the plan)
+════════════════════════════════════════════════════════════════════════
+Between fresh poses nav HOLDS the last (left, right) — but KEEPS CALLING
+bridge.drive() every tick. The bridge's change-or-heartbeat gate decides
+what actually hits the wire; the 0.25 s heartbeat is what feeds the ESP32's
+300 ms firmware watchdog. An implementation that "holds" by NOT calling
+drive() silently stops the car mid-trial (watchdog fires at 300 ms).
+config._validate enforces tick_s < heartbeat_s < 0.3.
+
+The monitor bounds the hold: past stale_abort_s it verdicts stale_stop and
+the loop safe-stops. The car never drives blind until the trial timeout.
+
+Fail-safe inheritance: if THIS loop dies (exception, GIL stall, process
+kill), drive() calls cease and the firmware watchdog stops the car within
+300 ms. bridge.drive() returning False (e-stop latch, rate gate, HTTP
+drop) is EXPECTED and never retried against — the next tick tries again.
+"""
+
+from __future__ import annotations
+
+import threading
+import time
+from typing import Optional, Tuple
+
+from config import Config
+from esp32_bridge import Esp32Bridge
+from monitor import MissionMonitor
+from planner import PlanResult
+from rtsm_client import RtsmClient
+from trial_logger import TrialLogger
+
+
+def drive_command(heading_err: float, nav_cfg,
+                  dist_m: Optional[float] = None) -> Tuple[float, float, str]:
+    """Heading error (rad, +=CCW/left) → (left, right, mode) in [-1, 1].
+
+    Pure and deterministic — the whole steering policy, unit-tested in
+    isolation (test_nav.py pins both signs and both modes).
+
+    Gentle end-game (2026-08-30, after two believed-arrivals physically
+    nudged their targets/walls; STALL FLOORS added same day on review —
+    a plain 0.6 scale put commands at 0.30, below this rig's measured
+    ~0.4 motor stall floor, which would have stalled the car 0.75 m
+    from every target): inside slow_zone_m of the believed target,
+    commands scale by slow_zone_scale but never below the calibration-
+    proven moving floors (slow_zone_min_speed / slow_zone_min_turn) —
+    on this rig that means a modest, honest slowdown rather than a
+    dramatic one. dist_m None = no scaling (sweep steps, relocation
+    walks)."""
+    import math
+
+    in_slow = (dist_m is not None and nav_cfg.slow_zone_m > 0
+               and dist_m < nav_cfg.slow_zone_m)
+
+    rotate_rad = math.radians(nav_cfg.rotate_in_place_deg)
+    if abs(heading_err) > rotate_rad:
+        t = nav_cfg.max_turn
+        if in_slow:
+            t = max(nav_cfg.slow_zone_min_turn,
+                    nav_cfg.max_turn * nav_cfg.slow_zone_scale)
+            t = min(t, nav_cfg.max_turn)
+        if heading_err > 0.0:            # target LEFT → rotate CCW
+            return -t, t, "rotate"
+        return t, -t, "rotate"           # target RIGHT → rotate CW
+
+    base = nav_cfg.max_speed
+    if in_slow:
+        base = max(nav_cfg.slow_zone_min_speed,
+                   nav_cfg.max_speed * nav_cfg.slow_zone_scale)
+        base = min(base, nav_cfg.max_speed)
+    d = max(-nav_cfg.max_turn, min(nav_cfg.max_turn,
+                                   nav_cfg.kp_steer * heading_err))
+    left = max(-1.0, min(1.0, base - d))
+    right = max(-1.0, min(1.0, base + d))
+    return left, right, "translate"
+
+
+class NavRunner:
+    """Runs one mission to completion. Returns (result, detail).
+
+    result ∈ arrived | timeout | stale_stop | frame_reset | drift |
+             degenerate_heading | blocked | estopped | preempted |
+             cancelled | shutdown
+    """
+
+    def __init__(
+        self,
+        cfg: Config,
+        bridge: Esp32Bridge,
+        rtsm: RtsmClient,
+        plan: PlanResult,
+        condition: str,
+        stop_event: threading.Event,
+        preempt_event: threading.Event,
+        cancel_event: threading.Event,
+        shutdown_event: threading.Event,
+        logger: Optional[TrialLogger] = None,
+        progress: Optional[dict] = None,
+        timeout_s_override: Optional[float] = None,
+        log_t0_mono: Optional[float] = None,
+    ):
+        self._cfg = cfg
+        self._bridge = bridge
+        self._rtsm = rtsm
+        self._plan = plan
+        self._stop_event = stop_event
+        self._preempt = preempt_event
+        self._cancel = cancel_event
+        self._shutdown = shutdown_event
+        self._logger = logger
+        self._progress = progress if progress is not None else {}
+
+        # Override: the baseline's search phase spends part of the trial
+        # budget before the drive starts — the drive gets the remainder.
+        timeout_s = timeout_s_override if timeout_s_override is not None else (
+            cfg.nav.timeout_rtsm_s if condition == "rtsm"
+            else cfg.nav.timeout_baseline_s)
+        self._t0 = time.monotonic()
+        # Log clock: all records in one trial JSONL must share ONE epoch
+        # (the mission's t0), even though the monitor's timeout budget runs
+        # from drive start — for baseline trials the two differ by the
+        # whole search phase.
+        self._log_t0 = log_t0_mono if log_t0_mono is not None else self._t0
+        self._monitor = MissionMonitor(
+            nav=cfg.nav,
+            calibration=cfg.calibration,
+            target_xyz=list(plan.xyz_world or []),
+            plan_pose=plan.plan_pose,
+            plan_epoch=plan.frame_epoch,
+            timeout_s=timeout_s,
+            t0_mono=self._t0,
+        )
+
+    def run(self) -> Tuple[str, str]:
+        nav = self._cfg.nav
+        poll_interval = 1.0 / nav.poll_hz
+        next_poll = 0.0                          # poll immediately
+        left = right = 0.0
+        have_cmd = False                         # no motion before first fresh pose
+        blocked_polls = 0                        # drive-phase obstacle debounce
+        last_clearance_m = None                  # freshest valid depth clearance
+
+        while True:
+            # ── interrupts, highest priority, every tick ────────────────
+            if self._shutdown.is_set():
+                self._bridge.stop()
+                return "shutdown", "server shutting down"
+            if self._stop_event.is_set():
+                # E-stop path already latched the bridge and posted /stop —
+                # do NOT command motors again (drive() would no-op anyway).
+                return "estopped", "hard e-stop"
+            if self._preempt.is_set():
+                self._preempt.clear()
+                self._bridge.stop()              # safe stop BEFORE goal swap
+                return "preempted", "new command preempted this drive"
+            if self._cancel.is_set():
+                self._cancel.clear()
+                self._bridge.stop()
+                return "cancelled", "operator cancel"
+
+            if time.monotonic() >= next_poll:
+                pose, clearance = self._safe_pose_clearance()
+                # Clock AFTER the fetch: if RTSM blocked us for seconds,
+                # the staleness/timeout verdicts must see that time.
+                now = time.monotonic()
+                next_poll = now + poll_interval
+                c_m = self._valid_clearance_m(clearance)
+                if c_m is not None:
+                    last_clearance_m = c_m
+                tick = self._monitor.assess(pose, now)
+                self._note_progress(tick)
+                if (tick.status == "ongoing" and tick.pose_fresh
+                        and tick.heading_err is not None):
+                    left, right, _mode = drive_command(tick.heading_err, nav,
+                                                       dist_m=tick.ground_dist)
+                    have_cmd = True
+                elif tick.status == "ongoing" and not tick.pose_fresh:
+                    # Blind-hold refinement (2026-08-16, after a live wall
+                    # hit): with a known-near obstacle, holding the last
+                    # drive command blind pushes INTO it — hold zero
+                    # instead (drive(0,0) still feeds the watchdog). The
+                    # next fresh pose recomputes the real command.
+                    if (last_clearance_m is not None
+                            and last_clearance_m < nav.blind_hold_min_clearance_m):
+                        left = right = 0.0
+                if self._logger is not None:
+                    # Logged AFTER the command update: each fresh tick line
+                    # pairs heading_err with the command DERIVED FROM IT
+                    # (hold/terminal ticks carry the held command).
+                    self._logger.log_tick(now - self._log_t0, pose, tick,
+                                          left, right)
+                if tick.status != "ongoing":
+                    self._bridge.stop()
+                    return tick.status, tick.detail
+                # Drive-phase obstacle guard (2026-08-16; consistency
+                # bound 2026-08-30, SIGN reviewed same day): trip when
+                # the measured surface is nearer than the believed
+                # target could possibly read. Geometry on THIS rig: the
+                # calibrated lever_arm_forward_m is the camera→drive-
+                # center forward component (−0.259: the camera LEADS the
+                # drive center), so camera→target ≈ ground_dist + lever
+                # (i.e. ground_dist − 0.259). A reading below that minus
+                # the margin (target half-depth + map error) cannot be
+                # the target. Consequence, stated honestly: the bound
+                # collapses below zero inside ~0.6 m — at final-approach
+                # range a wall return is geometrically indistinguishable
+                # from the target's own face, so near-target contact is
+                # mitigated by the slow zone (speed floor above stall),
+                # not by this trip.
+                lever = self._cfg.calibration.lever_arm_forward_m
+                if (nav.blocked_clearance_m > 0 and tick.pose_fresh
+                        and c_m is not None
+                        and c_m < nav.blocked_clearance_m
+                        and tick.ground_dist is not None
+                        and c_m < (tick.ground_dist + lever
+                                   - nav.blocked_target_margin_m)):
+                    blocked_polls += 1
+                    if blocked_polls >= nav.blocked_debounce_polls:
+                        self._bridge.stop()
+                        return "blocked", (
+                            f"obstacle {c_m:.2f} m ahead with target still "
+                            f"{tick.ground_dist:.2f} m away")
+                elif tick.pose_fresh:
+                    blocked_polls = 0
+
+            # HOLD RULE: called every tick, fresh pose or not (see module
+            # docstring) — the bridge decides what hits the wire. Skipped
+            # the instant an interrupt is pending (handled next iteration):
+            # a cancelled/e-stopped mission must not push one more command.
+            if have_cmd and not (self._stop_event.is_set()
+                                 or self._preempt.is_set()
+                                 or self._cancel.is_set()):
+                self._bridge.drive(left, right)
+
+            time.sleep(nav.tick_s)
+
+    # ── helpers ──────────────────────────────────────────────────────────
+
+    def _safe_pose_clearance(self):
+        try:
+            return self._rtsm.get_pose_and_clearance()
+        except Exception:  # noqa: BLE001 — an RTSM hiccup is a stale tick,
+            return None, None  # never a crashed control loop
+
+    def _valid_clearance_m(self, clearance) -> Optional[float]:
+        """Clearance meters from a fresh-enough sample, else None. A stale
+        sample is ignored entirely — the blind-hold refinement must key on
+        the last VALID measurement, not a frozen one."""
+        if not clearance:
+            return None
+        try:
+            age = time.time() - float(clearance.get("timestamp", 0))
+            if age > self._cfg.nav.clearance_max_age_s:
+                return None
+            return float(clearance.get("clearance_m", 0.0))
+        except (TypeError, ValueError):
+            return None
+
+    def _note_progress(self, tick) -> None:
+        self._progress["ticks"] = self._progress.get("ticks", 0) + 1
+        self._progress["phase"] = "driving"
+        if tick.ground_dist is not None:
+            self._progress["ground_dist_m"] = round(tick.ground_dist, 3)

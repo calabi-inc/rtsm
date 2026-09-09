@@ -1,0 +1,826 @@
+{
+  "label": "Grounding DINO + SAM2",
+  "backend": "grounded_sam2",
+  "timestamp": "2026-09-07T03:53:49.400822",
+  "latency": {
+    "frame_count": 54,
+    "window_duration_s": 49.4,
+    "input_hz": 5.0,
+    "processing_hz": 1.09,
+    "effective_ratio": 0.219,
+    "gate_acceptance_rate": 1.0,
+    "warmup_skipped": 5,
+    "t_segmentation": {
+      "mean": 0.2223,
+      "p50": 0.2224,
+      "p95": 0.2688,
+      "max": 0.2899
+    },
+    "t_heuristics": {
+      "mean": 0.0786,
+      "p50": 0.0527,
+      "p95": 0.1816,
+      "max": 0.6344
+    },
+    "t_scoring": {
+      "mean": 0.0003,
+      "p50": 0.0002,
+      "p95": 0.0006,
+      "max": 0.0014
+    },
+    "t_clip": {
+      "mean": 0.0261,
+      "p50": 0.0155,
+      "p95": 0.0397,
+      "max": 0.4537
+    },
+    "t_association": {
+      "mean": 0.0014,
+      "p50": 0.0012,
+      "p95": 0.0034,
+      "max": 0.0041
+    },
+    "t_total": {
+      "mean": 0.3774,
+      "p50": 0.3229,
+      "p95": 0.8242,
+      "max": 0.9249
+    },
+    "mean_queue_depth": 0.2,
+    "mean_masks_in": 2.9,
+    "mean_candidates": 2.6,
+    "mask_survival_rate": 0.886
+  },
+  "latency_hourly": [
+    {
+      "wall_ts": 1788778339.8664005,
+      "input_hz": 0.0,
+      "processing_hz": 0.0,
+      "effective_ratio": 0.0,
+      "queue_drops": 0,
+      "gate_rejections": 0,
+      "throttle_skips": 0,
+      "tracking_drops": 0,
+      "queue_depth_mean": 0.0,
+      "queue_depth_max": 0,
+      "t_total_ms": 0.0,
+      "t_seg_ms": 0.0,
+      "t_heur_ms": 0.0,
+      "t_scoring_ms": 0.0,
+      "t_clip_ms": 0.0,
+      "t_assoc_ms": 0.0,
+      "frames_in_bucket": 0,
+      "assoc_matched": 0,
+      "assoc_created": 0,
+      "wm_total": 0,
+      "wm_confirmed": 0,
+      "wm_proto": 0
+    },
+    {
+      "wall_ts": 1788778340.856288,
+      "input_hz": 5.1,
+      "processing_hz": 0.0,
+      "effective_ratio": 0.0,
+      "queue_drops": 0,
+      "gate_rejections": 2,
+      "throttle_skips": 3,
+      "tracking_drops": 0,
+      "queue_depth_mean": 0.0,
+      "queue_depth_max": 0,
+      "t_total_ms": 0.0,
+      "t_seg_ms": 0.0,
+      "t_heur_ms": 0.0,
+      "t_scoring_ms": 0.0,
+      "t_clip_ms": 0.0,
+      "t_assoc_ms": 0.0,
+      "frames_in_bucket": 0,
+      "assoc_matched": 0,
+      "assoc_created": 0,
+      "wm_total": 7,
+      "wm_confirmed": 0,
+      "wm_proto": 7
+    },
+    {
+      "wall_ts": 1788778341.8472707,
+      "input_hz": 5.0,
+      "processing_hz": 0.0,
+      "effective_ratio": 0.0,
+      "queue_drops": 0,
+      "gate_rejections": 1,
+      "throttle_skips": 4,
+      "tracking_drops": 0,
+      "queue_depth_mean": 0.0,
+      "queue_depth_max": 0,
+      "t_total_ms": 0.0,
+      "t_seg_ms": 0.0,
+      "t_heur_ms": 0.0,
+      "t_scoring_ms": 0.0,
+      "t_clip_ms": 0.0,
+      "t_assoc_ms": 0.0,
+      "frames_in_bucket": 0,
+      "assoc_matched": 0,
+      "assoc_created": 0,
+      "wm_total": 7,
+      "wm_confirmed": 0,
+      "wm_proto": 7
+    },
+    {
+      "wall_ts": 1788778342.8697824,
+      "input_hz": 5.9,
+      "processing_hz": 1.97,
+      "effective_ratio": 0.333,
+      "queue_drops": 0,
+      "gate_rejections": 0,
+      "throttle_skips": 4,
+      "tracking_drops": 0,
+      "queue_depth_mean": 0.0,
+      "queue_depth_max": 0,
+      "t_total_ms": 389.0,
+      "t_seg_ms": 247.3,
+      "t_heur_ms": 111.4,
+      "t_scoring_ms": 0.3,
+      "t_clip_ms": 16.7,
+      "t_assoc_ms": 1.6,
+      "frames_in_bucket": 2,
+      "assoc_matched": 9,
+      "assoc_created": 1,
+      "wm_total": 8,
+      "wm_confirmed": 4,
+      "wm_proto": 4
+    },
+    {
+      "wall_ts": 1788778343.8768604,
+      "input_hz": 5.0,
+      "processing_hz": 0.0,
+      "effective_ratio": 0.0,
+      "queue_drops": 0,
+      "gate_rejections": 2,
+      "throttle_skips": 3,
+      "tracking_drops": 0,
+      "queue_depth_mean": 0.0,
+      "queue_depth_max": 0,
+      "t_total_ms": 0.0,
+      "t_seg_ms": 0.0,
+      "t_heur_ms": 0.0,
+      "t_scoring_ms": 0.0,
+      "t_clip_ms": 0.0,
+      "t_assoc_ms": 0.0,
+      "frames_in_bucket": 0,
+      "assoc_matched": 0,
+      "assoc_created": 0,
+      "wm_total": 8,
+      "wm_confirmed": 4,
+      "wm_proto": 4
+    },
+    {
+      "wall_ts": 1788778345.3510196,
+      "input_hz": 4.0,
+      "processing_hz": 0.67,
+      "effective_ratio": 0.167,
+      "queue_drops": 0,
+      "gate_rejections": 2,
+      "throttle_skips": 3,
+      "tracking_drops": 0,
+      "queue_depth_mean": 0.0,
+      "queue_depth_max": 0,
+      "t_total_ms": 609.4,
+      "t_seg_ms": 256.0,
+      "t_heur_ms": 137.0,
+      "t_scoring_ms": 0.4,
+      "t_clip_ms": 27.2,
+      "t_assoc_ms": 2.0,
+      "frames_in_bucket": 1,
+      "assoc_matched": 4,
+      "assoc_created": 0,
+      "wm_total": 8,
+      "wm_confirmed": 4,
+      "wm_proto": 4
+    }
+  ],
+  "segmentation": {
+    "frame_count": 54,
+    "backend": "grounded_sam2",
+    "dual_rate": 0.0,
+    "fastsam_only_rate": 0.0,
+    "yoloe_only_rate": 1.0,
+    "mean_total": 2.9,
+    "mean_fastsam_raw": 0.0,
+    "mean_yoloe_raw": 0.0,
+    "staged_survival_rate": 0.0,
+    "selected_rate_by_source": {
+      "dual": 0.0,
+      "fastsam_only": 0.0,
+      "yoloe_only": 0.0
+    }
+  },
+  "segmentation_hourly": [
+    {
+      "wall_ts": 1788778339.8664005,
+      "backend": "dual",
+      "dual_rate": 0.0,
+      "fastsam_only_rate": 0.0,
+      "yoloe_only_rate": 0.0,
+      "mean_total": 0.0,
+      "mean_fastsam_raw": 0.0,
+      "mean_yoloe_raw": 0.0,
+      "staged_survival_rate": 0.0,
+      "frames_in_bucket": 0
+    },
+    {
+      "wall_ts": 1788778340.856288,
+      "backend": "unknown",
+      "dual_rate": 0.0,
+      "fastsam_only_rate": 0.0,
+      "yoloe_only_rate": 0.0,
+      "mean_total": 0.0,
+      "mean_fastsam_raw": 0.0,
+      "mean_yoloe_raw": 0.0,
+      "staged_survival_rate": 0.0,
+      "frames_in_bucket": 0
+    },
+    {
+      "wall_ts": 1788778341.8472707,
+      "backend": "unknown",
+      "dual_rate": 0.0,
+      "fastsam_only_rate": 0.0,
+      "yoloe_only_rate": 0.0,
+      "mean_total": 0.0,
+      "mean_fastsam_raw": 0.0,
+      "mean_yoloe_raw": 0.0,
+      "staged_survival_rate": 0.0,
+      "frames_in_bucket": 0
+    },
+    {
+      "wall_ts": 1788778342.8697824,
+      "backend": "grounded_sam2",
+      "dual_rate": 0.0,
+      "fastsam_only_rate": 0.0,
+      "yoloe_only_rate": 1.0,
+      "mean_total": 5.0,
+      "mean_fastsam_raw": 0.0,
+      "mean_yoloe_raw": 0.0,
+      "staged_survival_rate": 0.0,
+      "frames_in_bucket": 2
+    },
+    {
+      "wall_ts": 1788778343.8768604,
+      "backend": "unknown",
+      "dual_rate": 0.0,
+      "fastsam_only_rate": 0.0,
+      "yoloe_only_rate": 0.0,
+      "mean_total": 0.0,
+      "mean_fastsam_raw": 0.0,
+      "mean_yoloe_raw": 0.0,
+      "staged_survival_rate": 0.0,
+      "frames_in_bucket": 0
+    },
+    {
+      "wall_ts": 1788778345.3510196,
+      "backend": "grounded_sam2",
+      "dual_rate": 0.0,
+      "fastsam_only_rate": 0.0,
+      "yoloe_only_rate": 1.0,
+      "mean_total": 4.0,
+      "mean_fastsam_raw": 0.0,
+      "mean_yoloe_raw": 0.0,
+      "staged_survival_rate": 0.0,
+      "frames_in_bucket": 1
+    }
+  ],
+  "working_memory": {
+    "objects": 25,
+    "confirmed": 18,
+    "avg_hits": 4.88,
+    "upserts_total": 75,
+    "ltm_never_upserted": 0,
+    "robot_pose": {
+      "xyz": [
+        -1.1896884441375732,
+        0.6059783697128296,
+        -0.8103014826774597
+      ],
+      "quaternion_xyzw": [
+        0.21286404132843018,
+        0.23926477134227753,
+        -0.6493202447891235,
+        0.6898003220558167
+      ],
+      "timestamp": 1776124691.236178,
+      "frame_epoch": null
+    },
+    "forward_clearance": null,
+    "detections_by_label": {
+      "teddy bear": {
+        "n": 73,
+        "last_seen_wall": 1788778388.5829074,
+        "last_score": 0.3616,
+        "max_score": 0.6925
+      },
+      "tissue box": {
+        "n": 50,
+        "last_seen_wall": 1788778388.5829074,
+        "last_score": 0.6065,
+        "max_score": 0.6462
+      },
+      "water bottle": {
+        "n": 31,
+        "last_seen_wall": 1788778382.0163853,
+        "last_score": 0.3346,
+        "max_score": 0.8651
+      },
+      "scissors": {
+        "n": 4,
+        "last_seen_wall": 1788778368.4938958,
+        "last_score": 0.3194,
+        "max_score": 0.5095
+      }
+    },
+    "ingest_q": 0
+  },
+  "detailed": {
+    "working_memory": {
+      "objects": 25,
+      "confirmed": 18,
+      "avg_hits": 4.88,
+      "upserts_total": 75,
+      "ltm_never_upserted": 0,
+      "robot_pose": {
+        "xyz": [
+          -1.1896884441375732,
+          0.6059783697128296,
+          -0.8103014826774597
+        ],
+        "quaternion_xyzw": [
+          0.21286404132843018,
+          0.23926477134227753,
+          -0.6493202447891235,
+          0.6898003220558167
+        ],
+        "timestamp": 1776124691.236178,
+        "frame_epoch": null
+      },
+      "forward_clearance": null,
+      "detections_by_label": {
+        "teddy bear": {
+          "n": 73,
+          "last_seen_wall": 1788778388.5829074,
+          "last_score": 0.3616,
+          "max_score": 0.6925
+        },
+        "tissue box": {
+          "n": 50,
+          "last_seen_wall": 1788778388.5829074,
+          "last_score": 0.6065,
+          "max_score": 0.6462
+        },
+        "water bottle": {
+          "n": 31,
+          "last_seen_wall": 1788778382.0163853,
+          "last_score": 0.3346,
+          "max_score": 0.8651
+        },
+        "scissors": {
+          "n": 4,
+          "last_seen_wall": 1788778368.4938958,
+          "last_score": 0.3194,
+          "max_score": 0.5095
+        }
+      }
+    },
+    "vectors": {
+      "backend": "faiss",
+      "count": 18,
+      "index_ntotal": 18,
+      "dim": 768,
+      "last_error": null,
+      "total_failures": 0,
+      "consecutive_failures": 0,
+      "persist_path": "model_store/faiss/index.flatip",
+      "persist_error": null
+    },
+    "sweep_cache": {
+      "cells": 0,
+      "objects": 0,
+      "view_states": 34,
+      "cam_snapshots": 34,
+      "look_lrus": 0
+    },
+    "visualization": {
+      "keyframes": 0,
+      "total_points": 0,
+      "poses_set": 0
+    },
+    "extra": {
+      "ingest_q": 0
+    }
+  },
+  "objects": {
+    "total": 25,
+    "offset": 0,
+    "limit": 100,
+    "count": 25,
+    "objects": [
+      {
+        "id": "aff22f279f95406e",
+        "xyz_world": [
+          -0.867219865322113,
+          -0.3066554665565491,
+          2.5707967281341553
+        ],
+        "created_wall_utc": 1788778339.853887,
+        "created_mono": 55820.703,
+        "stability": 0.9953574058708675,
+        "hits": 12,
+        "confirmed": true,
+        "label_primary": "teddy bear",
+        "view_bins": 1,
+        "last_seen_mono": 55869.609
+      },
+      {
+        "id": "bf0ab1cdc10742f4",
+        "xyz_world": [
+          -1.4973610639572144,
+          -0.638961911201477,
+          0.9516091346740723
+        ],
+        "created_wall_utc": 1788778339.853887,
+        "created_mono": 55820.703,
+        "stability": 0.8966216606266725,
+        "hits": 5,
+        "confirmed": true,
+        "label_primary": "teddy bear",
+        "view_bins": 2,
+        "last_seen_mono": 55825.703
+      },
+      {
+        "id": "0002573eb9034f10",
+        "xyz_world": [
+          -0.6155606508255005,
+          -0.28641387820243835,
+          2.7411279678344727
+        ],
+        "created_wall_utc": 1788778339.853887,
+        "created_mono": 55820.703,
+        "stability": 0.9532838005234104,
+        "hits": 7,
+        "confirmed": true,
+        "label_primary": "teddy bear",
+        "view_bins": 1,
+        "last_seen_mono": 55869.609
+      },
+      {
+        "id": "7c95edbe3c7944c0",
+        "xyz_world": [
+          -0.10675737261772156,
+          -0.3566548526287079,
+          2.327075242996216
+        ],
+        "created_wall_utc": 1788778339.853887,
+        "created_mono": 55820.703,
+        "stability": 0.9830954594508463,
+        "hits": 9,
+        "confirmed": true,
+        "label_primary": "teddy bear",
+        "view_bins": 1,
+        "last_seen_mono": 55869.609
+      },
+      {
+        "id": "83ca2ec75a16434d",
+        "xyz_world": [
+          -1.1048847436904907,
+          -0.27693700790405273,
+          2.367584705352783
+        ],
+        "created_wall_utc": 1788778347.3961716,
+        "created_mono": 55828.25,
+        "stability": 0.9884902873755896,
+        "hits": 10,
+        "confirmed": true,
+        "label_primary": "teddy bear",
+        "view_bins": 1,
+        "last_seen_mono": 55869.609
+      },
+      {
+        "id": "ef007a0241d94d1d",
+        "xyz_world": [
+          -1.5666141510009766,
+          -0.6875616312026978,
+          0.7884491086006165
+        ],
+        "created_wall_utc": 1788778347.3961716,
+        "created_mono": 55828.25,
+        "stability": 0.8252876805000265,
+        "hits": 4,
+        "confirmed": true,
+        "label_primary": "tissue box",
+        "view_bins": 1,
+        "last_seen_mono": 55832.718
+      },
+      {
+        "id": "35b6d537953a4cf2",
+        "xyz_world": [
+          -2.5853846073150635,
+          -0.7974213361740112,
+          1.1528116464614868
+        ],
+        "created_wall_utc": 1788778351.006049,
+        "created_mono": 55831.859,
+        "stability": 0.8055718888236173,
+        "hits": 4,
+        "confirmed": true,
+        "label_primary": "teddy bear",
+        "view_bins": 1,
+        "last_seen_mono": 55833.281
+      },
+      {
+        "id": "946e57d1de034718",
+        "xyz_world": [
+          -3.3500454425811768,
+          -0.6255297064781189,
+          0.3779425323009491
+        ],
+        "created_wall_utc": 1788778351.0070553,
+        "created_mono": 55831.859,
+        "stability": 0.9323575072244066,
+        "hits": 6,
+        "confirmed": true,
+        "label_primary": "tissue box",
+        "view_bins": 1,
+        "last_seen_mono": 55834.906
+      },
+      {
+        "id": "c4a6ed10cca44000",
+        "xyz_world": [
+          -2.709836483001709,
+          0.07469189912080765,
+          -0.6177061796188354
+        ],
+        "created_wall_utc": 1788778353.5478575,
+        "created_mono": 55834.39,
+        "stability": 0.9294745932320385,
+        "hits": 6,
+        "confirmed": true,
+        "label_primary": "water bottle",
+        "view_bins": 1,
+        "last_seen_mono": 55839.109
+      },
+      {
+        "id": "4aa55a1f47aa40b8",
+        "xyz_world": [
+          -2.038662910461426,
+          -0.6189223527908325,
+          -0.9050843119621277
+        ],
+        "created_wall_utc": 1788778359.3719523,
+        "created_mono": 55840.218,
+        "stability": 0.687761114066081,
+        "hits": 3,
+        "confirmed": true,
+        "label_primary": "tissue box",
+        "view_bins": 1,
+        "last_seen_mono": 55843.734
+      },
+      {
+        "id": "c9f9fc3758494cfb",
+        "xyz_world": [
+          -1.126413106918335,
+          -0.508959174156189,
+          -1.676543951034546
+        ],
+        "created_wall_utc": 1788778360.444314,
+        "created_mono": 55841.296,
+        "stability": 0.9282255167871214,
+        "hits": 6,
+        "confirmed": true,
+        "label_primary": "water bottle",
+        "view_bins": 2,
+        "last_seen_mono": 55847.546
+      },
+      {
+        "id": "7628c1b1bd0e4e8a",
+        "xyz_world": [
+          -0.47180265188217163,
+          -0.6016926169395447,
+          -1.2932324409484863
+        ],
+        "created_wall_utc": 1788778366.690835,
+        "created_mono": 55847.546,
+        "stability": 0.7148916540264052,
+        "hits": 3,
+        "confirmed": true,
+        "label_primary": "tissue box",
+        "view_bins": 2,
+        "last_seen_mono": 55848.171
+      },
+      {
+        "id": "c60dae9cc1cd4a9b",
+        "xyz_world": [
+          -0.5448828339576721,
+          -0.614662766456604,
+          -1.3473453521728516
+        ],
+        "created_wall_utc": 1788778367.9209514,
+        "created_mono": 55848.765,
+        "stability": 0.7099661572394287,
+        "hits": 3,
+        "confirmed": true,
+        "label_primary": "tissue box",
+        "view_bins": 1,
+        "last_seen_mono": 55850.265
+      },
+      {
+        "id": "7530c8caabd94876",
+        "xyz_world": [
+          -0.2739982008934021,
+          -0.12092134356498718,
+          -0.5960281491279602
+        ],
+        "created_wall_utc": 1788778367.922457,
+        "created_mono": 55848.765,
+        "stability": 0.9528172805816799,
+        "hits": 7,
+        "confirmed": true,
+        "label_primary": "water bottle",
+        "view_bins": 2,
+        "last_seen_mono": 55852.812
+      },
+      {
+        "id": "57b743de66c944e4",
+        "xyz_world": [
+          0.42805346846580505,
+          -0.5272646546363831,
+          1.1544712781906128
+        ],
+        "created_wall_utc": 1788778374.2266576,
+        "created_mono": 55855.078,
+        "stability": 0.9927645924324481,
+        "hits": 11,
+        "confirmed": true,
+        "label_primary": "tissue box",
+        "view_bins": 2,
+        "last_seen_mono": 55864.5
+      },
+      {
+        "id": "9190723495954c85",
+        "xyz_world": [
+          -0.27103638648986816,
+          -0.3359484374523163,
+          2.5315959453582764
+        ],
+        "created_wall_utc": 1788778381.2647843,
+        "created_mono": 55862.109,
+        "stability": 0.9259265646998484,
+        "hits": 6,
+        "confirmed": true,
+        "label_primary": "teddy bear",
+        "view_bins": 1,
+        "last_seen_mono": 55869.609
+      },
+      {
+        "id": "2d87ef08b76f4e73",
+        "xyz_world": [
+          -0.5293398499488831,
+          -0.3668288290500641,
+          2.6396453380584717
+        ],
+        "created_wall_utc": 1788778381.2653024,
+        "created_mono": 55862.109,
+        "stability": 0.25,
+        "hits": 1,
+        "confirmed": false,
+        "label_primary": "teddy bear",
+        "view_bins": 1,
+        "last_seen_mono": 55862.109
+      },
+      {
+        "id": "d3d8fd54a3eb47b4",
+        "xyz_world": [
+          -0.6534474492073059,
+          -0.29039302468299866,
+          2.7030434608459473
+        ],
+        "created_wall_utc": 1788778382.1842222,
+        "created_mono": 55863.031,
+        "stability": 0.8023972521553854,
+        "hits": 4,
+        "confirmed": true,
+        "label_primary": "teddy bear",
+        "view_bins": 1,
+        "last_seen_mono": 55868.046
+      },
+      {
+        "id": "bc348785a1574114",
+        "xyz_world": [
+          1.1471387147903442,
+          0.04774806648492813,
+          1.3890186548233032
+        ],
+        "created_wall_utc": 1788778382.1842222,
+        "created_mono": 55863.031,
+        "stability": 0.25,
+        "hits": 1,
+        "confirmed": false,
+        "label_primary": "water bottle",
+        "view_bins": 1,
+        "last_seen_mono": 55863.031
+      },
+      {
+        "id": "36454cb2df8d4ac4",
+        "xyz_world": [
+          -1.5989776849746704,
+          -0.7138172388076782,
+          0.7817591428756714
+        ],
+        "created_wall_utc": 1788778383.6498854,
+        "created_mono": 55864.5,
+        "stability": 0.9577624700666238,
+        "hits": 7,
+        "confirmed": true,
+        "label_primary": "tissue box",
+        "view_bins": 1,
+        "last_seen_mono": 55869.609
+      },
+      {
+        "id": "a577cf033a3a45ae",
+        "xyz_world": [
+          -0.6376135349273682,
+          -0.2947811484336853,
+          2.6814045906066895
+        ],
+        "created_wall_utc": 1788778384.1102147,
+        "created_mono": 55864.953,
+        "stability": 0.25,
+        "hits": 1,
+        "confirmed": false,
+        "label_primary": "teddy bear",
+        "view_bins": 1,
+        "last_seen_mono": 55864.953
+      },
+      {
+        "id": "8651d60c4bc94846",
+        "xyz_world": [
+          0.33507612347602844,
+          -0.7835094332695007,
+          1.222760796546936
+        ],
+        "created_wall_utc": 1788778384.1107538,
+        "created_mono": 55864.953,
+        "stability": 0.25,
+        "hits": 1,
+        "confirmed": false,
+        "label_primary": "tissue box",
+        "view_bins": 1,
+        "last_seen_mono": 55864.953
+      },
+      {
+        "id": "fdd038c1a6744c95",
+        "xyz_world": [
+          0.24401195347309113,
+          -0.2930464446544647,
+          2.2191407680511475
+        ],
+        "created_wall_utc": 1788778384.8253856,
+        "created_mono": 55865.671,
+        "stability": 0.5222448760684317,
+        "hits": 2,
+        "confirmed": false,
+        "label_primary": "teddy bear",
+        "view_bins": 1,
+        "last_seen_mono": 55869.609
+      },
+      {
+        "id": "aaaaac6a0ff64e84",
+        "xyz_world": [
+          -0.9171150922775269,
+          -0.14627313613891602,
+          2.757582664489746
+        ],
+        "created_wall_utc": 1788778385.9887352,
+        "created_mono": 55866.843,
+        "stability": 0.5288145772578887,
+        "hits": 2,
+        "confirmed": false,
+        "label_primary": "tissue box",
+        "view_bins": 1,
+        "last_seen_mono": 55868.046
+      },
+      {
+        "id": "256451595e014f57",
+        "xyz_world": [
+          -2.293320417404175,
+          -0.9187089204788208,
+          1.473766803741455
+        ],
+        "created_wall_utc": 1788778387.2003858,
+        "created_mono": 55868.046,
+        "stability": 0.25,
+        "hits": 1,
+        "confirmed": false,
+        "label_primary": "teddy bear",
+        "view_bins": 1,
+        "last_seen_mono": 55868.046
+      }
+    ]
+  },
+  "_gpu_info": "NVIDIA GeForce RTX 5090, 32607 MiB"
+}

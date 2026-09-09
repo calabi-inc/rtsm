@@ -195,6 +195,16 @@ class GroundedSAM2Segmenter(SegmentationAdapter):
             [self._match_label(label, vocab) for label in labels],
             dtype=torch.int64,
         )
+        # Normalize span-merged compound phrases ("water bottle tissue
+        # box") to the single matched vocabulary entry (2026-08-28):
+        # downstream stores labels verbatim and searches them by
+        # substring, so a compound phrase would make the WRONG class
+        # searchable on this object. _match_label picks the first
+        # contained entry — inherently ambiguous for compounds, but one
+        # clean class (arbitrated later by image) beats a multi-class
+        # string. Unmatched phrases stay raw.
+        labels = [vocab[int(ci)] if int(ci) >= 0 else lbl
+                  for lbl, ci in zip(labels, class_ids)]
 
         # Ensure CPU tensors
         boxes_cpu = boxes.cpu().float()

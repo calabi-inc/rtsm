@@ -7,6 +7,9 @@ Covers:
 - WebSocketReceiver pose_sink firing at input rate — including frames the
   keyframe/interval throttle skips — with the same post-flip pose the
   FramePacket carries.
+- Frame epoch: bumps when a hello carries a new session_id (sender re-created
+  its streaming session → world origin may have moved), rides the pose sink,
+  and is preserved by epoch-less writers (pipeline dual-write).
 """
 
 from __future__ import annotations
@@ -136,7 +139,7 @@ class TestPoseSinkReceiveRate:
         """The key behavior: a frame the non-KF interval throttle skips
         (parse returns None, no image decode) still delivers its pose."""
         calls = []
-        rx = _make_receiver(lambda t, q, ts: calls.append((t.copy(), np.asarray(q).copy(), ts)))
+        rx = _make_receiver(lambda t, q, ts, ep: calls.append((t.copy(), np.asarray(q).copy(), ts)))
         # Arm the throttle: pretend frame 1 was just enqueued.
         rx._frame_count = 1
         rx._last_nonkf_enq_mono = time.monotonic()
@@ -151,7 +154,7 @@ class TestPoseSinkReceiveRate:
 
     def test_sink_not_called_on_bad_tracking(self):
         calls = []
-        rx = _make_receiver(lambda t, q, ts: calls.append(ts))
+        rx = _make_receiver(lambda t, q, ts, ep: calls.append(ts))
         hdr = _header()
         hdr["tracking_state"] = "limited"
         pkt = rx._parse_binary_message(_binary_message(hdr))
@@ -162,7 +165,7 @@ class TestPoseSinkReceiveRate:
         """The sink must deliver the same (post-convention) pose the
         FramePacket carries — one convention for all consumers."""
         calls = []
-        rx = _make_receiver(lambda t, q, ts: calls.append((np.asarray(t).copy(), np.asarray(q).copy())))
+        rx = _make_receiver(lambda t, q, ts, ep: calls.append((np.asarray(t).copy(), np.asarray(q).copy())))
         img = np.zeros((2, 2, 3), dtype=np.uint8)
         _, jpeg = cv2.imencode(".jpg", img)
         pkt = rx._parse_binary_message(
@@ -180,7 +183,7 @@ class TestPoseSinkReceiveRate:
         calls_flip, calls_noflip = [], []
         for flip, calls in ((True, calls_flip), (False, calls_noflip)):
             rx = _make_receiver(
-                lambda t, q, ts, c=calls: c.append((np.asarray(t).copy(), np.asarray(q).copy())),
+                lambda t, q, ts, ep, c=calls: c.append((np.asarray(t).copy(), np.asarray(q).copy())),
                 apply_camera_flip=flip,
             )
             rx._frame_count = 1
@@ -200,7 +203,7 @@ class TestPoseSinkReceiveRate:
         assert rx._parse_binary_message(_binary_message(_header())) is None
 
     def test_sink_error_does_not_break_parse(self):
-        def boom(t, q, ts):
+        def boom(t, q, ts, ep):
             raise RuntimeError("sink failure")
 
         rx = _make_receiver(pose_sink=boom)
@@ -208,3 +211,73 @@ class TestPoseSinkReceiveRate:
         _, jpeg = cv2.imencode(".jpg", img)
         pkt = rx._parse_binary_message(_binary_message(_header(), rgb_bytes=jpeg.tobytes()))
         assert pkt is not None, "a failing sink must not break frame parsing"
+
+
+# ─────────────────── frame epoch ───────────────────
+
+
+class TestFrameEpoch:
+    def test_epoch_bumps_on_new_session_only(self):
+        rx = _make_receiver(pose_sink=None)
+        assert rx._note_session("A") == 1
+        assert rx._note_session("A") == 1, "same-id reconnect keeps the epoch"
+        assert rx._note_session("B") == 2
+        assert rx._note_session("B") == 2
+        assert rx._note_session("A") == 3, "returning to an old id is still a new session"
+
+    def test_sink_receives_current_epoch(self):
+        calls = []
+        rx = _make_receiver(lambda t, q, ts, ep: calls.append(ep))
+        rx._note_session("A")
+        rx._frame_count = 1
+        rx._last_nonkf_enq_mono = time.monotonic()
+        assert rx._parse_binary_message(_binary_message(_header())) is None  # throttled
+        rx._note_session("B")
+        assert rx._parse_binary_message(_binary_message(_header(unix_ts=1235.5))) is None
+        assert calls == [1, 2]
+
+    def test_wm_stores_epoch_and_none_preserves(self):
+        """The receiver writes with an epoch; the pipeline dual-writer calls
+        without one (None) and must NOT clear the stored epoch."""
+        wm = WorkingMemory(cfg={})
+        wm.update_robot_pose(
+            np.array([1.0, 2.0, 3.0]), np.array([0, 0, 0, 1.0]), 100.0, frame_epoch=3
+        )
+        assert wm.get_robot_pose()["frame_epoch"] == 3
+        # pipeline-style 3-arg write, newer timestamp → pose updates, epoch kept
+        wm.update_robot_pose(np.array([4.0, 5.0, 6.0]), np.array([0, 0, 0, 1.0]), 101.0)
+        pose = wm.get_robot_pose()
+        assert pose["xyz"] == [4.0, 5.0, 6.0]
+        assert pose["frame_epoch"] == 3
+        # next receiver write with a new epoch replaces it
+        wm.update_robot_pose(
+            np.array([7.0, 8.0, 9.0]), np.array([0, 0, 0, 1.0]), 102.0, frame_epoch=4
+        )
+        assert wm.get_robot_pose()["frame_epoch"] == 4
+
+    def test_wm_epoch_none_when_never_provided(self):
+        """ZMQ/replay paths have no epochs — the field exists but is None."""
+        wm = WorkingMemory(cfg={})
+        wm.update_robot_pose(np.array([1.0, 2.0, 3.0]), np.array([0, 0, 0, 1.0]), 100.0)
+        assert wm.get_robot_pose()["frame_epoch"] is None
+
+    def test_epoch_survives_wm_clear(self):
+        """clear() (demo /reset) drops the pose; the next receive-time write
+        re-carries the receiver's current epoch."""
+        wm = WorkingMemory(cfg={})
+        wm.update_robot_pose(
+            np.array([1.0, 2.0, 3.0]), np.array([0, 0, 0, 1.0]), 100.0, frame_epoch=2
+        )
+        wm.clear()
+        assert wm.get_robot_pose() is None
+        wm.update_robot_pose(
+            np.array([4.0, 5.0, 6.0]), np.array([0, 0, 0, 1.0]), 101.0, frame_epoch=2
+        )
+        assert wm.get_robot_pose()["frame_epoch"] == 2
+
+    def test_stats_surfaces_epoch(self):
+        wm = WorkingMemory(cfg={})
+        wm.update_robot_pose(
+            np.array([1.0, 2.0, 3.0]), np.array([0, 0, 0, 1.0]), 100.0, frame_epoch=5
+        )
+        assert wm.stats()["robot_pose"]["frame_epoch"] == 5

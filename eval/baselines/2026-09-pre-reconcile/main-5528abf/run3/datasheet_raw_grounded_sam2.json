@@ -1,0 +1,2187 @@
+{
+  "label": "Grounding DINO + SAM2",
+  "backend": "grounded_sam2",
+  "timestamp": "2026-09-07T03:45:30.581474",
+  "latency": {
+    "frame_count": 53,
+    "window_duration_s": 61.3,
+    "input_hz": 0.0,
+    "processing_hz": 0.87,
+    "effective_ratio": 865.074,
+    "gate_acceptance_rate": 1.0,
+    "warmup_skipped": 5,
+    "t_segmentation": {
+      "mean": 0.3365,
+      "p50": 0.3359,
+      "p95": 0.3851,
+      "max": 0.6797
+    },
+    "t_heuristics": {
+      "mean": 0.672,
+      "p50": 0.6345,
+      "p95": 1.1492,
+      "max": 1.187
+    },
+    "t_scoring": {
+      "mean": 0.0003,
+      "p50": 0.0003,
+      "p95": 0.0005,
+      "max": 0.0006
+    },
+    "t_clip": {
+      "mean": 0.0564,
+      "p50": 0.057,
+      "p95": 0.0741,
+      "max": 0.096
+    },
+    "t_association": {
+      "mean": 0.0087,
+      "p50": 0.0086,
+      "p95": 0.0113,
+      "max": 0.0201
+    },
+    "t_total": {
+      "mean": 1.0774,
+      "p50": 1.0298,
+      "p95": 1.563,
+      "max": 1.6451
+    },
+    "mean_queue_depth": 9.8,
+    "mean_masks_in": 26.7,
+    "mean_candidates": 14.2,
+    "mask_survival_rate": 0.53
+  },
+  "latency_hourly": [
+    {
+      "wall_ts": 1788777825.9655545,
+      "input_hz": 0.0,
+      "processing_hz": 0.0,
+      "effective_ratio": 0.0,
+      "queue_drops": 0,
+      "gate_rejections": 0,
+      "frame_rejections": 0,
+      "throttle_skips": 0,
+      "tracking_drops": 0,
+      "queue_depth_mean": 0.0,
+      "queue_depth_max": 0,
+      "t_total_ms": 0.0,
+      "t_seg_ms": 0.0,
+      "t_heur_ms": 0.0,
+      "t_scoring_ms": 0.0,
+      "t_clip_ms": 0.0,
+      "t_assoc_ms": 0.0,
+      "frames_in_bucket": 0,
+      "assoc_matched": 0,
+      "assoc_created": 0,
+      "wm_total": 0,
+      "wm_confirmed": 0,
+      "wm_proto": 0
+    },
+    {
+      "wall_ts": 1788777826.9652278,
+      "input_hz": 5.0,
+      "processing_hz": 0.0,
+      "effective_ratio": 0.0,
+      "queue_drops": 0,
+      "gate_rejections": 4,
+      "frame_rejections": 0,
+      "throttle_skips": 3,
+      "tracking_drops": 0,
+      "queue_depth_mean": 1.0,
+      "queue_depth_max": 2,
+      "t_total_ms": 0.0,
+      "t_seg_ms": 0.0,
+      "t_heur_ms": 0.0,
+      "t_scoring_ms": 0.0,
+      "t_clip_ms": 0.0,
+      "t_assoc_ms": 0.0,
+      "frames_in_bucket": 0,
+      "assoc_matched": 0,
+      "assoc_created": 0,
+      "wm_total": 10,
+      "wm_confirmed": 0,
+      "wm_proto": 10
+    },
+    {
+      "wall_ts": 1788777827.980155,
+      "input_hz": 4.9,
+      "processing_hz": 0.0,
+      "effective_ratio": 0.0,
+      "queue_drops": 0,
+      "gate_rejections": 1,
+      "frame_rejections": 0,
+      "throttle_skips": 4,
+      "tracking_drops": 0,
+      "queue_depth_mean": 0.0,
+      "queue_depth_max": 0,
+      "t_total_ms": 0.0,
+      "t_seg_ms": 0.0,
+      "t_heur_ms": 0.0,
+      "t_scoring_ms": 0.0,
+      "t_clip_ms": 0.0,
+      "t_assoc_ms": 0.0,
+      "frames_in_bucket": 0,
+      "assoc_matched": 0,
+      "assoc_created": 0,
+      "wm_total": 10,
+      "wm_confirmed": 0,
+      "wm_proto": 10
+    },
+    {
+      "wall_ts": 1788777829.0005174,
+      "input_hz": 5.9,
+      "processing_hz": 0.0,
+      "effective_ratio": 0.0,
+      "queue_drops": 0,
+      "gate_rejections": 1,
+      "frame_rejections": 0,
+      "throttle_skips": 4,
+      "tracking_drops": 0,
+      "queue_depth_mean": 0.0,
+      "queue_depth_max": 0,
+      "t_total_ms": 0.0,
+      "t_seg_ms": 0.0,
+      "t_heur_ms": 0.0,
+      "t_scoring_ms": 0.0,
+      "t_clip_ms": 0.0,
+      "t_assoc_ms": 0.0,
+      "frames_in_bucket": 0,
+      "assoc_matched": 0,
+      "assoc_created": 0,
+      "wm_total": 10,
+      "wm_confirmed": 0,
+      "wm_proto": 10
+    },
+    {
+      "wall_ts": 1788777830.023315,
+      "input_hz": 4.8,
+      "processing_hz": 0.0,
+      "effective_ratio": 0.0,
+      "queue_drops": 0,
+      "gate_rejections": 2,
+      "frame_rejections": 0,
+      "throttle_skips": 3,
+      "tracking_drops": 0,
+      "queue_depth_mean": 0.0,
+      "queue_depth_max": 0,
+      "t_total_ms": 0.0,
+      "t_seg_ms": 0.0,
+      "t_heur_ms": 0.0,
+      "t_scoring_ms": 0.0,
+      "t_clip_ms": 0.0,
+      "t_assoc_ms": 0.0,
+      "frames_in_bucket": 0,
+      "assoc_matched": 0,
+      "assoc_created": 0,
+      "wm_total": 20,
+      "wm_confirmed": 0,
+      "wm_proto": 20
+    },
+    {
+      "wall_ts": 1788777831.2051349,
+      "input_hz": 4.3,
+      "processing_hz": 0.0,
+      "effective_ratio": 0.0,
+      "queue_drops": 0,
+      "gate_rejections": 0,
+      "frame_rejections": 0,
+      "throttle_skips": 3,
+      "tracking_drops": 0,
+      "queue_depth_mean": 0.0,
+      "queue_depth_max": 0,
+      "t_total_ms": 0.0,
+      "t_seg_ms": 0.0,
+      "t_heur_ms": 0.0,
+      "t_scoring_ms": 0.0,
+      "t_clip_ms": 0.0,
+      "t_assoc_ms": 0.0,
+      "frames_in_bucket": 0,
+      "assoc_matched": 0,
+      "assoc_created": 0,
+      "wm_total": 20,
+      "wm_confirmed": 0,
+      "wm_proto": 20
+    },
+    {
+      "wall_ts": 1788777832.2246754,
+      "input_hz": 4.8,
+      "processing_hz": 0.0,
+      "effective_ratio": 0.0,
+      "queue_drops": 0,
+      "gate_rejections": 3,
+      "frame_rejections": 0,
+      "throttle_skips": 3,
+      "tracking_drops": 0,
+      "queue_depth_mean": 0.5,
+      "queue_depth_max": 1,
+      "t_total_ms": 0.0,
+      "t_seg_ms": 0.0,
+      "t_heur_ms": 0.0,
+      "t_scoring_ms": 0.0,
+      "t_clip_ms": 0.0,
+      "t_assoc_ms": 0.0,
+      "frames_in_bucket": 0,
+      "assoc_matched": 0,
+      "assoc_created": 0,
+      "wm_total": 28,
+      "wm_confirmed": 4,
+      "wm_proto": 24
+    },
+    {
+      "wall_ts": 1788777833.2428272,
+      "input_hz": 4.9,
+      "processing_hz": 0.0,
+      "effective_ratio": 0.0,
+      "queue_drops": 0,
+      "gate_rejections": 1,
+      "frame_rejections": 0,
+      "throttle_skips": 3,
+      "tracking_drops": 0,
+      "queue_depth_mean": 0.0,
+      "queue_depth_max": 0,
+      "t_total_ms": 0.0,
+      "t_seg_ms": 0.0,
+      "t_heur_ms": 0.0,
+      "t_scoring_ms": 0.0,
+      "t_clip_ms": 0.0,
+      "t_assoc_ms": 0.0,
+      "frames_in_bucket": 0,
+      "assoc_matched": 0,
+      "assoc_created": 0,
+      "wm_total": 28,
+      "wm_confirmed": 4,
+      "wm_proto": 24
+    },
+    {
+      "wall_ts": 1788777834.2640543,
+      "input_hz": 4.9,
+      "processing_hz": 0.0,
+      "effective_ratio": 0.0,
+      "queue_drops": 0,
+      "gate_rejections": 0,
+      "frame_rejections": 0,
+      "throttle_skips": 4,
+      "tracking_drops": 0,
+      "queue_depth_mean": 0.0,
+      "queue_depth_max": 0,
+      "t_total_ms": 0.0,
+      "t_seg_ms": 0.0,
+      "t_heur_ms": 0.0,
+      "t_scoring_ms": 0.0,
+      "t_clip_ms": 0.0,
+      "t_assoc_ms": 0.0,
+      "frames_in_bucket": 0,
+      "assoc_matched": 0,
+      "assoc_created": 0,
+      "wm_total": 28,
+      "wm_confirmed": 4,
+      "wm_proto": 24
+    },
+    {
+      "wall_ts": 1788777835.2719254,
+      "input_hz": 4.9,
+      "processing_hz": 0.0,
+      "effective_ratio": 0.0,
+      "queue_drops": 0,
+      "gate_rejections": 0,
+      "frame_rejections": 0,
+      "throttle_skips": 3,
+      "tracking_drops": 0,
+      "queue_depth_mean": 1.0,
+      "queue_depth_max": 1,
+      "t_total_ms": 0.0,
+      "t_seg_ms": 0.0,
+      "t_heur_ms": 0.0,
+      "t_scoring_ms": 0.0,
+      "t_clip_ms": 0.0,
+      "t_assoc_ms": 0.0,
+      "frames_in_bucket": 0,
+      "assoc_matched": 0,
+      "assoc_created": 0,
+      "wm_total": 37,
+      "wm_confirmed": 5,
+      "wm_proto": 32
+    },
+    {
+      "wall_ts": 1788777836.2784977,
+      "input_hz": 6.0,
+      "processing_hz": 0.0,
+      "effective_ratio": 0.0,
+      "queue_drops": 0,
+      "gate_rejections": 0,
+      "frame_rejections": 0,
+      "throttle_skips": 4,
+      "tracking_drops": 0,
+      "queue_depth_mean": 1.5,
+      "queue_depth_max": 2,
+      "t_total_ms": 0.0,
+      "t_seg_ms": 0.0,
+      "t_heur_ms": 0.0,
+      "t_scoring_ms": 0.0,
+      "t_clip_ms": 0.0,
+      "t_assoc_ms": 0.0,
+      "frames_in_bucket": 0,
+      "assoc_matched": 0,
+      "assoc_created": 0,
+      "wm_total": 43,
+      "wm_confirmed": 8,
+      "wm_proto": 35
+    },
+    {
+      "wall_ts": 1788777837.8224356,
+      "input_hz": 3.9,
+      "processing_hz": 0.0,
+      "effective_ratio": 0.0,
+      "queue_drops": 0,
+      "gate_rejections": 3,
+      "frame_rejections": 0,
+      "throttle_skips": 3,
+      "tracking_drops": 0,
+      "queue_depth_mean": 2.7,
+      "queue_depth_max": 4,
+      "t_total_ms": 0.0,
+      "t_seg_ms": 0.0,
+      "t_heur_ms": 0.0,
+      "t_scoring_ms": 0.0,
+      "t_clip_ms": 0.0,
+      "t_assoc_ms": 0.0,
+      "frames_in_bucket": 0,
+      "assoc_matched": 0,
+      "assoc_created": 0,
+      "wm_total": 44,
+      "wm_confirmed": 10,
+      "wm_proto": 34
+    }
+  ],
+  "segmentation": {
+    "frame_count": 53,
+    "backend": "grounded_sam2",
+    "dual_rate": 0.0,
+    "fastsam_only_rate": 0.0,
+    "yoloe_only_rate": 1.0,
+    "mean_total": 26.7,
+    "mean_fastsam_raw": 0.0,
+    "mean_yoloe_raw": 0.0,
+    "staged_survival_rate": 0.0,
+    "selected_rate_by_source": {
+      "dual": 0.0,
+      "fastsam_only": 0.0,
+      "yoloe_only": 0.0
+    }
+  },
+  "segmentation_hourly": [
+    {
+      "wall_ts": 1788777825.9655545,
+      "backend": "dual",
+      "dual_rate": 0.0,
+      "fastsam_only_rate": 0.0,
+      "yoloe_only_rate": 0.0,
+      "mean_total": 0.0,
+      "mean_fastsam_raw": 0.0,
+      "mean_yoloe_raw": 0.0,
+      "staged_survival_rate": 0.0,
+      "frames_in_bucket": 0
+    },
+    {
+      "wall_ts": 1788777826.9652278,
+      "backend": "unknown",
+      "dual_rate": 0.0,
+      "fastsam_only_rate": 0.0,
+      "yoloe_only_rate": 0.0,
+      "mean_total": 0.0,
+      "mean_fastsam_raw": 0.0,
+      "mean_yoloe_raw": 0.0,
+      "staged_survival_rate": 0.0,
+      "frames_in_bucket": 0
+    },
+    {
+      "wall_ts": 1788777827.980155,
+      "backend": "unknown",
+      "dual_rate": 0.0,
+      "fastsam_only_rate": 0.0,
+      "yoloe_only_rate": 0.0,
+      "mean_total": 0.0,
+      "mean_fastsam_raw": 0.0,
+      "mean_yoloe_raw": 0.0,
+      "staged_survival_rate": 0.0,
+      "frames_in_bucket": 0
+    },
+    {
+      "wall_ts": 1788777829.0005174,
+      "backend": "unknown",
+      "dual_rate": 0.0,
+      "fastsam_only_rate": 0.0,
+      "yoloe_only_rate": 0.0,
+      "mean_total": 0.0,
+      "mean_fastsam_raw": 0.0,
+      "mean_yoloe_raw": 0.0,
+      "staged_survival_rate": 0.0,
+      "frames_in_bucket": 0
+    },
+    {
+      "wall_ts": 1788777830.023315,
+      "backend": "unknown",
+      "dual_rate": 0.0,
+      "fastsam_only_rate": 0.0,
+      "yoloe_only_rate": 0.0,
+      "mean_total": 0.0,
+      "mean_fastsam_raw": 0.0,
+      "mean_yoloe_raw": 0.0,
+      "staged_survival_rate": 0.0,
+      "frames_in_bucket": 0
+    },
+    {
+      "wall_ts": 1788777831.2051349,
+      "backend": "unknown",
+      "dual_rate": 0.0,
+      "fastsam_only_rate": 0.0,
+      "yoloe_only_rate": 0.0,
+      "mean_total": 0.0,
+      "mean_fastsam_raw": 0.0,
+      "mean_yoloe_raw": 0.0,
+      "staged_survival_rate": 0.0,
+      "frames_in_bucket": 0
+    },
+    {
+      "wall_ts": 1788777832.2246754,
+      "backend": "unknown",
+      "dual_rate": 0.0,
+      "fastsam_only_rate": 0.0,
+      "yoloe_only_rate": 0.0,
+      "mean_total": 0.0,
+      "mean_fastsam_raw": 0.0,
+      "mean_yoloe_raw": 0.0,
+      "staged_survival_rate": 0.0,
+      "frames_in_bucket": 0
+    },
+    {
+      "wall_ts": 1788777833.2428272,
+      "backend": "unknown",
+      "dual_rate": 0.0,
+      "fastsam_only_rate": 0.0,
+      "yoloe_only_rate": 0.0,
+      "mean_total": 0.0,
+      "mean_fastsam_raw": 0.0,
+      "mean_yoloe_raw": 0.0,
+      "staged_survival_rate": 0.0,
+      "frames_in_bucket": 0
+    },
+    {
+      "wall_ts": 1788777834.2640543,
+      "backend": "unknown",
+      "dual_rate": 0.0,
+      "fastsam_only_rate": 0.0,
+      "yoloe_only_rate": 0.0,
+      "mean_total": 0.0,
+      "mean_fastsam_raw": 0.0,
+      "mean_yoloe_raw": 0.0,
+      "staged_survival_rate": 0.0,
+      "frames_in_bucket": 0
+    },
+    {
+      "wall_ts": 1788777835.2719254,
+      "backend": "unknown",
+      "dual_rate": 0.0,
+      "fastsam_only_rate": 0.0,
+      "yoloe_only_rate": 0.0,
+      "mean_total": 0.0,
+      "mean_fastsam_raw": 0.0,
+      "mean_yoloe_raw": 0.0,
+      "staged_survival_rate": 0.0,
+      "frames_in_bucket": 0
+    },
+    {
+      "wall_ts": 1788777836.2784977,
+      "backend": "unknown",
+      "dual_rate": 0.0,
+      "fastsam_only_rate": 0.0,
+      "yoloe_only_rate": 0.0,
+      "mean_total": 0.0,
+      "mean_fastsam_raw": 0.0,
+      "mean_yoloe_raw": 0.0,
+      "staged_survival_rate": 0.0,
+      "frames_in_bucket": 0
+    },
+    {
+      "wall_ts": 1788777837.8224356,
+      "backend": "unknown",
+      "dual_rate": 0.0,
+      "fastsam_only_rate": 0.0,
+      "yoloe_only_rate": 0.0,
+      "mean_total": 0.0,
+      "mean_fastsam_raw": 0.0,
+      "mean_yoloe_raw": 0.0,
+      "staged_survival_rate": 0.0,
+      "frames_in_bucket": 0
+    }
+  ],
+  "working_memory": {
+    "objects": 133,
+    "confirmed": 81,
+    "avg_hits": 3.8045112781954886,
+    "upserts_total": 123,
+    "robot_pose": {
+      "xyz": [
+        -1.1896884441375732,
+        0.6059783697128296,
+        -0.8103014826774597
+      ],
+      "quaternion_xyzw": [
+        0.21286404132843018,
+        0.23926477134227753,
+        -0.6493202447891235,
+        0.6898003220558167
+      ],
+      "timestamp": 1776124691.236178
+    },
+    "ingest_q": 0,
+    "pose_conversion_failures": 0
+  },
+  "detailed": {
+    "working_memory": {
+      "objects": 133,
+      "confirmed": 81,
+      "avg_hits": 3.8045112781954886,
+      "upserts_total": 123,
+      "robot_pose": {
+        "xyz": [
+          -1.1896884441375732,
+          0.6059783697128296,
+          -0.8103014826774597
+        ],
+        "quaternion_xyzw": [
+          0.21286404132843018,
+          0.23926477134227753,
+          -0.6493202447891235,
+          0.6898003220558167
+        ],
+        "timestamp": 1776124691.236178
+      }
+    },
+    "sweep_cache": {
+      "cells": 0,
+      "objects": 0,
+      "view_states": 34,
+      "cam_snapshots": 34,
+      "look_lrus": 0
+    },
+    "visualization": {
+      "keyframes": 0,
+      "total_points": 0,
+      "poses_set": 0
+    },
+    "extra": {
+      "ingest_q": 0,
+      "pose_conversion_failures": 0
+    }
+  },
+  "objects": {
+    "total": 133,
+    "offset": 0,
+    "limit": 100,
+    "count": 100,
+    "objects": [
+      {
+        "id": "ad6678d3f8f94305",
+        "xyz_world": [
+          -0.8666189312934875,
+          -0.3072577118873596,
+          2.5698840618133545
+        ],
+        "created_wall_utc": 1788777826.3666632,
+        "created_mono": 55307.218,
+        "stability": 0.9820074867166735,
+        "hits": 9,
+        "confirmed": true,
+        "label_primary": "pillow",
+        "view_bins": 1,
+        "last_seen_mono": 55368.171
+      },
+      {
+        "id": "67ccc02372c24963",
+        "xyz_world": [
+          -1.1062299013137817,
+          -0.2782243490219116,
+          2.367595672607422
+        ],
+        "created_wall_utc": 1788777826.3676677,
+        "created_mono": 55307.218,
+        "stability": 0.9972360924554458,
+        "hits": 13,
+        "confirmed": true,
+        "label_primary": "pet toy",
+        "view_bins": 1,
+        "last_seen_mono": 55368.171
+      },
+      {
+        "id": "ed14360199264e0f",
+        "xyz_world": [
+          -0.6185584664344788,
+          -0.28521671891212463,
+          2.7373063564300537
+        ],
+        "created_wall_utc": 1788777826.3681712,
+        "created_mono": 55307.218,
+        "stability": 0.951238134069282,
+        "hits": 7,
+        "confirmed": true,
+        "label_primary": "pet toy",
+        "view_bins": 1,
+        "last_seen_mono": 55368.171
+      },
+      {
+        "id": "551405b05b744c50",
+        "xyz_world": [
+          -0.27089568972587585,
+          -0.33583927154541016,
+          2.529942512512207
+        ],
+        "created_wall_utc": 1788777826.3691776,
+        "created_mono": 55307.218,
+        "stability": 0.966986220385086,
+        "hits": 8,
+        "confirmed": true,
+        "label_primary": "pet toy",
+        "view_bins": 1,
+        "last_seen_mono": 55368.171
+      },
+      {
+        "id": "2d62b52945f84a3d",
+        "xyz_world": [
+          -1.5972188711166382,
+          -0.2107439935207367,
+          2.011413812637329
+        ],
+        "created_wall_utc": 1788777829.51972,
+        "created_mono": 55310.375,
+        "stability": 0.930206182213241,
+        "hits": 6,
+        "confirmed": true,
+        "label_primary": "pillow",
+        "view_bins": 1,
+        "last_seen_mono": 55364.859
+      },
+      {
+        "id": "31cfc8c9cecd47d7",
+        "xyz_world": [
+          -1.5431244373321533,
+          -0.6910587549209595,
+          0.79787278175354
+        ],
+        "created_wall_utc": 1788777831.5397778,
+        "created_mono": 55312.39,
+        "stability": 0.9722739239101157,
+        "hits": 8,
+        "confirmed": true,
+        "label_primary": "tablet",
+        "view_bins": 1,
+        "last_seen_mono": 55321.921
+      },
+      {
+        "id": "d44d833d09674fab",
+        "xyz_world": [
+          -1.6090977191925049,
+          -0.6180861592292786,
+          0.8884967565536499
+        ],
+        "created_wall_utc": 1788777831.5418236,
+        "created_mono": 55312.39,
+        "stability": 0.9981501448034831,
+        "hits": 14,
+        "confirmed": true,
+        "label_primary": "laptop",
+        "view_bins": 2,
+        "last_seen_mono": 55368.171
+      },
+      {
+        "id": "4f0c29e3b4eb4273",
+        "xyz_world": [
+          -2.146000385284424,
+          -0.90776127576828,
+          1.6648410558700562
+        ],
+        "created_wall_utc": 1788777831.5438445,
+        "created_mono": 55312.39,
+        "stability": 0.9773310328342797,
+        "hits": 9,
+        "confirmed": true,
+        "label_primary": "headphones",
+        "view_bins": 2,
+        "last_seen_mono": 55368.171
+      },
+      {
+        "id": "b5e42cb1ac5d48bc",
+        "xyz_world": [
+          -2.336435556411743,
+          -0.9315691590309143,
+          1.4753162860870361
+        ],
+        "created_wall_utc": 1788777834.3057046,
+        "created_mono": 55315.156,
+        "stability": 0.9238297918740161,
+        "hits": 6,
+        "confirmed": true,
+        "label_primary": "night light",
+        "view_bins": 2,
+        "last_seen_mono": 55366.062
+      },
+      {
+        "id": "45cb0f764ba64a90",
+        "xyz_world": [
+          -2.1933200359344482,
+          -0.8921164870262146,
+          1.6351053714752197
+        ],
+        "created_wall_utc": 1788777834.306711,
+        "created_mono": 55315.156,
+        "stability": 0.8807150751524984,
+        "hits": 5,
+        "confirmed": true,
+        "label_primary": "bowl",
+        "view_bins": 1,
+        "last_seen_mono": 55367.078
+      },
+      {
+        "id": "11db46c8c3374902",
+        "xyz_world": [
+          -2.2730801105499268,
+          -0.9167401194572449,
+          1.5454498529434204
+        ],
+        "created_wall_utc": 1788777834.3072143,
+        "created_mono": 55315.156,
+        "stability": 0.9219895301984521,
+        "hits": 6,
+        "confirmed": true,
+        "label_primary": "night light",
+        "view_bins": 2,
+        "last_seen_mono": 55364.859
+      },
+      {
+        "id": "f460e49cd91140fd",
+        "xyz_world": [
+          -2.087258815765381,
+          -0.9397258162498474,
+          1.7911264896392822
+        ],
+        "created_wall_utc": 1788777835.429408,
+        "created_mono": 55316.281,
+        "stability": 0.7970837521014504,
+        "hits": 4,
+        "confirmed": true,
+        "label_primary": "phone",
+        "view_bins": 1,
+        "last_seen_mono": 55318.796
+      },
+      {
+        "id": "fd4fd1b02e464262",
+        "xyz_world": [
+          -2.586714744567871,
+          -0.7975761294364929,
+          1.153133511543274
+        ],
+        "created_wall_utc": 1788777836.9368494,
+        "created_mono": 55317.781,
+        "stability": 0.9155697331382809,
+        "hits": 6,
+        "confirmed": true,
+        "label_primary": "blanket",
+        "view_bins": 1,
+        "last_seen_mono": 55321.921
+      },
+      {
+        "id": "9b8570d83df641f4",
+        "xyz_world": [
+          -2.9928886890411377,
+          -0.9393646121025085,
+          0.7461019158363342
+        ],
+        "created_wall_utc": 1788777837.938749,
+        "created_mono": 55318.781,
+        "stability": 0.7037771379304993,
+        "hits": 3,
+        "confirmed": true,
+        "label_primary": "thermos",
+        "view_bins": 1,
+        "last_seen_mono": 55321.921
+      },
+      {
+        "id": "43188bd569f948bd",
+        "xyz_world": [
+          -3.307939052581787,
+          -0.30694645643234253,
+          0.9371965527534485
+        ],
+        "created_wall_utc": 1788777837.9397724,
+        "created_mono": 55318.796,
+        "stability": 0.7568896996347734,
+        "hits": 4,
+        "confirmed": true,
+        "label_primary": "cushion",
+        "view_bins": 1,
+        "last_seen_mono": 55321.921
+      },
+      {
+        "id": "91f8414325e34de3",
+        "xyz_world": [
+          -3.3069052696228027,
+          -0.6240931749343872,
+          0.5101463198661804
+        ],
+        "created_wall_utc": 1788777837.9414096,
+        "created_mono": 55318.796,
+        "stability": 0.7867025456528975,
+        "hits": 4,
+        "confirmed": true,
+        "label_primary": "lamp",
+        "view_bins": 1,
+        "last_seen_mono": 55321.921
+      },
+      {
+        "id": "cdd61f9bbc2742cd",
+        "xyz_world": [
+          -3.3502089977264404,
+          -0.6250013113021851,
+          0.37786999344825745
+        ],
+        "created_wall_utc": 1788777837.9419317,
+        "created_mono": 55318.796,
+        "stability": 0.9340298680937033,
+        "hits": 6,
+        "confirmed": true,
+        "label_primary": "snack bag",
+        "view_bins": 1,
+        "last_seen_mono": 55324.859
+      },
+      {
+        "id": "81be31c6ff9641ed",
+        "xyz_world": [
+          -3.0621824264526367,
+          -0.9508084654808044,
+          0.6835566163063049
+        ],
+        "created_wall_utc": 1788777838.9095895,
+        "created_mono": 55319.765,
+        "stability": 0.6953620977247336,
+        "hits": 3,
+        "confirmed": true,
+        "label_primary": "headphones",
+        "view_bins": 1,
+        "last_seen_mono": 55321.921
+      },
+      {
+        "id": "d53fb1488bb143b7",
+        "xyz_world": [
+          -2.706009864807129,
+          0.057120177894830704,
+          -0.6152105927467346
+        ],
+        "created_wall_utc": 1788777842.4148555,
+        "created_mono": 55323.265,
+        "stability": 0.9282318911269727,
+        "hits": 6,
+        "confirmed": true,
+        "label_primary": "lamp",
+        "view_bins": 1,
+        "last_seen_mono": 55330.953
+      },
+      {
+        "id": "7f076fb1b8194159",
+        "xyz_world": [
+          -2.554814338684082,
+          0.107962466776371,
+          -0.7867134213447571
+        ],
+        "created_wall_utc": 1788777842.4158604,
+        "created_mono": 55323.265,
+        "stability": 0.8155060196890099,
+        "hits": 4,
+        "confirmed": true,
+        "label_primary": "spoon",
+        "view_bins": 1,
+        "last_seen_mono": 55327.218
+      },
+      {
+        "id": "3361a3c13e8e4ed7",
+        "xyz_world": [
+          -2.539968252182007,
+          -0.31755632162094116,
+          -0.5126695036888123
+        ],
+        "created_wall_utc": 1788777842.4174364,
+        "created_mono": 55323.265,
+        "stability": 0.949825486587538,
+        "hits": 7,
+        "confirmed": true,
+        "label_primary": "bag",
+        "view_bins": 1,
+        "last_seen_mono": 55331.937
+      },
+      {
+        "id": "7ee72f7e4cd74ce4",
+        "xyz_world": [
+          -2.149806499481201,
+          -0.7061825394630432,
+          -0.6558913588523865
+        ],
+        "created_wall_utc": 1788777842.4174364,
+        "created_mono": 55323.265,
+        "stability": 0.8086840371608481,
+        "hits": 4,
+        "confirmed": true,
+        "label_primary": "card box",
+        "view_bins": 1,
+        "last_seen_mono": 55327.203
+      },
+      {
+        "id": "a9ea5c88c3744866",
+        "xyz_world": [
+          -2.5948712825775146,
+          -0.011128194630146027,
+          -0.6032955646514893
+        ],
+        "created_wall_utc": 1788777842.4189484,
+        "created_mono": 55323.265,
+        "stability": 0.9816024227484689,
+        "hits": 9,
+        "confirmed": true,
+        "label_primary": "alarm clock",
+        "view_bins": 1,
+        "last_seen_mono": 55334.156
+      },
+      {
+        "id": "66857ff925d748b4",
+        "xyz_world": [
+          -2.605983257293701,
+          -0.24221579730510712,
+          -0.5162160396575928
+        ],
+        "created_wall_utc": 1788777844.015649,
+        "created_mono": 55324.859,
+        "stability": 0.710471761806228,
+        "hits": 3,
+        "confirmed": true,
+        "label_primary": "mirror",
+        "view_bins": 1,
+        "last_seen_mono": 55329.968
+      },
+      {
+        "id": "925881a324884e98",
+        "xyz_world": [
+          -2.3632054328918457,
+          -0.16457490622997284,
+          -0.7581787109375
+        ],
+        "created_wall_utc": 1788777844.0197906,
+        "created_mono": 55324.875,
+        "stability": 0.9279849710430514,
+        "hits": 6,
+        "confirmed": true,
+        "label_primary": "phone",
+        "view_bins": 1,
+        "last_seen_mono": 55330.953
+      },
+      {
+        "id": "d6975d19ba234782",
+        "xyz_world": [
+          -2.221196413040161,
+          -0.13846252858638763,
+          -0.8136850595474243
+        ],
+        "created_wall_utc": 1788777844.0235472,
+        "created_mono": 55324.875,
+        "stability": 0.8079609783286494,
+        "hits": 4,
+        "confirmed": true,
+        "label_primary": "knife",
+        "view_bins": 1,
+        "last_seen_mono": 55331.937
+      },
+      {
+        "id": "a36a42ea09594ab6",
+        "xyz_world": [
+          -2.373979091644287,
+          -0.005289221648126841,
+          -0.8559123873710632
+        ],
+        "created_wall_utc": 1788777844.0245528,
+        "created_mono": 55324.875,
+        "stability": 0.6877508274355297,
+        "hits": 3,
+        "confirmed": true,
+        "label_primary": "water bottle",
+        "view_bins": 1,
+        "last_seen_mono": 55329.968
+      },
+      {
+        "id": "d69505335ae14883",
+        "xyz_world": [
+          -2.2889997959136963,
+          0.09730125963687897,
+          -0.9023585915565491
+        ],
+        "created_wall_utc": 1788777845.1545167,
+        "created_mono": 55326.0,
+        "stability": 0.9760275551820561,
+        "hits": 9,
+        "confirmed": true,
+        "label_primary": "thermos",
+        "view_bins": 1,
+        "last_seen_mono": 55335.125
+      },
+      {
+        "id": "11a341ca783a4d15",
+        "xyz_world": [
+          -2.1812355518341064,
+          -0.20676709711551666,
+          -0.8420904278755188
+        ],
+        "created_wall_utc": 1788777845.1545167,
+        "created_mono": 55326.0,
+        "stability": 0.711028413019583,
+        "hits": 3,
+        "confirmed": true,
+        "label_primary": "mattress",
+        "view_bins": 1,
+        "last_seen_mono": 55329.968
+      },
+      {
+        "id": "1c9b95d9ef1d4a10",
+        "xyz_world": [
+          -2.2685792446136475,
+          -0.040826160460710526,
+          -0.8731371164321899
+        ],
+        "created_wall_utc": 1788777845.157531,
+        "created_mono": 55326.0,
+        "stability": 0.7012760912810483,
+        "hits": 3,
+        "confirmed": true,
+        "label_primary": "bowl",
+        "view_bins": 1,
+        "last_seen_mono": 55328.437
+      },
+      {
+        "id": "db8b5d1facba4286",
+        "xyz_world": [
+          -2.2794644832611084,
+          -0.2677671015262604,
+          -0.7494810819625854
+        ],
+        "created_wall_utc": 1788777845.1585352,
+        "created_mono": 55326.015,
+        "stability": 0.8064969669535864,
+        "hits": 4,
+        "confirmed": true,
+        "label_primary": "knife",
+        "view_bins": 1,
+        "last_seen_mono": 55329.968
+      },
+      {
+        "id": "aff48bfabc254f88",
+        "xyz_world": [
+          -2.356375217437744,
+          0.057499807327985764,
+          -0.872840404510498
+        ],
+        "created_wall_utc": 1788777845.1590383,
+        "created_mono": 55326.015,
+        "stability": 0.9158537899434739,
+        "hits": 6,
+        "confirmed": true,
+        "label_primary": "drill",
+        "view_bins": 1,
+        "last_seen_mono": 55335.125
+      },
+      {
+        "id": "2bbc592c2e7649a6",
+        "xyz_world": [
+          -2.2275798320770264,
+          -0.26512736082077026,
+          -0.7836503982543945
+        ],
+        "created_wall_utc": 1788777846.36786,
+        "created_mono": 55327.218,
+        "stability": 0.8860153997176451,
+        "hits": 5,
+        "confirmed": true,
+        "label_primary": "soap",
+        "view_bins": 1,
+        "last_seen_mono": 55331.937
+      },
+      {
+        "id": "021c250c91e24326",
+        "xyz_world": [
+          -2.600083827972412,
+          -0.5921595692634583,
+          -0.5566495656967163
+        ],
+        "created_wall_utc": 1788777847.5954828,
+        "created_mono": 55328.437,
+        "stability": 0.6617528704650999,
+        "hits": 3,
+        "confirmed": true,
+        "label_primary": "pillow",
+        "view_bins": 1,
+        "last_seen_mono": 55333.062
+      },
+      {
+        "id": "f4240c1a86624661",
+        "xyz_world": [
+          -2.5783350467681885,
+          0.10185938328504562,
+          -0.8098901510238647
+        ],
+        "created_wall_utc": 1788777847.5984983,
+        "created_mono": 55328.453,
+        "stability": 0.796962238606137,
+        "hits": 4,
+        "confirmed": true,
+        "label_primary": "spoon",
+        "view_bins": 1,
+        "last_seen_mono": 55333.062
+      },
+      {
+        "id": "cf101d9db7854e47",
+        "xyz_world": [
+          -2.1298906803131104,
+          -0.7434341311454773,
+          -0.631065845489502
+        ],
+        "created_wall_utc": 1788777847.6001477,
+        "created_mono": 55328.453,
+        "stability": 0.970345828473298,
+        "hits": 8,
+        "confirmed": true,
+        "label_primary": "soap",
+        "view_bins": 2,
+        "last_seen_mono": 55336.781
+      },
+      {
+        "id": "8ef7291d276f40e5",
+        "xyz_world": [
+          -2.040888547897339,
+          -0.6183929443359375,
+          -0.9100580811500549
+        ],
+        "created_wall_utc": 1788777847.6027465,
+        "created_mono": 55328.453,
+        "stability": 0.9172588871433671,
+        "hits": 6,
+        "confirmed": true,
+        "label_primary": "router",
+        "view_bins": 2,
+        "last_seen_mono": 55338.671
+      },
+      {
+        "id": "7940d916a8b1475d",
+        "xyz_world": [
+          -2.1948299407958984,
+          -0.17063376307487488,
+          -0.7614211440086365
+        ],
+        "created_wall_utc": 1788777850.1115613,
+        "created_mono": 55330.968,
+        "stability": 0.8010198902930692,
+        "hits": 4,
+        "confirmed": true,
+        "label_primary": "stapler",
+        "view_bins": 1,
+        "last_seen_mono": 55336.781
+      },
+      {
+        "id": "57ebe14ef6c54592",
+        "xyz_world": [
+          -2.4790546894073486,
+          -0.7866800427436829,
+          -0.5055339932441711
+        ],
+        "created_wall_utc": 1788777850.1130784,
+        "created_mono": 55330.968,
+        "stability": 0.6984344779052558,
+        "hits": 3,
+        "confirmed": true,
+        "label_primary": "sheet",
+        "view_bins": 2,
+        "last_seen_mono": 55335.125
+      },
+      {
+        "id": "a2f279e1fa714606",
+        "xyz_world": [
+          -2.36820650100708,
+          -0.4450891315937042,
+          -0.6344413757324219
+        ],
+        "created_wall_utc": 1788777850.1135824,
+        "created_mono": 55330.968,
+        "stability": 0.8696462303740299,
+        "hits": 5,
+        "confirmed": true,
+        "label_primary": "cabinet",
+        "view_bins": 1,
+        "last_seen_mono": 55335.14
+      },
+      {
+        "id": "cf4f7c75801a42dd",
+        "xyz_world": [
+          -2.713165760040283,
+          -0.9476346969604492,
+          -2.158534288406372
+        ],
+        "created_wall_utc": 1788777852.2199168,
+        "created_mono": 55333.062,
+        "stability": 0.6856698430889446,
+        "hits": 3,
+        "confirmed": true,
+        "label_primary": "stapler",
+        "view_bins": 1,
+        "last_seen_mono": 55336.781
+      },
+      {
+        "id": "7b7ab83858774e16",
+        "xyz_world": [
+          -1.1265981197357178,
+          0.08830534666776657,
+          -1.960195541381836
+        ],
+        "created_wall_utc": 1788777853.3103354,
+        "created_mono": 55334.156,
+        "stability": 0.9647581432999099,
+        "hits": 8,
+        "confirmed": true,
+        "label_primary": "blanket",
+        "view_bins": 1,
+        "last_seen_mono": 55341.531
+      },
+      {
+        "id": "95ae7789330a43cc",
+        "xyz_world": [
+          -1.1457905769348145,
+          -0.8706749677658081,
+          -1.6704133749008179
+        ],
+        "created_wall_utc": 1788777853.3113408,
+        "created_mono": 55334.156,
+        "stability": 0.9921920015881855,
+        "hits": 11,
+        "confirmed": true,
+        "label_primary": "heater",
+        "view_bins": 2,
+        "last_seen_mono": 55344.64
+      },
+      {
+        "id": "6de6c8dca6f748b8",
+        "xyz_world": [
+          -2.732440948486328,
+          -0.9507130980491638,
+          -2.160705804824829
+        ],
+        "created_wall_utc": 1788777853.3113408,
+        "created_mono": 55334.156,
+        "stability": 0.6956647508859548,
+        "hits": 3,
+        "confirmed": true,
+        "label_primary": "bag",
+        "view_bins": 1,
+        "last_seen_mono": 55338.671
+      },
+      {
+        "id": "64eda687dfba41ee",
+        "xyz_world": [
+          -2.0598292350769043,
+          -0.6701235771179199,
+          -0.9353072047233582
+        ],
+        "created_wall_utc": 1788777853.3113408,
+        "created_mono": 55334.156,
+        "stability": 0.6934066341759154,
+        "hits": 3,
+        "confirmed": true,
+        "label_primary": "stapler",
+        "view_bins": 2,
+        "last_seen_mono": 55337.765
+      },
+      {
+        "id": "491aee8db5f94431",
+        "xyz_world": [
+          -2.120905876159668,
+          -0.6432192921638489,
+          -2.5088257789611816
+        ],
+        "created_wall_utc": 1788777854.2837324,
+        "created_mono": 55335.14,
+        "stability": 0.7511259277863628,
+        "hits": 4,
+        "confirmed": true,
+        "label_primary": "painting",
+        "view_bins": 1,
+        "last_seen_mono": 55338.671
+      },
+      {
+        "id": "3b355fb821624af5",
+        "xyz_world": [
+          -0.9341036081314087,
+          0.19021448493003845,
+          -2.0690629482269287
+        ],
+        "created_wall_utc": 1788777855.9263797,
+        "created_mono": 55336.781,
+        "stability": 0.7123746814431648,
+        "hits": 3,
+        "confirmed": true,
+        "label_primary": "blanket",
+        "view_bins": 1,
+        "last_seen_mono": 55339.437
+      },
+      {
+        "id": "4295b7c2637649dd",
+        "xyz_world": [
+          -2.2808637619018555,
+          -0.7117241024971008,
+          -2.693079948425293
+        ],
+        "created_wall_utc": 1788777856.9080262,
+        "created_mono": 55337.75,
+        "stability": 0.7980805625214431,
+        "hits": 4,
+        "confirmed": true,
+        "label_primary": "blanket",
+        "view_bins": 1,
+        "last_seen_mono": 55340.156
+      },
+      {
+        "id": "378da25657704999",
+        "xyz_world": [
+          -0.47621864080429077,
+          -0.6059376001358032,
+          -1.2994049787521362
+        ],
+        "created_wall_utc": 1788777859.9058986,
+        "created_mono": 55340.75,
+        "stability": 0.7022461079293179,
+        "hits": 3,
+        "confirmed": true,
+        "label_primary": "cushion",
+        "view_bins": 1,
+        "last_seen_mono": 55342.687
+      },
+      {
+        "id": "7b25e81cfef34aff",
+        "xyz_world": [
+          -0.2261665016412735,
+          -0.48028087615966797,
+          -0.7584757804870605
+        ],
+        "created_wall_utc": 1788777860.6811476,
+        "created_mono": 55341.531,
+        "stability": 0.790056330499556,
+        "hits": 4,
+        "confirmed": true,
+        "label_primary": "bottle",
+        "view_bins": 1,
+        "last_seen_mono": 55344.64
+      },
+      {
+        "id": "f0a1026ad90849b4",
+        "xyz_world": [
+          -0.27400466799736023,
+          -0.12102258205413818,
+          -0.5961364507675171
+        ],
+        "created_wall_utc": 1788777861.8467453,
+        "created_mono": 55342.703,
+        "stability": 0.8067815469174056,
+        "hits": 4,
+        "confirmed": true,
+        "label_primary": "bottle",
+        "view_bins": 2,
+        "last_seen_mono": 55348.953
+      },
+      {
+        "id": "2d694ae80f094616",
+        "xyz_world": [
+          -0.546353816986084,
+          -0.6150953769683838,
+          -1.3476649522781372
+        ],
+        "created_wall_utc": 1788777862.8318732,
+        "created_mono": 55343.687,
+        "stability": 0.8309251545939516,
+        "hits": 4,
+        "confirmed": true,
+        "label_primary": "sofa",
+        "view_bins": 1,
+        "last_seen_mono": 55346.281
+      },
+      {
+        "id": "9561952f354b4198",
+        "xyz_world": [
+          0.2572375237941742,
+          -0.15718506276607513,
+          -0.5815714597702026
+        ],
+        "created_wall_utc": 1788777862.8318732,
+        "created_mono": 55343.687,
+        "stability": 0.9608336589777747,
+        "hits": 8,
+        "confirmed": true,
+        "label_primary": "bottle",
+        "view_bins": 1,
+        "last_seen_mono": 55350.265
+      },
+      {
+        "id": "a92bebd869014418",
+        "xyz_world": [
+          -0.09751849621534348,
+          -0.23477280139923096,
+          -0.5733835697174072
+        ],
+        "created_wall_utc": 1788777862.8343852,
+        "created_mono": 55343.687,
+        "stability": 0.7978008255871387,
+        "hits": 4,
+        "confirmed": true,
+        "label_primary": "shoe",
+        "view_bins": 1,
+        "last_seen_mono": 55348.953
+      },
+      {
+        "id": "d8e2486ccb4d4e17",
+        "xyz_world": [
+          0.22084620594978333,
+          0.0010548547143116593,
+          -0.6587109565734863
+        ],
+        "created_wall_utc": 1788777862.8363993,
+        "created_mono": 55343.687,
+        "stability": 0.6639350183084413,
+        "hits": 3,
+        "confirmed": true,
+        "label_primary": "monitor",
+        "view_bins": 1,
+        "last_seen_mono": 55346.281
+      },
+      {
+        "id": "93a437a8b62d48ed",
+        "xyz_world": [
+          0.38885921239852905,
+          0.13180653750896454,
+          -0.48406359553337097
+        ],
+        "created_wall_utc": 1788777864.602485,
+        "created_mono": 55345.453,
+        "stability": 0.7991403863152191,
+        "hits": 4,
+        "confirmed": true,
+        "label_primary": "mirror",
+        "view_bins": 1,
+        "last_seen_mono": 55348.953
+      },
+      {
+        "id": "1ef54f21fbb245a1",
+        "xyz_world": [
+          0.5273958444595337,
+          0.1809626966714859,
+          -0.41222333908081055
+        ],
+        "created_wall_utc": 1788777864.6034918,
+        "created_mono": 55345.453,
+        "stability": 0.9190935060161378,
+        "hits": 6,
+        "confirmed": true,
+        "label_primary": "folder",
+        "view_bins": 1,
+        "last_seen_mono": 55352.218
+      },
+      {
+        "id": "9e5fab06a793435f",
+        "xyz_world": [
+          0.12955589592456818,
+          0.03509266674518585,
+          -0.6304404735565186
+        ],
+        "created_wall_utc": 1788777864.6034918,
+        "created_mono": 55345.453,
+        "stability": 0.7871661598811286,
+        "hits": 4,
+        "confirmed": true,
+        "label_primary": "pan",
+        "view_bins": 1,
+        "last_seen_mono": 55350.265
+      },
+      {
+        "id": "1e797572542d417c",
+        "xyz_world": [
+          -0.28298839926719666,
+          -0.11381930112838745,
+          -0.5889605283737183
+        ],
+        "created_wall_utc": 1788777864.606549,
+        "created_mono": 55345.453,
+        "stability": 0.7118157394765925,
+        "hits": 3,
+        "confirmed": true,
+        "label_primary": "bottle",
+        "view_bins": 1,
+        "last_seen_mono": 55347.421
+      },
+      {
+        "id": "d4682df8b2944311",
+        "xyz_world": [
+          0.751698911190033,
+          -0.08494264632463455,
+          -0.26064804196357727
+        ],
+        "created_wall_utc": 1788777865.4263244,
+        "created_mono": 55346.281,
+        "stability": 0.943700352503423,
+        "hits": 7,
+        "confirmed": true,
+        "label_primary": "pet toy",
+        "view_bins": 1,
+        "last_seen_mono": 55355.859
+      },
+      {
+        "id": "0ce0714b38804ddd",
+        "xyz_world": [
+          0.46672487258911133,
+          -0.16739730536937714,
+          -0.45333293080329895
+        ],
+        "created_wall_utc": 1788777865.4263244,
+        "created_mono": 55346.281,
+        "stability": 0.9079084561602844,
+        "hits": 6,
+        "confirmed": true,
+        "label_primary": "speaker",
+        "view_bins": 1,
+        "last_seen_mono": 55351.265
+      },
+      {
+        "id": "24a460553e5149f5",
+        "xyz_world": [
+          0.15191790461540222,
+          -0.20623226463794708,
+          -0.36450204253196716
+        ],
+        "created_wall_utc": 1788777865.4288695,
+        "created_mono": 55346.281,
+        "stability": 0.8709655071375237,
+        "hits": 5,
+        "confirmed": true,
+        "label_primary": "keyboard",
+        "view_bins": 2,
+        "last_seen_mono": 55355.859
+      },
+      {
+        "id": "c37d761a3c2b4182",
+        "xyz_world": [
+          0.8643349409103394,
+          0.3279806971549988,
+          0.14991560578346252
+        ],
+        "created_wall_utc": 1788777866.5660763,
+        "created_mono": 55347.421,
+        "stability": 0.9775242634822277,
+        "hits": 9,
+        "confirmed": true,
+        "label_primary": "blanket",
+        "view_bins": 1,
+        "last_seen_mono": 55358.5
+      },
+      {
+        "id": "c91a1fe7be23470d",
+        "xyz_world": [
+          1.0474778413772583,
+          -0.17403240501880646,
+          0.528968095779419
+        ],
+        "created_wall_utc": 1788777868.100324,
+        "created_mono": 55348.953,
+        "stability": 0.8703378048303511,
+        "hits": 5,
+        "confirmed": true,
+        "label_primary": "toaster",
+        "view_bins": 1,
+        "last_seen_mono": 55354.296
+      },
+      {
+        "id": "625e3e90ac394f21",
+        "xyz_world": [
+          0.4934365451335907,
+          -0.2809784710407257,
+          1.1872116327285767
+        ],
+        "created_wall_utc": 1788777869.4087598,
+        "created_mono": 55350.265,
+        "stability": 0.9937215314226628,
+        "hits": 11,
+        "confirmed": true,
+        "label_primary": "foam roller",
+        "view_bins": 1,
+        "last_seen_mono": 55360.64
+      },
+      {
+        "id": "79724f898d0b4c7d",
+        "xyz_world": [
+          1.0392394065856934,
+          -0.1632206290960312,
+          1.2230393886566162
+        ],
+        "created_wall_utc": 1788777869.4093459,
+        "created_mono": 55350.265,
+        "stability": 0.9976153833498248,
+        "hits": 14,
+        "confirmed": true,
+        "label_primary": "cushion",
+        "view_bins": 1,
+        "last_seen_mono": 55360.64
+      },
+      {
+        "id": "c501b0279f1146d8",
+        "xyz_world": [
+          -0.07806366682052612,
+          -0.08352092653512955,
+          0.10322029888629913
+        ],
+        "created_wall_utc": 1788777869.411379,
+        "created_mono": 55350.265,
+        "stability": 0.9465847923646707,
+        "hits": 7,
+        "confirmed": true,
+        "label_primary": "shoe",
+        "view_bins": 2,
+        "last_seen_mono": 55357.734
+      },
+      {
+        "id": "78d20b51e5c94f90",
+        "xyz_world": [
+          0.4280796945095062,
+          -0.52659672498703,
+          1.1544151306152344
+        ],
+        "created_wall_utc": 1788777869.4128857,
+        "created_mono": 55350.265,
+        "stability": 0.9952999546912784,
+        "hits": 12,
+        "confirmed": true,
+        "label_primary": "dehumidifier",
+        "view_bins": 2,
+        "last_seen_mono": 55361.656
+      },
+      {
+        "id": "fa74502507c74d5f",
+        "xyz_world": [
+          0.3703548014163971,
+          -0.5126883387565613,
+          1.185562014579773
+        ],
+        "created_wall_utc": 1788777870.4068449,
+        "created_mono": 55351.25,
+        "stability": 0.9254823047785465,
+        "hits": 6,
+        "confirmed": true,
+        "label_primary": "plate",
+        "view_bins": 2,
+        "last_seen_mono": 55361.656
+      },
+      {
+        "id": "ea73a1c2ea8c41dc",
+        "xyz_world": [
+          0.7212585210800171,
+          0.44822144508361816,
+          1.7163448333740234
+        ],
+        "created_wall_utc": 1788777872.4112048,
+        "created_mono": 55353.265,
+        "stability": 0.9825005565117519,
+        "hits": 9,
+        "confirmed": true,
+        "label_primary": "sheet",
+        "view_bins": 1,
+        "last_seen_mono": 55361.656
+      },
+      {
+        "id": "30c8d35e2cc94357",
+        "xyz_world": [
+          1.3546028137207031,
+          -0.5391108393669128,
+          1.0483366250991821
+        ],
+        "created_wall_utc": 1788777873.4401093,
+        "created_mono": 55354.296,
+        "stability": 0.8169804713068165,
+        "hits": 4,
+        "confirmed": true,
+        "label_primary": "pillow",
+        "view_bins": 1,
+        "last_seen_mono": 55358.5
+      },
+      {
+        "id": "d344ed748e7a4df3",
+        "xyz_world": [
+          1.3450204133987427,
+          -0.5244165062904358,
+          1.05714750289917
+        ],
+        "created_wall_utc": 1788777875.0057294,
+        "created_mono": 55355.859,
+        "stability": 0.5093625375394581,
+        "hits": 2,
+        "confirmed": false,
+        "label_primary": "pillow",
+        "view_bins": 1,
+        "last_seen_mono": 55359.578
+      },
+      {
+        "id": "8ea4f1fe20854f80",
+        "xyz_world": [
+          0.16789917647838593,
+          -0.48119544982910156,
+          0.22770890593528748
+        ],
+        "created_wall_utc": 1788777876.8862293,
+        "created_mono": 55357.734,
+        "stability": 0.5087374117595678,
+        "hits": 2,
+        "confirmed": false,
+        "label_primary": "mouse",
+        "view_bins": 1,
+        "last_seen_mono": 55358.5
+      },
+      {
+        "id": "c4f9c9d3ae6047a3",
+        "xyz_world": [
+          0.23571109771728516,
+          -0.3206900358200073,
+          2.20910906791687
+        ],
+        "created_wall_utc": 1788777876.887939,
+        "created_mono": 55357.734,
+        "stability": 0.8735991223683931,
+        "hits": 5,
+        "confirmed": true,
+        "label_primary": "light switch",
+        "view_bins": 1,
+        "last_seen_mono": 55361.656
+      },
+      {
+        "id": "735928bde0a542b8",
+        "xyz_world": [
+          0.6328401565551758,
+          -0.3975697159767151,
+          1.184248685836792
+        ],
+        "created_wall_utc": 1788777877.644881,
+        "created_mono": 55358.5,
+        "stability": 0.5371542271606118,
+        "hits": 2,
+        "confirmed": false,
+        "label_primary": "portable air conditioner",
+        "view_bins": 1,
+        "last_seen_mono": 55359.578
+      },
+      {
+        "id": "e0cba962a2d7417a",
+        "xyz_world": [
+          -0.14043977856636047,
+          -0.0732906311750412,
+          0.03309090808033943
+        ],
+        "created_wall_utc": 1788777877.6453846,
+        "created_mono": 55358.5,
+        "stability": 0.25,
+        "hits": 1,
+        "confirmed": false,
+        "label_primary": "bag",
+        "view_bins": 1,
+        "last_seen_mono": 55358.5
+      },
+      {
+        "id": "0efb9fac68ef4199",
+        "xyz_world": [
+          0.7230069637298584,
+          0.4093341827392578,
+          1.7140860557556152
+        ],
+        "created_wall_utc": 1788777877.6469631,
+        "created_mono": 55358.5,
+        "stability": 0.25,
+        "hits": 1,
+        "confirmed": false,
+        "label_primary": "towel",
+        "view_bins": 1,
+        "last_seen_mono": 55358.5
+      },
+      {
+        "id": "12cf9d8af66d4bcb",
+        "xyz_world": [
+          -0.6040502190589905,
+          -0.5857177972793579,
+          1.1619818210601807
+        ],
+        "created_wall_utc": 1788777877.6474867,
+        "created_mono": 55358.5,
+        "stability": 0.25,
+        "hits": 1,
+        "confirmed": false,
+        "label_primary": "tablet",
+        "view_bins": 1,
+        "last_seen_mono": 55358.5
+      },
+      {
+        "id": "dfaacd8cd2544ea8",
+        "xyz_world": [
+          0.9038197994232178,
+          0.2248329073190689,
+          0.27339911460876465
+        ],
+        "created_wall_utc": 1788777877.6485066,
+        "created_mono": 55358.5,
+        "stability": 0.25,
+        "hits": 1,
+        "confirmed": false,
+        "label_primary": "painting",
+        "view_bins": 1,
+        "last_seen_mono": 55358.5
+      },
+      {
+        "id": "6d83030f6f5a4227",
+        "xyz_world": [
+          -0.10722897201776505,
+          -0.3561725318431854,
+          2.3270103931427
+        ],
+        "created_wall_utc": 1788777878.726048,
+        "created_mono": 55359.578,
+        "stability": 0.6971006247484419,
+        "hits": 3,
+        "confirmed": true,
+        "label_primary": "pet toy",
+        "view_bins": 1,
+        "last_seen_mono": 55368.171
+      },
+      {
+        "id": "a3cf02f5cbd04802",
+        "xyz_world": [
+          0.08735007047653198,
+          0.5398669838905334,
+          2.4917428493499756
+        ],
+        "created_wall_utc": 1788777878.7291555,
+        "created_mono": 55359.578,
+        "stability": 0.25,
+        "hits": 1,
+        "confirmed": false,
+        "label_primary": "sheet",
+        "view_bins": 1,
+        "last_seen_mono": 55359.578
+      },
+      {
+        "id": "1630fd94ab884d9f",
+        "xyz_world": [
+          -1.1700637340545654,
+          -0.8944064378738403,
+          0.934748649597168
+        ],
+        "created_wall_utc": 1788777878.7296655,
+        "created_mono": 55359.578,
+        "stability": 0.9461407510709359,
+        "hits": 7,
+        "confirmed": true,
+        "label_primary": "night light",
+        "view_bins": 1,
+        "last_seen_mono": 55367.078
+      },
+      {
+        "id": "6e605038760442c9",
+        "xyz_world": [
+          -1.3879998922348022,
+          -0.7658265233039856,
+          0.8113430142402649
+        ],
+        "created_wall_utc": 1788777878.7301767,
+        "created_mono": 55359.578,
+        "stability": 0.25,
+        "hits": 1,
+        "confirmed": false,
+        "label_primary": "desk lamp",
+        "view_bins": 1,
+        "last_seen_mono": 55359.578
+      },
+      {
+        "id": "9ffe49a3e9ba4110",
+        "xyz_world": [
+          -1.440651774406433,
+          -0.7238025069236755,
+          0.8009088635444641
+        ],
+        "created_wall_utc": 1788777878.7301767,
+        "created_mono": 55359.578,
+        "stability": 0.25,
+        "hits": 1,
+        "confirmed": false,
+        "label_primary": "sheet",
+        "view_bins": 1,
+        "last_seen_mono": 55359.578
+      },
+      {
+        "id": "a1e2244550c74e4c",
+        "xyz_world": [
+          0.7229434847831726,
+          0.4869425296783447,
+          1.714606761932373
+        ],
+        "created_wall_utc": 1788777878.7301767,
+        "created_mono": 55359.578,
+        "stability": 0.25,
+        "hits": 1,
+        "confirmed": false,
+        "label_primary": "towel",
+        "view_bins": 1,
+        "last_seen_mono": 55359.578
+      },
+      {
+        "id": "cb1227cc303d4bd1",
+        "xyz_world": [
+          -0.03952749818563461,
+          -0.892883837223053,
+          0.10826850682497025
+        ],
+        "created_wall_utc": 1788777878.7316859,
+        "created_mono": 55359.578,
+        "stability": 0.25,
+        "hits": 1,
+        "confirmed": false,
+        "label_primary": "headphones",
+        "view_bins": 1,
+        "last_seen_mono": 55359.578
+      },
+      {
+        "id": "eb9b1f5a8a3749e9",
+        "xyz_world": [
+          -1.1764882802963257,
+          -0.9233158230781555,
+          0.9020195007324219
+        ],
+        "created_wall_utc": 1788777878.7316859,
+        "created_mono": 55359.578,
+        "stability": 0.25,
+        "hits": 1,
+        "confirmed": false,
+        "label_primary": "edge",
+        "view_bins": 1,
+        "last_seen_mono": 55359.578
+      },
+      {
+        "id": "17bce174b48341dd",
+        "xyz_world": [
+          0.0767863541841507,
+          0.14441056549549103,
+          2.5723836421966553
+        ],
+        "created_wall_utc": 1788777879.7946918,
+        "created_mono": 55360.64,
+        "stability": 0.25,
+        "hits": 1,
+        "confirmed": false,
+        "label_primary": "edge",
+        "view_bins": 1,
+        "last_seen_mono": 55360.64
+      },
+      {
+        "id": "d97187aab0144bf5",
+        "xyz_world": [
+          0.3808531165122986,
+          -0.5110573172569275,
+          1.1697278022766113
+        ],
+        "created_wall_utc": 1788777879.7956965,
+        "created_mono": 55360.64,
+        "stability": 0.25,
+        "hits": 1,
+        "confirmed": false,
+        "label_primary": "clock",
+        "view_bins": 1,
+        "last_seen_mono": 55360.64
+      },
+      {
+        "id": "6568f653b460423e",
+        "xyz_world": [
+          -1.4764435291290283,
+          -0.686839759349823,
+          0.7819352746009827
+        ],
+        "created_wall_utc": 1788777879.7992494,
+        "created_mono": 55360.656,
+        "stability": 0.25,
+        "hits": 1,
+        "confirmed": false,
+        "label_primary": "stapler",
+        "view_bins": 1,
+        "last_seen_mono": 55360.656
+      },
+      {
+        "id": "a84e8ca808b34832",
+        "xyz_world": [
+          -1.492499589920044,
+          -0.6744415163993835,
+          0.7788724303245544
+        ],
+        "created_wall_utc": 1788777879.7997606,
+        "created_mono": 55360.656,
+        "stability": 0.25,
+        "hits": 1,
+        "confirmed": false,
+        "label_primary": "mattress",
+        "view_bins": 1,
+        "last_seen_mono": 55360.656
+      },
+      {
+        "id": "2d785cbd766b4c77",
+        "xyz_world": [
+          -1.2325952053070068,
+          -0.9338878989219666,
+          1.0490014553070068
+        ],
+        "created_wall_utc": 1788777879.8008928,
+        "created_mono": 55360.656,
+        "stability": 0.25,
+        "hits": 1,
+        "confirmed": false,
+        "label_primary": "shoe",
+        "view_bins": 1,
+        "last_seen_mono": 55360.656
+      },
+      {
+        "id": "164a5b1bca0e4324",
+        "xyz_world": [
+          1.0138875246047974,
+          0.03459623456001282,
+          1.5490367412567139
+        ],
+        "created_wall_utc": 1788777879.801405,
+        "created_mono": 55360.656,
+        "stability": 0.25,
+        "hits": 1,
+        "confirmed": false,
+        "label_primary": "knife",
+        "view_bins": 1,
+        "last_seen_mono": 55360.656
+      },
+      {
+        "id": "76cf4511c01f46a6",
+        "xyz_world": [
+          -1.6283364295959473,
+          -0.7591385841369629,
+          0.7298669219017029
+        ],
+        "created_wall_utc": 1788777880.805143,
+        "created_mono": 55361.656,
+        "stability": 0.7118300562062699,
+        "hits": 3,
+        "confirmed": true,
+        "label_primary": "phone",
+        "view_bins": 1,
+        "last_seen_mono": 55363.953
+      },
+      {
+        "id": "01e3f0819a4845dc",
+        "xyz_world": [
+          -1.6133583784103394,
+          -0.71100914478302,
+          0.7755858302116394
+        ],
+        "created_wall_utc": 1788777880.8066745,
+        "created_mono": 55361.656,
+        "stability": 0.25,
+        "hits": 1,
+        "confirmed": false,
+        "label_primary": "computer",
+        "view_bins": 1,
+        "last_seen_mono": 55361.656
+      },
+      {
+        "id": "f7ce511729ef4242",
+        "xyz_world": [
+          0.11091246455907822,
+          0.5531806945800781,
+          2.510409355163574
+        ],
+        "created_wall_utc": 1788777880.810894,
+        "created_mono": 55361.656,
+        "stability": 0.25,
+        "hits": 1,
+        "confirmed": false,
+        "label_primary": "towel",
+        "view_bins": 1,
+        "last_seen_mono": 55361.656
+      },
+      {
+        "id": "dbf6e5ce7dab469a",
+        "xyz_world": [
+          -1.8310803174972534,
+          -0.6994257569313049,
+          0.8305448293685913
+        ],
+        "created_wall_utc": 1788777880.810894,
+        "created_mono": 55361.656,
+        "stability": 0.25,
+        "hits": 1,
+        "confirmed": false,
+        "label_primary": "cable",
+        "view_bins": 1,
+        "last_seen_mono": 55361.656
+      },
+      {
+        "id": "4fab7b912fa24655",
+        "xyz_world": [
+          -1.1550612449645996,
+          -0.7184167504310608,
+          0.8123641610145569
+        ],
+        "created_wall_utc": 1788777880.8119,
+        "created_mono": 55361.656,
+        "stability": 0.25,
+        "hits": 1,
+        "confirmed": false,
+        "label_primary": "shoe",
+        "view_bins": 1,
+        "last_seen_mono": 55361.656
+      },
+      {
+        "id": "cbff0b7e8fba4c76",
+        "xyz_world": [
+          -1.598659634590149,
+          -0.7137624621391296,
+          0.7818385362625122
+        ],
+        "created_wall_utc": 1788777881.9778042,
+        "created_mono": 55362.828,
+        "stability": 0.8903304583108622,
+        "hits": 5,
+        "confirmed": true,
+        "label_primary": "tablet",
+        "view_bins": 1,
+        "last_seen_mono": 55368.171
+      },
+      {
+        "id": "c07fbc5934b54990",
+        "xyz_world": [
+          0.2447269856929779,
+          -0.2938510477542877,
+          2.2193751335144043
+        ],
+        "created_wall_utc": 1788777881.9788878,
+        "created_mono": 55362.828,
+        "stability": 0.8046830076039493,
+        "hits": 4,
+        "confirmed": true,
+        "label_primary": "shoe",
+        "view_bins": 1,
+        "last_seen_mono": 55368.171
+      }
+    ]
+  },
+  "_gpu_info": "NVIDIA GeForce RTX 5090, 32607 MiB"
+}
