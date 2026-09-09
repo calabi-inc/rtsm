@@ -114,9 +114,17 @@ class RtsmClient:
     # ── public API ───────────────────────────────────────────────────────
 
     def healthz(self) -> bool:
-        """True iff RTSM answers /healthz with status ok. Never raises."""
+        """True iff RTSM answers /healthz at all (HTTP 200 with a ``status``
+        field). Never raises.
+
+        Reachability, not health: since the frame-flow watchdog and the
+        semantic-index checks landed in RTSM core, /healthz reports
+        ``status: degraded`` for conditions that are NOT "RTSM is down" —
+        no phone input for 5 s, a lagging vector index. Treating those as
+        unreachable made ``lifecycle: spawn`` start a second RTSM and
+        preflight say "unreachable" while RTSM was serving /stats."""
         try:
-            return self._get("/healthz").get("status") == "ok"
+            return "status" in self._get("/healthz")
         except requests.RequestException:
             return False
 

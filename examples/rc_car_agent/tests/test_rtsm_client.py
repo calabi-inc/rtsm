@@ -59,6 +59,21 @@ def test_healthz(mock_rtsm):
     assert RtsmClient("http://127.0.0.1:1", timeout_s=0.2).healthz() is False
 
 
+def test_healthz_degraded_is_still_reachable(mock_rtsm):
+    """RTSM core's /healthz says ``degraded`` for frame-flow starvation
+    (watchdog, 5 s without phone input) and semantic-index lag. Neither
+    means RTSM is down: the agent must not respawn it or report it
+    unreachable — those conditions surface through preflight's own
+    /stats checks instead."""
+    srv, url = mock_rtsm
+    srv.canned["/healthz"] = {
+        "status": "degraded",
+        "frame_flow": {"state": "starved", "degraded": True},
+        "reasons": ["no input from client for 30.0s"],
+    }
+    assert RtsmClient(url).healthz() is True
+
+
 def test_pose_parse(mock_rtsm):
     _, url = mock_rtsm
     pose = RtsmClient(url).get_robot_pose()
