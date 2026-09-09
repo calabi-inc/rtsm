@@ -127,6 +127,14 @@ def forward_clearance_from_depth(depth_m: Optional[np.ndarray],
     return float(np.percentile(valid, 10)), frac
 
 
+def depth_valid_fraction(depth_m: Optional[np.ndarray]) -> Optional[float]:
+    """Fraction of finite depth pixels (the P2 pose-ledger field for dropped
+    frames). None when there is no depth."""
+    if depth_m is None or getattr(depth_m, "size", 0) == 0:
+        return None
+    return float(np.isfinite(depth_m).mean())
+
+
 def decode_depth(
     raw: bytes,
     fmt: Optional[str],
@@ -256,7 +264,7 @@ class WebSocketReceiver:
         latency_analytics: Optional[Any] = None,
         event_sink: Optional[callable] = None,
         event_source: str = "websocket",
-        trace_queue: Optional[IngestQueue] = None,
+        admission_queue: Optional[IngestQueue] = None,
         throttle_clock: str = "wall",
     ) -> None:
         self.ingest_q = ingest_queue
@@ -266,11 +274,13 @@ class WebSocketReceiver:
         self._throttle_clock = "sensor" if str(throttle_clock).lower() == "sensor" else "wall"
         # Frame-flow trace: called with a ReceiverEvent for every decision
         # (enqueued / dropped + reason). None (the default) skips it entirely.
-        # trace_queue: the queue whose depth the lines report (the replayer's
-        # decoder-only instance owns a dummy queue and passes the real one).
+        # admission_queue: the queue this receiver's frames are destined for.
+        # Consulted BEFORE the RGB decode (admit-before-decode) and reported as
+        # queue_depth on trace lines. The replayer's decoder-only instance owns
+        # a dummy ingest queue and passes the real one here.
         self._event_sink = event_sink
         self._event_source = str(event_source)
-        self._trace_queue = trace_queue if trace_queue is not None else ingest_queue
+        self._admission_queue = admission_queue if admission_queue is not None else ingest_queue
         self._hdr_seq: Any = None     # header ids of the message being parsed (for parse_error lines)
         self._hdr_ts: Any = None
         self._host = host
@@ -450,18 +460,20 @@ class WebSocketReceiver:
                         try:
                             pkt = self._parse_binary_message(msg["bytes"])
                             if pkt is not None:
-                                # Broadcast camera frame at full rate (every decoded frame)
-                                if self._on_camera_frame is not None:
-                                    try:
-                                        self._on_camera_frame(pkt)
-                                    except Exception as e:
-                                        logger.error(f"[websocket] on_camera_frame callback error: {e}")
                                 if self._latency_analytics:
                                     self._latency_analytics.sample_queue_depth(self.ingest_q.qsize())
                                 ok = self.ingest_q.put(pkt, block=False)
                                 if ok:
                                     frames_enqueued += 1
                                     self._trace_rx(RX_ENQUEUED, "", pkt=pkt)
+                                    # Viz camera feed (JPEG encode for non-JPEG sources)
+                                    # only for ADMITTED frames: no encode work for a
+                                    # frame the queue just refused.
+                                    if self._on_camera_frame is not None:
+                                        try:
+                                            self._on_camera_frame(pkt)
+                                        except Exception as e:
+                                            logger.error(f"[websocket] on_camera_frame callback error: {e}")
                                     self.last_enqueue_mono = time.monotonic()
                                     self._last_enq_ts_ns = pkt.time.t_sensor_ns
                                     # (throttle stamp advanced at the admit decision in
@@ -603,7 +615,8 @@ class WebSocketReceiver:
 
     def _trace_rx(self, decision: str, reason: str = "", *, pkt: Optional[FramePacket] = None,
                   seq: Any = None, ts: Any = None, is_kf: Optional[bool] = None,
-                  frame_count: Optional[int] = None, queue_depth: Optional[int] = None) -> None:
+                  frame_count: Optional[int] = None, queue_depth: Optional[int] = None,
+                  depth_valid_frac: Optional[float] = None) -> None:
         """Emit one ReceiverEvent to the event sink (no-op when unset).
 
         Returns None so drop sites can `return self._trace_rx(...)`. When a
@@ -619,8 +632,15 @@ class WebSocketReceiver:
                 if frame_count is None:
                     frame_count = self._frame_count
             if queue_depth is None:
-                q = self._trace_queue
+                q = self._admission_queue
                 queue_depth = int(q.qsize()) if q is not None else None
+            if depth_valid_frac is None and pkt is not None:
+                # One statistic on every line: the PRE-confidence-filter
+                # fraction the parser put on the packet at step 5d
+                # (pkt.depth_m itself has been NaN-masked by step 13 by now).
+                depth_valid_frac = getattr(pkt, "depth_valid_frac", None)
+                if depth_valid_frac is None:
+                    depth_valid_frac = depth_valid_fraction(pkt.depth_m)
             sink(ReceiverEvent(
                 timestamp=time.monotonic(),
                 source=self._event_source,
@@ -631,6 +651,7 @@ class WebSocketReceiver:
                 is_keyframe=is_kf,
                 frame_count=frame_count,
                 queue_depth=queue_depth,
+                depth_valid_frac=depth_valid_frac,
             ))
         except Exception:
             logger.debug("[websocket] frame-flow trace failed", exc_info=True)
@@ -769,6 +790,25 @@ class WebSocketReceiver:
             except Exception as e:
                 logger.error(f"[websocket] pose_sink callback error: {e}")
 
+        # 5d. Decode depth (+ the confidence map already sliced in step 4) for
+        # EVERY tracking-normal frame, before the throttle and the queue
+        # admission: ~150 KB, cheap, and it lets the trace / P2 pose ledger
+        # carry depth statistics for the frames that are dropped below. The
+        # 8.5 MB RGB decode waits until the frame is admitted (step 7).
+        # Consequence (like the T_wc hoist in 5b): a malformed depth payload
+        # now raises HERE -- before frame_count and the throttle stamp, and
+        # for frames the throttle would have dropped unseen -- and surfaces
+        # as a parse_error line; main raised after the frame_count increment.
+        depth_fmt = header.get("depth_format")
+        depth_w = int(header.get("depth_width", 0) or 0)
+        depth_h = int(header.get("depth_height", 0) or 0)
+        depth_scale = float(header.get("depth_scale", 0.001) or 0.001)
+        depth_m = decode_depth(
+            depth_bytes, fmt=depth_fmt, width=depth_w, height=depth_h,
+            depth_scale=depth_scale,
+        )
+        dvf = depth_valid_fraction(depth_m) if self._event_sink is not None else None
+
         self._frame_count += 1
 
         # 5. Keyframe decision
@@ -792,7 +832,26 @@ class WebSocketReceiver:
                 if self._latency_analytics:
                     self._latency_analytics.record_throttle_skip()
                 return self._trace_rx(RX_DROPPED, RX_THROTTLE, seq=hdr_seq, ts=hdr_ts,
-                                      is_kf=False, frame_count=self._frame_count)
+                                      is_kf=False, frame_count=self._frame_count,
+                                      depth_valid_frac=dvf)
+
+        # 6b. Queue admission BEFORE the RGB decode (admit-before-decode). With
+        # the legacy tail-drop queue this is the same drop that put() would
+        # have reported after the decode; deciding here means a congested
+        # pipeline no longer costs the receiver an 8.5 MB decode per frame it
+        # is about to throw away (the E1 wedge). The stream loop keeps its
+        # put(): a slot can still fill between this check and the put.
+        aq = self._admission_queue
+        if aq is not None and aq.full():
+            if self._latency_analytics:
+                # Sample the (saturated) depth too: the stream loop samples
+                # only for frames that get this far, so without this the
+                # per-second queue_depth_max could never show maxsize.
+                self._latency_analytics.sample_queue_depth(aq.qsize())
+                self._latency_analytics.record_queue_drop()
+            return self._trace_rx(RX_DROPPED, RX_QUEUE_FULL, seq=hdr_seq, ts=hdr_ts,
+                                  is_kf=is_keyframe, frame_count=self._frame_count,
+                                  depth_valid_frac=dvf)
 
         # 7. Decode RGB (capture raw JPEG for zero-copy viz forwarding)
         rgb_fmt = header.get("rgb_format", "jpeg")
@@ -801,15 +860,7 @@ class WebSocketReceiver:
         raw_jpeg = bytes(rgb_bytes) if rgb_fmt == "jpeg" else None
         rgb = decode_rgb(rgb_bytes, fmt=rgb_fmt, width=rgb_w, height=rgb_h)
 
-        # 8. Decode depth (native resolution, NaN for invalid)
-        depth_fmt = header.get("depth_format")
-        depth_w = int(header.get("depth_width", 0) or 0)
-        depth_h = int(header.get("depth_height", 0) or 0)
-        depth_scale = float(header.get("depth_scale", 0.001) or 0.001)
-        depth_m = decode_depth(
-            depth_bytes, fmt=depth_fmt, width=depth_w, height=depth_h,
-            depth_scale=depth_scale,
-        )
+        # 8. Depth was decoded in step 5d (before throttle / admission).
 
         # 8b. Forward-clearance wall guard (opt-in: io.clearance.enable;
         # sink is None otherwise): computed here at RECEIVE time
@@ -892,6 +943,7 @@ class WebSocketReceiver:
             confidence=confidence_m,
             rgb_jpeg=raw_jpeg,
             frame_epoch=self._frame_epoch,
+            depth_valid_frac=dvf,
         )
 
     # ── Server lifecycle ──

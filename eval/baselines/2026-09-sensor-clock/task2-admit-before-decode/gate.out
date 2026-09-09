@@ -1,0 +1,7 @@
+== S rc=0 ==
+== W rc=0 ==
+S (sensor): (124, 65) frames 53 sha ad6f71a5b89c8506 | meta sensor | rx {('enqueued', ''): 86, ('dropped', 'throttle'): 154} | depth_valid_frac on 240 of 240 receiver lines
+  vs sensor anchor B1: multiset IDENTICAL ad6f71a5b89c8506 ad6f71a5b89c8506 | dequeue identical (86) | receiver identical (240)
+W (wall):   (121, 66) frames 53 sha 92e0a8f1206d77da | rx {('enqueued', ''): 88, ('dropped', 'throttle'): 152}
+  vs wall anchor A (info only): multiset IDENTICAL 92e0a8f1206d77da 92e0a8f1206d77da | dequeue identical (88)
+P1T2_GATE_DONE

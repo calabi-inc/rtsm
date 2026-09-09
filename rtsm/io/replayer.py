@@ -49,6 +49,7 @@ class ReplayReceiver:
         replay_speed: float = 1.0,
         event_sink: Optional[callable] = None,
         throttle_clock: str = "wall",
+        pose_sink: Optional[callable] = None,
     ) -> None:
         self._recording_dir = os.path.abspath(recording_dir)
         self._ingest_q = ingest_queue
@@ -87,10 +88,15 @@ class ReplayReceiver:
             # is read from the REAL ingest queue, not the decoder's dummy.
             event_sink=event_sink,
             event_source="replay",
-            trace_queue=ingest_queue,
+            # The real ingest queue: the decoder's admit-before-decode check and
+            # its trace depth must see the queue the frames actually go to.
+            admission_queue=ingest_queue,
             # ingest.clock: "sensor" makes the non-KF throttle compare recorded
             # header timestamps, so the admitted set is the same at any speed.
             throttle_clock=throttle_clock,
+            # Receive-time robot pose under replay too (every tracking-normal
+            # frame), so replay-based pose-freshness checks mean something.
+            pose_sink=pose_sink,
         )
 
         self._replay_speed = max(0.1, replay_speed)  # <1 = slower, >1 = faster
@@ -118,6 +124,14 @@ class ReplayReceiver:
     # ── Core replay loop ──
 
     def _replay_loop(self) -> None:
+        # _done is set on EVERY exit (also an unexpected exception): run.py /
+        # demo.py block on wait(), and a hung replay is worse than a short one.
+        try:
+            self._replay_loop_impl()
+        finally:
+            self._done.set()
+
+    def _replay_loop_impl(self) -> None:
         # Load index
         binary_entries = self._load_index()
         text_entries = self._load_text_messages()
@@ -174,20 +188,29 @@ class ReplayReceiver:
                     bin_f.seek(entry["offset"])
                     raw = bin_f.read(entry["length"])
 
-                    pkt = self._decoder._parse_binary_message(raw)
+                    try:
+                        pkt = self._decoder._parse_binary_message(raw)
+                    except Exception as e:
+                        # Same as the live stream loop: one bad frame (the
+                        # parse_error trace line is emitted inside the
+                        # decoder, with the header ids) must not end the
+                        # replay.
+                        logger.error(f"[replay] frame parse error: {e}")
+                        continue
                     if pkt is not None:
-                        # Broadcast camera frame for every decoded packet (full frame rate PiP)
-                        if self._on_camera_frame is not None:
-                            try:
-                                self._on_camera_frame(pkt)
-                            except Exception as e:
-                                logger.error(f"[replay] on_camera_frame callback error: {e}")
                         if self._latency_analytics:
                             self._latency_analytics.sample_queue_depth(self._ingest_q.qsize())
                         ok = self._ingest_q.put(pkt, block=False)
                         if ok:
                             frames_enqueued += 1
                             self._decoder._trace_rx(RX_ENQUEUED, "", pkt=pkt)
+                            # Viz camera feed only for ADMITTED frames (no encode
+                            # work for a frame the queue refused)
+                            if self._on_camera_frame is not None:
+                                try:
+                                    self._on_camera_frame(pkt)
+                                except Exception as e:
+                                    logger.error(f"[replay] on_camera_frame callback error: {e}")
                             # (throttle stamp advanced at the decoder's admit decision)
                             if pkt.is_keyframe and self._on_keyframe is not None:
                                 try:

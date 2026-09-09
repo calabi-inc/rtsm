@@ -156,6 +156,11 @@ class FramePacket:
     # new client session; None for sources without the notion). The dispatcher's
     # SensorClock re-bases on a change so sensor time stays continuous.
     frame_epoch: Optional[int] = None
+    # Finite fraction of the decoded depth BEFORE the confidence filter, set by
+    # the websocket/replay receiver when a frame-flow trace sink is attached
+    # (else None). The enqueued trace line reads it, so every receiver line
+    # carries one statistic. Moves into IngestMeta with P1 task 3.
+    depth_valid_frac: Optional[float] = None
 
     # convenience helpers
     @property

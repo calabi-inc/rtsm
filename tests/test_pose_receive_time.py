@@ -256,7 +256,8 @@ class TestFrameEpoch:
         assert wm.get_robot_pose()["frame_epoch"] == 4
 
     def test_wm_epoch_none_when_never_provided(self):
-        """ZMQ/replay paths have no epochs — the field exists but is None."""
+        """The ZMQ path has no epochs — the field exists but is None (replay
+        carries the recording's epoch since P1 task 2 wired its pose sink)."""
         wm = WorkingMemory(cfg={})
         wm.update_robot_pose(np.array([1.0, 2.0, 3.0]), np.array([0, 0, 0, 1.0]), 100.0)
         assert wm.get_robot_pose()["frame_epoch"] is None

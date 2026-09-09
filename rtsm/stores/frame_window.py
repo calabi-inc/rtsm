@@ -1,6 +1,11 @@
 """
 FrameWindow: Efficient, TTL-based sliding window for RGB and depth frames.
 
+- Payload-agnostic: stores whatever the producer hands it per stamp. The
+  ZeroMQ subscriber stores ENCODED payloads (JPEG bytes for rgb, a
+  (PNG bytes, depth_units) tuple for depth) and decodes only after a pose is
+  admitted; tests and other producers may store decoded arrays. Decoding is
+  the caller's job.
 - Maintains sorted timestamp lists and dicts for fast lookup and eviction.
 - Accepts integer nanosecond timestamps or ROS2 Time-like objects.
 - Used for buffering recent frames for association, matching, or visualization.
@@ -81,8 +86,11 @@ class FrameWindow:
 
         Args:
             stamp: Timestamp (int nanoseconds or ROS Time-like)
-            rgb: RGB image (H, W, 3) uint8
-            depth: Depth image (H, W) float32 in meters
+            rgb: RGB payload -- opaque to the window (encoded JPEG bytes on
+                the ZeroMQ path; a decoded (H, W, 3) uint8 array elsewhere)
+            depth: depth payload -- opaque as well ((PNG bytes, depth_units)
+                on the ZeroMQ path; a decoded (H, W) float32-metres array
+                elsewhere)
             intrinsics: Optional per-frame camera intrinsics
         """
         ts = to_ns(stamp)
@@ -115,6 +123,12 @@ class FrameWindow:
         best = min(cand, key=lambda k: abs(k - ts))
         return best if abs(best - ts) <= self.slop_ns else None
 
+    def match_stamp(self, stamp: Any) -> Optional[int]:
+        """The camera (rgb) stamp assemble_pair() pairs `stamp` with: an exact
+        hit, else the nearest within slop; None when nothing qualifies."""
+        ts = to_ns(stamp)
+        return ts if ts in self.rgb else self._nearest(ts, self.rgb_ts)
+
     def assemble_pair(self, stamp: Any) -> Tuple[Any, Any, Optional["PinholeIntrinsics"]]:
         """
         Assemble RGB, depth, and intrinsics for a given timestamp.
@@ -123,10 +137,11 @@ class FrameWindow:
             stamp: Target timestamp (int nanoseconds or ROS Time-like)
 
         Returns:
-            Tuple of (rgb, depth, intrinsics). Any may be None if not found within slop.
+            Tuple of (rgb, depth, intrinsics) payloads exactly as stored (see
+            add_rgbd). Any may be None if not found within slop.
         """
         ts = to_ns(stamp)
-        rgb_ts = ts if ts in self.rgb else self._nearest(ts, self.rgb_ts)
+        rgb_ts = self.match_stamp(ts)
         depth_ts = self._nearest(ts, self.depth_ts)
         rgb = self.rgb.get(rgb_ts) if rgb_ts is not None else None
         depth = self.depth.get(depth_ts) if depth_ts is not None else None

@@ -299,6 +299,9 @@ def main():
             on_pose_corrections_batch=vis_server.handle_pose_corrections_batch if vis_server else None,
             latency_analytics=latency_analytics,
             replay_speed=args.replay_speed,
+            # Receive-time robot pose under replay too (every tracking-normal
+            # frame), so replay-based pose-freshness checks mean something.
+            pose_sink=wm.update_robot_pose,
             event_sink=event_sink,
             throttle_clock=clock_mode,
         )
