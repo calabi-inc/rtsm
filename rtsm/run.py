@@ -34,6 +34,7 @@ from rtsm.api.server import create_app, start_server, ResetComponents
 from rtsm.cfg import ConfigError, cfg_path, config_fingerprint
 from rtsm.cfg.cli import add_config_arguments, config_from_args
 from rtsm.cfg.tuning import validate_tuning
+from rtsm.evaluation.event_log import EventLogWriter
 
 import argparse
 import sys
@@ -251,6 +252,16 @@ def main():
             "only the live websocket receiver computes it (replay=%s, receiver=%s); "
             "/stats.forward_clearance will stay null", bool(args.replay), receiver_type)
 
+    # Frame-flow trace (diagnostics.*): one JSONL writer shared by the receiver
+    # thread and the pipeline thread. Disabled (the default) => every hook is a
+    # no-op and event_sink is None, so receivers skip building events entirely.
+    diag_cfg = cfg.get("diagnostics", {}) or {}
+    event_log = EventLogWriter(
+        enabled=bool(diag_cfg.get("enabled", False)),
+        configured_path=diag_cfg.get("event_log_path"),
+    )
+    event_sink = event_log.sink()
+
     # Will be set to FrameWindow or None depending on receiver
     frame_window_for_reset = None
 
@@ -271,6 +282,7 @@ def main():
             on_pose_corrections_batch=vis_server.handle_pose_corrections_batch if vis_server else None,
             latency_analytics=latency_analytics,
             replay_speed=args.replay_speed,
+            event_sink=event_sink,
         )
         replay_receiver.start()
         logger.info(f"Replay receiver started from {args.replay} (speed={args.replay_speed}x)")
@@ -305,6 +317,7 @@ def main():
             # io.clearance.enable (see clearance_enabled above); None makes
             # the receiver skip the depth statistic entirely.
             clearance_sink=wm.set_forward_clearance if clearance_enabled else None,
+            event_sink=event_sink,
             latency_analytics=latency_analytics,
         )
         ws_receiver.start()
@@ -323,6 +336,7 @@ def main():
             pose_m_per_unit=float(units_cfg.get("pose_m_per_unit", 1.0)),
             on_kf_packet=vis_server.handle_kf_packet if vis_server else None,
             on_kf_pose_update=vis_server.handle_kf_pose_update if vis_server else None,
+            event_sink=event_sink,
             latency_analytics=latency_analytics,
         )
         t = threading.Thread(target=sub.run_forever, daemon=True)
@@ -352,6 +366,7 @@ def main():
         vectors=vectors,
         ingest_q=ingest_q,
         sweep_cache=sweep_cache,
+        event_log=event_log,
         seg_analytics=seg_analytics,
         latency_analytics=latency_analytics,
     )
@@ -484,6 +499,7 @@ def main():
     finally:
         if recorder is not None:
             recorder.close()
+        event_log.close()   # no-op if the pipeline already closed it
 
 if __name__ == "__main__":
     main()

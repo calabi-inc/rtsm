@@ -23,7 +23,11 @@ from rtsm.stores.sweep_cache import SweepCache
 from rtsm.io.ingest_queue import IngestQueue
 from rtsm.core.datamodel import FramePacket
 from rtsm.core.watchdog import PipelineHeartbeat
-from rtsm.evaluation.event_log import EventLogWriter, FrameEvent, summarize_sources
+from rtsm.evaluation.event_log import (
+    DQ_DROPPED, DQ_FRAME_REJECTED, DQ_GATE_REJECTED, DQ_PROCESSED,
+    DQ_REASON_GATE_ERROR, DQ_REASON_KEYFRAME, DQ_REASON_NO_POSE, DQ_REASON_POSE_CONVERSION,
+    DequeueEvent, EventLogWriter, FrameEvent, summarize_sources,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -125,6 +129,7 @@ class Pipeline:
         sweep_cache: Optional[SweepCache] = None,
         seg_analytics: Optional[Any] = None,
         latency_analytics: Optional[Any] = None,
+        event_log: Optional[EventLogWriter] = None,
     ):
         self.cfg = cfg
         self.segmenter = segmenter
@@ -159,11 +164,17 @@ class Pipeline:
 
         # Phase 0 diagnostics: per-frame JSONL event log (off by default).
         # See rtsm/evaluation/event_log.py for path resolution rules.
-        diag_cfg = cfg.get("diagnostics", {})
-        self._event_log = EventLogWriter(
-            enabled=bool(diag_cfg.get("enabled", False)),
-            configured_path=diag_cfg.get("event_log_path"),
-        )
+        # The runner passes one writer shared with the receiver thread (the
+        # frame-flow trace); standalone construction (tests, scripts) builds
+        # its own from cfg.diagnostics.
+        if event_log is not None:
+            self._event_log = event_log
+        else:
+            diag_cfg = cfg.get("diagnostics", {})
+            self._event_log = EventLogWriter(
+                enabled=bool(diag_cfg.get("enabled", False)),
+                configured_path=diag_cfg.get("event_log_path"),
+            )
         # Always-present attrs (populated each frame when set; default to None)
         self._last_filter_diagnostics: Optional[FilterDiagnostics] = None
         self._last_scoring_trace: Optional[ScoringTrace] = None
@@ -208,9 +219,11 @@ class Pipeline:
             time.sleep(0.01)
             return
         self.heartbeat.beat_frame()
+        t_deq = time.monotonic()   # dequeue instant for the frame-flow trace (age_s)
 
         # Ingest gate: accept keyframes unconditionally, gate non-KFs with policy
         accept = True
+        gate_reason = DQ_REASON_NO_POSE    # trace label; overwritten by the gate below
         try:
             if pkt is not None and pkt.pose is not None:
                 # compute cell/vbin from pose
@@ -227,7 +240,7 @@ class Pipeline:
                 ts_ns = int(pkt.time.t_sensor_ns or 0)
                 if pkt.is_keyframe:
                     # Update gate's keyframe arrival bookkeeping (grace window) but always accept
-                    _ = self.ingest_gate.should_accept(
+                    dec = self.ingest_gate.should_accept(
                         is_keyframe=True,
                         ts_ns=ts_ns,
                         sweep_cache=self.sweep_cache,
@@ -240,6 +253,7 @@ class Pipeline:
                         now_mono=time.monotonic(),
                     )
                     accept = True
+                    gate_reason = str(getattr(dec, "reason", DQ_REASON_KEYFRAME) or DQ_REASON_KEYFRAME)
                 else:
                     dec = self.ingest_gate.should_accept(
                         is_keyframe=False,
@@ -254,17 +268,21 @@ class Pipeline:
                         now_mono=time.monotonic(),
                     )
                     accept = bool(getattr(dec, 'accept', True))
+                    gate_reason = str(getattr(dec, "reason", "") or "")
             else:
                 accept = True
+                gate_reason = DQ_REASON_NO_POSE
         except Exception as e:
             logger.warning(f"ingest gate error; proceeding: {e}")
             accept = True
+            gate_reason = DQ_REASON_GATE_ERROR
         if not accept:
             if self._latency_analytics:
                 try:
                     self._latency_analytics.record_gate_rejection()
                 except Exception:
                     logger.debug("Failed to record ingest-gate rejection", exc_info=True)
+            self._trace_dequeue(pkt, t_deq, DQ_GATE_REJECTED, gate_reason)
             return
 
         # Frame-quality gate: skip black, blank, or depth-less frames before paying
@@ -282,9 +300,12 @@ class Pipeline:
                 except Exception:
                     pass
             self.frame_gate.maybe_log(fq)
+            self._trace_dequeue(pkt, t_deq, DQ_FRAME_REJECTED, str(getattr(fq, "reason", "") or ""))
             return
+        self._trace_dequeue(pkt, t_deq, DQ_PROCESSED, gate_reason)
 
         t_step_start = time.perf_counter()
+        t_step_start_mono = time.monotonic()   # same clock as the other trace kinds
 
         # 1) segmentation -> masks
         # Ingest frames are BGR by contract (io/websocket.decode_rgb); PIL
@@ -569,7 +590,7 @@ class Pipeline:
                     except Exception:
                         n_conf = 0
                 self._event_log.write(FrameEvent(
-                    timestamp=t_step_start,
+                    timestamp=t_step_start_mono,
                     frame_seq=int(pkt.time.seq or 0) if pkt is not None else 0,
                     is_keyframe=is_kf,
                     n_masks_raw=n_masks,
@@ -578,6 +599,8 @@ class Pipeline:
                     n_matched=m,
                     n_created=c,
                     n_objects_confirmed=n_conf,
+                    t_sensor_ns=(int(pkt.time.t_sensor_ns)
+                                 if pkt is not None and pkt.time.t_sensor_ns is not None else None),
                     timing_ms={
                         "segmentation": (t_seg_end - t_seg_start) * 1000.0,
                         "heuristics": (t_heur_end - t_heur_start) * 1000.0,
@@ -592,6 +615,26 @@ class Pipeline:
                 logger.debug("event log write failed", exc_info=True)
 
     # -------- internals --------
+    def _trace_dequeue(self, pkt: Optional[FramePacket], t_deq: float, outcome: str, reason: str) -> None:
+        """Frame-flow trace: one 'dequeue' line per dequeued frame (no-op when
+        diagnostics are off). Never raises into the processing path."""
+        if not self._event_log.enabled or pkt is None:
+            return
+        try:
+            t_mono = getattr(pkt.time, "t_mono_s", None)
+            self._event_log.write(DequeueEvent(
+                timestamp=t_deq,
+                frame_seq=(int(pkt.time.seq) if pkt.time.seq is not None else None),
+                t_sensor_ns=(int(pkt.time.t_sensor_ns) if pkt.time.t_sensor_ns is not None else None),
+                is_keyframe=bool(pkt.is_keyframe),
+                queue_wait_s=(round(t_deq - float(t_mono), 6) if t_mono is not None else -1.0),
+                queue_depth=(int(self.ingest_q.qsize()) if self.ingest_q is not None else 0),
+                outcome=outcome,
+                reason=reason,
+            ))
+        except Exception:
+            logger.debug("frame-flow trace (dequeue) failed", exc_info=True)
+
     def _get_snapshot_via_queue(self) -> Tuple[Optional[Snapshot], Optional[FramePacket]]:
         if self.ingest_q is None:
             return None, None
@@ -642,6 +685,9 @@ class Pipeline:
                         f"[pipeline] dropping frame: pose present but conversion "
                         f"failed (#{n}): {e}"
                     )
+                # Frame-flow trace: this frame WAS dequeued; record it so the
+                # receiver/dequeue sequences stay in step.
+                self._trace_dequeue(pkt, time.monotonic(), DQ_DROPPED, DQ_REASON_POSE_CONVERSION)
                 return None, None
         return Snapshot(rgb=rgb, depth_m=depth_m, intrinsics=intr, pose_cam_T_world=T), pkt
 
