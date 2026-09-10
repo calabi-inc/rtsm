@@ -1972,7 +1972,8 @@ function updateChartDetails() {
   if (tpDetail && la) {
     const throttle = lastB?.throttle_skips ?? 0
     const gate = lastB?.gate_rejections ?? 0
-    tpDetail.textContent = `throttle: ${throttle}/s | gate: ${gate}/s`
+    const frame = lastB?.frame_rejections ?? 0   // frame-quality gate (gates.*)
+    tpDetail.textContent = `throttle: ${throttle}/s | gate: ${gate}/s | frame: ${frame}/s`
   }
 
   const ltDetail = document.getElementById('analytics-latency-detail')
