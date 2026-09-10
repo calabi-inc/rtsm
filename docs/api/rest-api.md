@@ -188,7 +188,17 @@ curl "http://localhost:8002/search/semantic?query=coffee+mug&top_k=3&include_sna
   "robot_pose": {
     "xyz": [0.12, 0.05, 0.31],
     "quaternion_xyzw": [0.0, 0.0, 0.0, 1.0],
-    "timestamp": 1712345678.5
+    "timestamp": 1712345678.5,
+    "frame_epoch": 0,
+    "sensor_ts_ns": 683333172055083,
+    "pose_clock": "sender",
+    "age_s": 0.041,
+    "stale": false,
+    "stale_after_s": 0.5,
+    "writes_accepted": 812,
+    "sensor_ts_regressions": 0,
+    "rejected_writes": 0,
+    "rejected_by_reason": {"older_epoch": 0, "epochless_into_epoch": 0}
   },
   "results": [
     {
@@ -204,7 +214,7 @@ curl "http://localhost:8002/search/semantic?query=coffee+mug&top_k=3&include_sna
 }
 ```
 
-> **`robot_pose`**: All search responses include the robot's latest pose so agents can compute heading and distance to target objects in one atomic query. RTSM stores but does not compute pose — it's a passthrough from the sensor.
+> **`robot_pose`**: All search responses include the robot's latest pose so agents can compute heading and distance to target objects in one atomic query. RTSM stores but does not compute pose — it's a passthrough from the sensor, written **at receive time by the receiver** (websocket, replay, ZeroMQ) for every tracking-normal frame at input rate; the pipeline does not write it. The store is a latest-value mailbox keyed on `(frame_epoch, sensor_ts_ns)`: `frame_epoch` bumps when the sender starts a new streaming session (websocket: a new `session_id`; ZeroMQ: the tracking stamp jumping back by more than 5 s), and poses across a bump do not share a world frame. `sensor_ts_ns` is the sender's monotonic sensor stamp; `timestamp` is a wall clock for display, the sender's (`pose_clock: "sender"`) or this server's (`"server"`; `null` before any tag is known), and is not guaranteed monotone. `age_s` is the time since the last accepted write on the server's clock and `stale` is `age_s > robot_pose.stale_after_s` — **diagnostic only**: an agent must measure freshness on its own clock (the RC-car agent uses `stale_abort_s`) and treat a non-advancing `timestamp` as a frozen feed. `sensor_ts_regressions` counts accepted writes whose stamp went backwards within one epoch (a looped replay, a bag loop, a stepped sender clock — the pose follows the sender); `rejected_writes` counts writes from a previous epoch or from an epoch-less writer, which only a second writer can produce.
 
 **Agent workflow**: Query RTSM for candidates with snapshots, then pass crops to Gemini/GPT-4V for visual verification:
 

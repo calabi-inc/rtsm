@@ -116,6 +116,7 @@ def run_config(config_name: str, replay_dir: str) -> dict:
         require_tracking_normal=bool(ws_cfg.get("require_tracking_normal", True)),
         keyframe_every_n=int(ws_cfg.get("keyframe_every_n", 30)),
         nonkf_min_interval_s=float(ws_cfg.get("nonkf_min_interval_s", 0.5)),
+        pose_sink=wm.update_robot_pose,   # receive-time pose (the pipeline no longer writes it)
         confidence_threshold=int(ws_cfg.get("confidence_threshold", 1)),
         apply_camera_flip=bool(vis_cfg.get("apply_camera_flip", False)),
         throttle_clock=clock_mode,

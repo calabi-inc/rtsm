@@ -160,7 +160,7 @@ class TestReplayerAdmission:
         q = IngestQueue(maxsize=1)                       # room for exactly one frame; nobody drains it
         rr = ReplayReceiver(recording_dir=str(rec_dir), ingest_queue=q, keyframe_every_n=30,
                             nonkf_min_interval_s=0.0, replay_speed=10.0,
-                            on_camera_frame=broadcasts.append, pose_sink=lambda *a: poses.append(a),
+                            on_camera_frame=broadcasts.append, pose_sink=lambda *a, **kw: poses.append((a, kw)),
                             event_sink=events.append)
         rr.start()
         assert rr.wait(10.0)
@@ -169,7 +169,9 @@ class TestReplayerAdmission:
         assert len(broadcasts) == 1                      # viz saw the admitted frame only
         assert count_rgb_decodes["n"] == 1               # the two refused frames were never RGB-decoded
         assert len(poses) == 3                           # pose sink fired for every tracking-normal frame
-        assert all(len(p) == 4 for p in poses)           # (t_wc, q_xyzw, unix_ts, frame_epoch)
+        assert all(len(a) == 4 for a, _ in poses)        # (t_wc, q_xyzw, unix_ts, frame_epoch)
+        assert [kw["sensor_ts_ns"] for _, kw in poses] == [1000, 2000, 3000]   # + the mailbox key (P1 task 4)
+        assert all(kw["pose_clock"] == "sender" for _, kw in poses)
 
     def test_bad_depth_frame_does_not_hang_the_replayer(self, tmp_path, monkeypatch):
         """The depth decode now runs before the throttle / admission for every

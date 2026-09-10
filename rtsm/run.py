@@ -19,7 +19,7 @@ except ImportError as e:
 
 # ── Core imports (always available) ──
 from rtsm.models.segmentation import get_segmenter
-from rtsm.stores.working_memory import WorkingMemory
+from rtsm.stores.working_memory import WorkingMemory, resolve_pose_stale_after_s
 from rtsm.stores.proximity_index import ProximityIndex, GridSpec
 from rtsm.core.association import Associator
 from rtsm.core.ingest_gate import IngestGate
@@ -122,6 +122,7 @@ def main():
     # for live receivers (its producer-paced put would block the receive loop).
     try:
         lane_cfg = LaneConfig.from_cfg(cfg, replay=bool(args.replay))
+        resolve_pose_stale_after_s(cfg)     # robot_pose.stale_after_s: finite, > 0
     except ValueError as exc:
         parser.error(str(exc))
     logger.info("Ingest policy: %s (ingest.policy=%s)", lane_cfg.policy, lane_cfg.configured_policy)
@@ -375,6 +376,9 @@ def main():
             pose_m_per_unit=float(units_cfg.get("pose_m_per_unit", 1.0)),
             on_kf_packet=vis_server.handle_kf_packet if vis_server else None,
             on_kf_pose_update=vis_server.handle_kf_pose_update if vis_server else None,
+            # Receive-time robot pose at input rate (pose mailbox); the
+            # dequeue-time write alone left /stats.robot_pose at ~1 Hz on ZMQ.
+            pose_sink=wm.update_robot_pose,
             event_sink=event_sink,
             throttle_clock=clock_mode,
             latency_analytics=latency_analytics,

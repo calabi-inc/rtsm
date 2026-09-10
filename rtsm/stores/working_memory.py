@@ -20,6 +20,32 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+
+POSE_STALE_AFTER_S_DEFAULT = 0.5
+
+
+def resolve_pose_stale_after_s(cfg: Any) -> float:
+    """``robot_pose.stale_after_s`` -> float seconds (finite, > 0; default
+    0.5 = 2.5 nominal periods at a 5 Hz phone stream, so the DIAGNOSTIC flag
+    does not flicker on ordinary WiFi jitter yet flips within half a second of
+    the stream stopping). Raises ValueError so the runners can fail through
+    parser.error before any model loads."""
+    rp = (cfg.get("robot_pose") or {}) if isinstance(cfg, dict) else {}
+    if not isinstance(rp, dict):
+        raise ValueError(f"robot_pose must be a mapping of settings (robot_pose: {{stale_after_s: 0.5}}); got {rp!r}")
+    raw = rp.get("stale_after_s", POSE_STALE_AFTER_S_DEFAULT)
+    if raw is None:
+        return POSE_STALE_AFTER_S_DEFAULT
+    if isinstance(raw, bool):
+        raise ValueError(f"robot_pose.stale_after_s must be a number of seconds > 0; got {raw!r}")
+    try:
+        v = float(raw)
+    except (TypeError, ValueError):
+        raise ValueError(f"robot_pose.stale_after_s must be a number of seconds > 0; got {raw!r}")
+    if not (v > 0) or v != v or v == float("inf"):
+        raise ValueError(f"robot_pose.stale_after_s must be a finite number > 0; got {raw!r}")
+    return v
+
 # --- type aliases ---
 Vec3 = np.ndarray  # shape (3,), float32
 Emb = np.ndarray   # shape (D,), float32 L2-normalized unless stated
@@ -173,11 +199,25 @@ class WorkingMemory:
 
         self._map: Dict[str, ObjectState] = {}
         self._lock = threading.RLock()
-        # Latest robot pose — passthrough from sensor (receive-time in live
-        # websocket mode; per processed frame on ZMQ/replay paths).
+        # Latest robot pose: a MAILBOX (Gate 4.5 plan, P1 task 4). Passthrough
+        # from the sensor, written at receive time by the ONE receiver in this
+        # process (websocket / replay / zeromq); the pipeline does not write
+        # it. (frame_epoch, sensor_ts_ns) is a regression detector, not a
+        # gate -- see update_robot_pose.
         self._latest_pose: Optional[Dict[str, Any]] = None
-        # Process-monotonic arrival time of the stored pose (guard window).
+        # Process-monotonic arrival time of the stored pose (-> age_s).
         self._latest_pose_arrival_mono: float = 0.0
+        self._pose_writes_accepted: int = 0
+        self._pose_rejects: Dict[str, int] = {self.POSE_REJECT_OLDER_EPOCH: 0, self.POSE_REJECT_EPOCHLESS: 0}
+        self._pose_consecutive_rejects: int = 0
+        self._pose_regressions: int = 0             # accepted writes whose stamp went backwards in-epoch
+        self._pose_last_regression_warn_mono: float = float("-inf")
+        # robot_pose.stale_after_s: DIAGNOSTIC threshold for the payload's
+        # `stale` flag (age_s above it). The RC-car agent's stale_abort_s is
+        # the safety bound and lives in the agent; RTSM never acts on this.
+        # Validated (finite, > 0); the runners call the same resolver before
+        # any model loads so a typo fails through parser.error.
+        self._pose_stale_after_s: float = resolve_pose_stale_after_s(cfg)
         # Latest forward-clearance summary from the depth stream (meters of
         # open space ahead of the camera). Written by the websocket receiver's
         # clearance_sink at receive time (rtsm/io/websocket.py step 8b), and
@@ -828,11 +868,12 @@ class WorkingMemory:
 
     # ---------- utilities ----------
 
-    # How long (by this process's monotonic clock) a stored pose out-ranks
-    # older-timestamped updates. Long enough to block the slow pipeline
-    # write (~0.5-1 s behind), short enough that a sender clock stepping
-    # backward (new device, NTP) recovers instead of freezing the pose.
-    _POSE_GUARD_WINDOW_S = 2.0
+    # Robot-pose mailbox rejection reasons (keys of robot_pose.rejected_by_reason).
+    # Both can only come from a SECOND writer: every shipped receiver writes at
+    # receive time with its own epoch, and the pipeline no longer writes at all.
+    POSE_REJECT_OLDER_EPOCH = "older_epoch"           # a frame from a previous streaming session
+    POSE_REJECT_EPOCHLESS = "epochless_into_epoch"    # writer knows no epoch, stored pose has one
+    _POSE_REGRESSION_WARN_EVERY_S = 60.0
 
     def update_robot_pose(
         self,
@@ -840,53 +881,130 @@ class WorkingMemory:
         q_wc_xyzw: np.ndarray,
         timestamp: float,
         frame_epoch: Optional[int] = None,
-    ) -> None:
-        """Store latest robot pose (passthrough from sensor).
+        *,
+        sensor_ts_ns: Optional[int] = None,
+        pose_clock: Optional[str] = None,
+    ) -> bool:
+        """Latest-value MAILBOX for the robot pose (passthrough from the sensor;
+        RTSM never computes or filters pose). Returns True when accepted.
 
-        RTSM does NOT compute or filter pose — it stores what the sensor provides.
-        This allows agents to query robot position + object positions atomically.
+        ONE writer per process: the receiver, at receive time, for every
+        tracking-normal frame (websocket / replay / zeromq). The pipeline does
+        not write the pose (P1 task 4 removed its dequeue-time write, which
+        was the only reason a compare-and-set ever had to arbitrate).
 
-        May be called from two writers: the receiver at frame-receive time
-        (fresh, input-rate) and the pipeline after processing (older frames).
-        Guarded compare-and-set under the WM lock: an update carrying a
-        strictly older timestamp is ignored while the stored pose is fresh
-        (received less than _POSE_GUARD_WINDOW_S ago), so a slow pipeline
-        write cannot overwrite a fresher receive-time pose — but a sender
-        clock discontinuity self-heals within the window rather than
-        rejecting all future updates. Timestamps must come from the same
-        clock per session (FramePacket wall time).
+        The key ``(frame_epoch, sensor_ts_ns)`` is therefore a REGRESSION
+        DETECTOR, not a gate: a same-epoch write whose stamp went backwards is
+        ACCEPTED (the sender says this is the pose now -- a looped replay, a
+        bag loop, a restarted bridge, a stepped clock) and counted in
+        ``sensor_ts_regressions`` with a WARNING at most once a minute.
+        ``timestamp`` (the wall value shown to agents) is the fallback key
+        when a side has no sensor stamp; a stamp <= 0 counts as none.
 
-        frame_epoch: opaque counter from the receiver that bumps when the
-        sender starts a new streaming session (world origin may have moved
-        — poses across a bump must not be assumed to share a world frame).
-        None means "this writer doesn't know the epoch" (pipeline writer,
-        ZMQ/replay) and PRESERVES the stored value rather than clearing it.
+        Two writes ARE rejected, both impossible from the single shipped
+        writer and kept as a safety net for embedders that add one:
+          writer epoch < stored epoch            -> older_epoch
+          writer epoch None, stored epoch known  -> epochless_into_epoch
+        A writer epoch above the stored one (new streaming session) and a
+        first epoch-bearing write into an epoch-less mailbox are accepted.
+
+        ``pose_clock`` tags where ``timestamp`` came from: ``sender`` (the
+        sender's own wall clock) or ``server`` (this process's time.time());
+        None keeps the stored tag.
         """
         ts = float(timestamp)
+        s_ns = int(sensor_ts_ns) if (sensor_ts_ns is not None and int(sensor_ts_ns) > 0) else None
+        epoch = int(frame_epoch) if frame_epoch is not None else None    # numpy ints -> JSON-safe ints
         now_mono = time.monotonic()
         with self._lock:
             lp = self._latest_pose
-            if (
-                lp is not None
-                and ts < lp["timestamp"]
-                and (now_mono - self._latest_pose_arrival_mono) < self._POSE_GUARD_WINDOW_S
-            ):
-                return
-            if frame_epoch is None and lp is not None:
-                frame_epoch = lp.get("frame_epoch")
+            reason = self._pose_reject_reason(lp, epoch)
+            if reason is not None:
+                self._pose_rejects[reason] += 1
+                self._pose_consecutive_rejects += 1
+                n = self._pose_consecutive_rejects
+                if n in (1, 100, 1000, 10000) or (n > 10000 and n % 100000 == 0):
+                    logger.warning(
+                        "[WM] robot_pose: write rejected (%s; %d consecutive): writer epoch=%s vs stored epoch=%s. "
+                        "Only a second writer can produce this -- every shipped receiver writes at receive "
+                        "time with its own epoch.", reason, n, epoch, lp.get("frame_epoch"),
+                    )
+                return False
+            self._pose_consecutive_rejects = 0
+            if lp is not None and self._pose_is_regression(lp, epoch, ts, s_ns):
+                self._pose_regressions += 1
+                if now_mono - self._pose_last_regression_warn_mono >= self._POSE_REGRESSION_WARN_EVERY_S:
+                    self._pose_last_regression_warn_mono = now_mono
+                    logger.warning(
+                        "[WM] robot_pose: pose key went backwards within epoch %s (sensor stamp %s -> %s, "
+                        "timestamp %.3f -> %.3f; %d regression(s) so far): the sender restarted or stepped its "
+                        "clock (looped replay, bag loop, bridge restart). The pose follows the sender; a new "
+                        "session would bump frame_epoch instead.",
+                        epoch, lp.get("sensor_ts_ns"), s_ns, float(lp["timestamp"]), ts, self._pose_regressions,
+                    )
+            self._pose_writes_accepted += 1
+            clock = pose_clock if pose_clock is not None else (lp.get("pose_clock") if lp else None)
             self._latest_pose = {
                 "xyz": t_wc.tolist() if hasattr(t_wc, 'tolist') else list(t_wc),
                 "quaternion_xyzw": q_wc_xyzw.tolist() if hasattr(q_wc_xyzw, 'tolist') else list(q_wc_xyzw),
                 "timestamp": ts,
-                "frame_epoch": frame_epoch,
+                "frame_epoch": epoch,
+                "sensor_ts_ns": s_ns,
+                "pose_clock": clock,
             }
             self._latest_pose_arrival_mono = now_mono
+            return True
+
+    @classmethod
+    def _pose_reject_reason(cls, lp: Optional[Dict[str, Any]], epoch: Optional[int]) -> Optional[str]:
+        """Second-writer safety net; None = accept."""
+        if lp is None:
+            return None
+        lp_epoch = lp.get("frame_epoch")
+        if epoch is None:
+            return cls.POSE_REJECT_EPOCHLESS if lp_epoch is not None else None
+        if lp_epoch is not None and epoch < lp_epoch:
+            return cls.POSE_REJECT_OLDER_EPOCH
+        return None
+
+    @staticmethod
+    def _pose_is_regression(lp: Dict[str, Any], epoch: Optional[int], ts: float, s_ns: Optional[int]) -> bool:
+        """Same epoch (or both epoch-less) and the ordering key went backwards."""
+        lp_epoch = lp.get("frame_epoch")
+        if epoch != lp_epoch:
+            return False            # a new session (epoch above) or the first epoch: a restart, not a regression
+        lp_s = lp.get("sensor_ts_ns")
+        if s_ns is not None and lp_s is not None:
+            return s_ns < int(lp_s)
+        return ts < float(lp["timestamp"])
+
+    def _robot_pose_payload(self) -> Optional[Dict[str, Any]]:
+        """The stored pose plus read-time diagnostics: age_s on this process's
+        clock since the last accepted write (never wall-now minus a sender
+        stamp), the stale flag, and the mailbox counters. Built under the WM
+        lock (no torn read); a fresh dict each call (callers may mutate)."""
+        with self._lock:
+            lp = self._latest_pose
+            if lp is None:
+                return None
+            age = max(0.0, time.monotonic() - self._latest_pose_arrival_mono)
+            out = dict(lp)
+            out["xyz"] = list(lp["xyz"])
+            out["quaternion_xyzw"] = list(lp["quaternion_xyzw"])
+            out["age_s"] = round(age, 3)
+            out["stale"] = bool(age > self._pose_stale_after_s)
+            out["stale_after_s"] = self._pose_stale_after_s
+            out["writes_accepted"] = int(self._pose_writes_accepted)
+            out["sensor_ts_regressions"] = int(self._pose_regressions)
+            out["rejected_writes"] = int(sum(self._pose_rejects.values()))
+            out["rejected_by_reason"] = dict(self._pose_rejects)
+            return out
 
     def get_robot_pose(self) -> Optional[Dict[str, Any]]:
-        """Get the latest robot pose, or None if no frame has arrived yet
-        (live websocket: first *received* frame; ZMQ/replay: first
-        *processed* frame)."""
-        return self._latest_pose
+        """The latest robot pose with diagnostics (see _robot_pose_payload), or
+        None if no pose has arrived yet. Written at receive time by every
+        receiver (P1 tasks 2 and 4); the pipeline does not write it."""
+        return self._robot_pose_payload()
 
     def set_forward_clearance(self, clearance_m: float, valid_frac: float,
                               timestamp: float) -> None:
@@ -953,7 +1071,7 @@ class WorkingMemory:
                 "avg_hits": avg_hits,
                 "upserts_total": int(self._upsert_count_total),
                 "ltm_never_upserted": never_upserted,
-                "robot_pose": self._latest_pose,
+                "robot_pose": self._robot_pose_payload(),
                 "detections_by_label": {
                     k: dict(v) for k, v in self._label_detections.items()
                 },
@@ -997,11 +1115,17 @@ class WorkingMemory:
             if self.index is not None:
                 self.index.clear()
 
-            # Reset stored robot pose so the monotonic-timestamp guard in
-            # update_robot_pose() can't reject re-fed older timestamps
-            # (e.g. replaying a recording after a /reset).
+            # Reset the robot-pose mailbox so re-fed older stamps (replaying a
+            # recording after a /reset, a rig restart) are accepted again, and
+            # zero its counters.
             self._latest_pose = None
             self._latest_pose_arrival_mono = 0.0
+            self._pose_writes_accepted = 0
+            for k in self._pose_rejects:
+                self._pose_rejects[k] = 0
+            self._pose_consecutive_rejects = 0
+            self._pose_regressions = 0
+            self._pose_last_regression_warn_mono = float("-inf")
             # Drop the last clearance sample too (stale after a reset).
             self._latest_clearance = None
 

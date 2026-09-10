@@ -137,6 +137,18 @@ ingest:
   max_frame_age_s: 2.0            # latest: non-keyframe older than this at dequeue is discarded (null disables)
   lossless_depth: 32              # lossless: FIFO depth before the producer waits (~8.5 MB per decoded frame)
 
+# -------------------- Robot pose (mailbox) --------------------
+robot_pose:
+  # DIAGNOSTIC ONLY. /stats.robot_pose.stale = age_s > stale_after_s, where
+  # age_s is the time since the last ACCEPTED pose write on this process's
+  # clock (never wall-now minus a sender stamp). The RC-car agent's
+  # stale_abort_s (2.5 s) is the safety bound and lives in the agent; RTSM
+  # never acts on this flag. 0.5 = 2.5 nominal periods of a 5 Hz phone
+  # stream (session1 receive gaps: p99 0.27 s, max 0.35 s; 0.3 would flicker);
+  # flips within half a second of the stream stopping. Under replay it is
+  # true by definition once the recording ends. Finite, > 0.
+  stale_after_s: 0.5
+
 units:
   # Convert incoming values to meters at ingestion
   # If your dataset publishes millimeters, set to 0.001

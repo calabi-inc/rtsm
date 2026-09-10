@@ -155,7 +155,13 @@ RTSM → {
   "robot_pose": {
     "xyz": [0.12, 0.05, 0.31],
     "quaternion_xyzw": [0.0, 0.0, 0.0, 1.0],
-    "timestamp": 1712345678.5
+    "timestamp": 1712345678.5,
+    "frame_epoch": 0,
+    "sensor_ts_ns": 683333172055083,
+    "pose_clock": "sender",
+    "age_s": 0.041,
+    "stale": false
+    /* diagnostic counters omitted -- see the REST API reference for the full payload */
   },
   "results": [
     {

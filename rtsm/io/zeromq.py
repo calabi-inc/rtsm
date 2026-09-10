@@ -55,6 +55,14 @@ class ZeroMQSubscriber:
         latency_analytics: Optional[Any] = None,
         event_sink: Optional[Callable[[Any], None]] = None,
         throttle_clock: str = "wall",
+        # Receive-time robot-pose passthrough (WorkingMemory.update_robot_pose):
+        # called for EVERY parsed tracking_pose at input rate (NOT for
+        # kf_pose: a keyframe carries the node's pose, 50-300 ms behind the
+        # tracking stream), as pose_sink(t_wc, q_xyzw, time.time(),
+        # frame_epoch, sensor_ts_ns=stamp, pose_clock="server"). The epoch is
+        # receiver-minted: 0, +1 whenever the tracking stamp goes backwards by
+        # more than POSE_EPOCH_REBASE_S (a bag loop, a bridge restart).
+        pose_sink: Optional[Callable[..., Any]] = None,
         # FrameWindow now holds ENCODED frames (JPEG / PNG bytes, ~0.35 MB per
         # 640x480 frame). Its old defaults (30 s, 2000 items) held ~1.9 GB of
         # decoded frames. The window must cover the LATENCY OF A kf_pose
@@ -151,6 +159,14 @@ class ZeroMQSubscriber:
         self._last_nonkf_admit_sensor_ns: Optional[int] = None
         # Frame-flow trace sink (ReceiverEvent per decision); None = off.
         self._event_sink = event_sink
+        self._pose_sink = pose_sink
+        self._kf_stamps_inherited: int = 0   # kf_pose messages that arrived without a stamp (counted in _handle_kf_pose)
+        self._last_enq_cam_ts: Optional[int] = None   # camera stamp the last admitted frame was paired with
+        # Receiver-minted session epoch (ZeroMQ has no hello/session_id): a
+        # tracking stamp that jumps back by more than POSE_EPOCH_REBASE_S is a
+        # restarted source -> new epoch on the pose mailbox, on every
+        # FramePacket (SensorClock re-bases on it) and in liveness().
+        self._frame_epoch: int = 0
         self._nonkf_min_interval_s: float = 0.5  # Max ~2 non-KF per second
 
         # Frame-flow liveness stamps (read by the watchdog). The subscriber
@@ -228,22 +244,57 @@ class ZeroMQSubscriber:
             logger.error(f"[zeromq] camera.rgbd: parse error: {e}")
 
     def _parse_rtabmap_pose(self, json_data: dict) -> tuple[int, np.ndarray, np.ndarray]:
+        """Parse an RTABMap pose (see _parse_rtabmap_pose_ex); 3-tuple form."""
+        ts_ns, t_wc, q_xyzw, _stamped = self._parse_rtabmap_pose_ex(json_data)
+        return ts_ns, t_wc, q_xyzw
+
+    def _parse_rtabmap_pose_ex(self, json_data: dict) -> tuple[int, np.ndarray, np.ndarray, bool]:
         """
         Parse RTABMap pose from JSON.
 
         RTABMap format: T_wc = [x, y, z, roll, pitch, yaw] (Euler angles in radians)
 
         Returns:
-            Tuple of (ts_ns, t_wc, q_xyzw)
+            Tuple of (ts_ns, t_wc, q_xyzw, stamped). ``stamped`` is False when
+            the message carried no stamp and ts_ns was INHERITED.
         """
-        # Get timestamp - RTABMap uses stamp_ms for tracking_pose, kf_id for kf_pose
+        # Timestamp: tracking_pose carries stamp_ms; kf_pose carries kf_id only
+        # (bridge-side gap). A stamp-less message inherits the last tracking
+        # stamp (the keyframe IS the latest tracked pose), else the newest
+        # camera frame in the window, and only as a last resort this
+        # process's clock -- which used to be the FIRST resort and paired the
+        # keyframe with whatever frame was newest while breaking the sensor
+        # ordering the pose mailbox relies on.
+        stamped = True
         if "stamp_ms" in json_data:
             ts_ns = int(json_data["stamp_ms"] * 1_000_000)  # ms to ns
         elif "ts_ns" in json_data:
             ts_ns = int(json_data["ts_ns"])
         else:
-            # Use current time as fallback
-            ts_ns = int(time.time_ns())
+            stamped = False
+            wm = int(getattr(self.fw, "watermark", 0) or 0)
+            if self._last_pose_ts_ns is not None:
+                ts_ns = int(self._last_pose_ts_ns)
+                # That tracking pose may already have enqueued THIS image (it
+                # passed the throttle): if a NEWER camera frame exists, pair
+                # the keyframe with it so one image is not processed twice.
+                # (Pairing is by nearest camera stamp, so compare on the
+                # camera stamp the tracking pose actually used.) If the
+                # enqueued image is still the newest, the keyframe re-processes
+                # it -- one duplicate GPU pass per stamp-less keyframe that
+                # follows a throttle-admitted tracking pose; the bridge-side
+                # stamp_ms on kf_pose removes it.
+                match = getattr(self.fw, "match_stamp", None)
+                cam = match(ts_ns) if match is not None else None
+                if cam is not None and cam == self._last_enq_cam_ts and wm > cam:
+                    ts_ns = wm
+            elif wm:
+                ts_ns = wm
+            else:
+                # Nothing on the sensor clock is known yet; this value cannot
+                # pair with any frame (the window is empty) and never reaches
+                # the pose mailbox (kf_pose does not write the pose).
+                ts_ns = int(time.time_ns())
 
         # Parse pose [x, y, z, roll, pitch, yaw]
         T_wc = json_data["T_wc"]
@@ -264,7 +315,7 @@ class ZeroMQSubscriber:
         # Convert Euler to quaternion
         q_xyzw = euler_to_quat_xyzw(roll, pitch, yaw)
 
-        return ts_ns, t_wc, q_xyzw
+        return ts_ns, t_wc, q_xyzw, stamped
 
     def _handle_tracking_pose(self, parts: List[bytes]) -> None:
         """
@@ -281,12 +332,28 @@ class ZeroMQSubscriber:
 
         try:
             json_data = json.loads(parts[1].decode("utf-8"))
-            ts_ns, t_wc, q_xyzw = self._parse_rtabmap_pose(json_data)
+            ts_ns, t_wc, q_xyzw, _stamped = self._parse_rtabmap_pose_ex(json_data)
+
+            # Restarted source? (bag loop, bridge restart): stamp went back by
+            # more than POSE_EPOCH_REBASE_S -> new receiver-minted epoch. A
+            # non-positive stamp is "no stamp" (as for SensorClock and the
+            # mailbox) and neither bumps the epoch nor becomes the reference.
+            last = self._last_pose_ts_ns
+            if ts_ns > 0:
+                if last is not None and ts_ns < int(last) - int(self.POSE_EPOCH_REBASE_S * 1e9):
+                    self._frame_epoch += 1
+                    logger.warning(
+                        "[zeromq] tracking stamp jumped back %.1f s (%d -> %d): new frame_epoch %d",
+                        (int(last) - ts_ns) / 1e9, int(last), ts_ns, self._frame_epoch,
+                    )
+                self._last_pose_ts_ns = ts_ns
 
             # Store latest pose
-            self._last_pose_ts_ns = ts_ns
             self._last_pose_t_wc = t_wc
             self._last_pose_q_xyzw = q_xyzw
+
+            # Receive-time robot pose (input rate, independent of admission)
+            self._emit_pose(t_wc, q_xyzw, ts_ns)
 
             # Try to assemble non-keyframe
             self._try_enqueue_frame(ts_ns, t_wc, q_xyzw, is_keyframe=False)
@@ -311,14 +378,22 @@ class ZeroMQSubscriber:
 
         try:
             json_data = json.loads(parts[1].decode("utf-8"))
-            ts_ns, t_wc, q_xyzw = self._parse_rtabmap_pose(json_data)
+            ts_ns, t_wc, q_xyzw, stamped = self._parse_rtabmap_pose_ex(json_data)
 
             # kf_id for logging/debugging
             kf_id = json_data.get("kf_id", -1)
+            if not stamped:
+                self._kf_stamps_inherited += 1
+
+            # No pose-mailbox write for keyframes: the node pose lags the
+            # tracking stream (50-300 ms, > 1 s in loop closure) and with an
+            # inherited stamp it would REPLACE the fresher tracking pose at
+            # the same key -- a periodic backwards blip an agent could read
+            # as a discontinuity. tracking_pose already writes at input rate.
 
             # Enqueue as keyframe
             self._try_enqueue_frame(ts_ns, t_wc, q_xyzw, is_keyframe=True)
-            logger.debug(f"[zmq] kf_pose: kf_id={kf_id}")
+            logger.debug(f"[zmq] kf_pose: kf_id={kf_id}{'' if stamped else ' (stamp inherited)'}")
 
         except Exception as e:
             logger.error(f"[zeromq] kf_pose: parse error: {e}")
@@ -579,6 +654,7 @@ class ZeroMQSubscriber:
             pose=pose,
             intr=intr,
             is_keyframe=is_keyframe,
+            frame_epoch=self._frame_epoch,
             ingest=IngestMeta(keyframe_origin=kf_origin, rx_seq=rx_seq),
         )
 
@@ -589,6 +665,7 @@ class ZeroMQSubscriber:
         if ok:
             self.last_enqueue_mono = time.monotonic()
             self._last_enq_ts_ns = ts_ns
+            self._last_enq_cam_ts = cam_ts
             frame_type = "KF" if is_keyframe else "frame"
             logger.debug(f"[zmq] enqueued {frame_type} -> queue={self.ingest_q.qsize()}")
             self._trace_rx(RX_ENQUEUED, "", ts_ns, is_keyframe, rx_seq=rx_seq,
@@ -600,6 +677,25 @@ class ZeroMQSubscriber:
             frame_type = "keyframe" if is_keyframe else "non-KF"
             logger.warning(f"[zeromq] ingest queue refused {frame_type} ({reason}); dropping")
             self._trace_rx(RX_DROPPED, reason, ts_ns, is_keyframe, rx_seq=rx_seq)
+
+    # A tracking stamp that goes back by more than this within the stream is a
+    # restarted source (bag loop, bridge restart) -> new receiver-minted epoch.
+    # Same constant as SensorClock.rebase_after_s so the clock and the mailbox
+    # agree on what a restart is.
+    POSE_EPOCH_REBASE_S = 5.0
+
+    def _emit_pose(self, t_wc: np.ndarray, q_xyzw: np.ndarray, ts_ns: int) -> None:
+        """Receive-time pose write (tracking poses only). `timestamp` is this
+        process's wall clock (RTAB-Map's stamp clock is not known to be unix),
+        tagged pose_clock="server"; the mailbox key is (receiver-minted epoch,
+        stamp). Never raises into the receive path."""
+        if self._pose_sink is None:
+            return
+        try:
+            self._pose_sink(t_wc, q_xyzw, time.time(), self._frame_epoch,
+                            sensor_ts_ns=int(ts_ns), pose_clock="server")
+        except Exception as e:
+            logger.error(f"[zeromq] pose_sink callback error: {e}")
 
     def _decode_rgbd(self, ts_ns: int, rgb_raw: Any, depth_raw: Any):
         """Decode a paired camera frame after admission; memoised per CAMERA
@@ -695,6 +791,8 @@ class ZeroMQSubscriber:
             "last_rx_mono": self.last_rx_mono,
             "last_enqueue_mono": self.last_enqueue_mono,
             "tracking_drops": 0,  # no tracking-state concept on the ZMQ path
+            "frame_epoch": self._frame_epoch,
+            "kf_stamps_inherited": self._kf_stamps_inherited,   # bridge-side gap: kf_pose without stamp_ms
         }
 
     def run_forever(self) -> None:

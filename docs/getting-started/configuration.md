@@ -254,6 +254,26 @@ units:
 
 ---
 
+### Robot pose mailbox (diagnostic threshold)
+
+```yaml
+robot_pose:
+  stale_after_s: 0.5    # /stats.robot_pose.stale = age_s > this; diagnostic only; finite, > 0
+```
+
+`/stats.robot_pose` (also embedded in every search response) is a latest-value
+mailbox written at receive time by the receiver for every tracking-normal
+frame; the pipeline does not write it. `age_s` is measured on the server's own
+clock since the last accepted write, and `stale` flags `age_s > stale_after_s`.
+The flag is **diagnostic**: RTSM never acts on it, and an agent must keep its
+own freshness bound (the RC-car agent's `stale_abort_s`). The default 0.5 s is
+2.5 nominal periods of a 5 Hz phone stream (session1's receive gaps: p99
+0.27 s, max 0.35 s, so 0.3 would flicker on ordinary WiFi jitter) and flips within half a
+second of the stream stopping; under replay it is true by definition once the
+recording ends. A stamp that goes backwards within one session is accepted
+and counted (`sensor_ts_regressions`), never used to freeze the pose; a bad
+value for `stale_after_s` is a startup config error.
+
 ## Ingest Clock & Admission Timing
 
 Frame admission and memory timing (the receiver's non-keyframe throttle, the

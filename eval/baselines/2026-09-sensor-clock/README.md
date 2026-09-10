@@ -69,3 +69,13 @@ session1 at 1×. `gate.out` is the script's verdict; the script itself is `p1t3_
 runs (`*.json`, `*.events.jsonl`, ~25k lines) are deliberately NOT committed: nothing compares against them (the references
 stay `B1.*` and `task2-admit-before-decode/S.*`), and the script regenerates them in ~7 min. From this record on, raw
 artifacts are gitignored under `eval/baselines/`; only a new reference anchor is force-added.
+
+## Task 4 reproduction (pose mailbox, 2026-09-10) — `task4-pose-mailbox/`
+
+Same harness, branch `feature/pose-mailbox` (main `1f22934` + the mailbox). **M** = packaged default (lossless, sensor
+clock): 124/65 @53 `ad6f71a5b89c8506` = this anchor; dequeue (86) and receiver (240) sequences identical to B1; per-line
+`(decision, reason, frame_seq, depth_valid_frac)` identical to `task2-admit-before-decode/S.events.jsonl`. Final
+`/stats.robot_pose` `xyz / quaternion_xyzw / timestamp / frame_epoch` equal the task-2 record (session1's last received
+frame, seq 405, epoch 0); `sensor_ts_ns` = that frame's stamp; `pose_clock: sender`; **one writer:** `writes_accepted`
+240 = every tracking-normal receiver line, `sensor_ts_regressions` 0, `rejected_writes` 0. **PASS.** Script + verdict only
+(raw artifacts gitignored).

@@ -71,16 +71,24 @@ python rtabmap_zmq_bridge.py --rtabmap-addr localhost:5555 --zmq-pub tcp://127.0
 
 ### Message Format
 
-The bridge publishes pose messages:
+The bridge publishes pose messages as `[topic, json]` multipart frames; the
+subscriber (`rtsm/io/zeromq.py`) parses this shape:
 
 ```json
-{
-  "timestamp": 1705312200.123,
-  "position": [1.2, 0.4, 2.1],
-  "orientation": [0.0, 0.0, 0.0, 1.0],
-  "frame_id": 12345
-}
+{"stamp_ms": 1705312200123, "T_wc": [x, y, z, roll, pitch, yaw]}
 ```
+
+`rtabmap.tracking_pose` (~30 Hz) carries `stamp_ms`; `rtabmap.kf_pose` carries
+`kf_id` and should carry `stamp_ms` too. **Clock contract:** `stamp_ms` is
+milliseconds on the same clock as `camera.rgbd`'s `ts_ns` (unix on the
+reference bridge); frames are paired within 30 ms of the pose stamp. A
+`kf_pose` without a stamp inherits the last tracking stamp (counted in the
+subscriber's `kf_stamps_inherited`), so the keyframe is attached to the newest
+image rather than the node's own; if that image was already admitted as a
+non-keyframe and no newer frame exists yet, the keyframe re-processes it (one
+duplicate GPU pass per such keyframe). Add `stamp_ms` on the bridge to remove
+both the lag and the duplicate. A tracking stamp that jumps back by more than 5 s (bag loop, bridge
+restart) starts a new `frame_epoch` on the robot pose.
 
 ---
 

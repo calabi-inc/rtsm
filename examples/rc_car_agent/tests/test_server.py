@@ -21,7 +21,12 @@ from server import BENCH_DUMMY_GOAL, create_app
 from test_esp32_bridge import _RecordingHandler
 
 POSE = {"xyz": [0.0, 0.3, 0.0], "quaternion_xyzw": [0, 0, 0, 1],
-        "timestamp": 1751000000.0, "frame_epoch": 7}
+        "timestamp": 1751000000.0, "frame_epoch": 7,
+        # RTSM's pose mailbox diagnostics (P1 task 4) -- present in every real
+        # payload, ignored by the agent on purpose (it keeps its own clock).
+        "sensor_ts_ns": 683333172055083, "pose_clock": "sender", "age_s": 9.9, "stale": True,
+        "stale_after_s": 0.5, "writes_accepted": 812, "sensor_ts_regressions": 0,
+        "rejected_writes": 0, "rejected_by_reason": {"older_epoch": 0, "epochless_into_epoch": 0}}
 CLEARANCE = {"clearance_m": 3.0, "valid_frac": 0.9, "timestamp": 1751000000.0}
 GOOD_STATS = {"objects": 12, "confirmed": 8, "robot_pose": POSE,
               "forward_clearance": CLEARANCE}
@@ -422,6 +427,53 @@ def test_frame_epoch_abort_e2e(env_car):
         car.epoch = car.epoch + 1                     # new sender session
         assert _wait(lambda: _result(c) == "frame_reset", timeout=5.0)
         assert any(rec["path"] == "/stop" for rec in esp_srv.recorded)
+
+
+def test_diagnostic_stale_flag_is_ignored_e2e(env_car, monkeypatch):
+    """Contract with RTSM's robot_pose mailbox (P1 task 4): /stats.robot_pose
+    now carries `stale` / `age_s` (diagnostic, RTSM never acts on them). The
+    agent measures freshness on ITS OWN clock via an advancing timestamp;
+    a payload saying stale=true with a live, advancing pose must not stop
+    the mission. The safety bound stays stale_abort_s."""
+    cfg, rtsm, bridge, rtsm_srv, esp_srv, car, tmp_path = env_car
+    from fake_car import FakeCar
+    real = FakeCar.pose_payload
+
+    def with_diagnostics(self):
+        p = real(self)
+        p.update({"stale": True, "age_s": 9.9, "stale_after_s": 0.5, "pose_clock": "sender",
+                  "sensor_ts_ns": int(p["timestamp"] * 1e9), "sensor_ts_regressions": 3, "rejected_writes": 0,
+                  "rejected_by_reason": {"older_epoch": 0, "epochless_into_epoch": 0}, "writes_accepted": 400})
+        return p
+    monkeypatch.setattr(FakeCar, "pose_payload", with_diagnostics)
+    target = rtsm_srv.semantic_results[0]["xyz_world"]
+    with TestClient(create_app(cfg, rtsm, bridge)) as c:
+        c.post("/command", json={"goal": "go to the red mug"})
+        assert _wait(lambda: _result(c) == "arrived", timeout=15.0)
+        assert car.ground_dist_to(target) <= cfg.nav.arrival_threshold_m + 0.2
+
+
+def test_server_fresh_flag_does_not_override_own_clock_e2e(env_car, monkeypatch):
+    """Negative pin of the same contract: a payload claiming stale=false /
+    age_s=0 while the timestamp has STOPPED advancing must still stale_stop
+    within the agent's own stale_abort_s."""
+    cfg, rtsm, bridge, rtsm_srv, esp_srv, car, tmp_path = env_car
+    from fake_car import FakeCar
+    real = FakeCar.pose_payload
+
+    def claims_fresh(self):
+        p = real(self)
+        p.update({"stale": False, "age_s": 0.0, "stale_after_s": 0.5, "pose_clock": "sender"})
+        return p
+    monkeypatch.setattr(FakeCar, "pose_payload", claims_fresh)
+    rtsm_srv.semantic_results[0]["xyz_world"] = [0.0, 0.3, 8.0]   # far target
+    with TestClient(create_app(cfg, rtsm, bridge)) as c:
+        c.post("/command", json={"goal": "go to the red mug"})
+        assert _wait(lambda: (c.get("/status").json().get("task") or {}).get("ticks", 0) > 3)
+        frozen_at = time.monotonic()
+        car.freeze()
+        assert _wait(lambda: _result(c) == "stale_stop", timeout=cfg.nav.stale_abort_s + 3.0)
+        assert time.monotonic() - frozen_at < cfg.nav.stale_abort_s + 2.0
 
 
 def test_stale_abort_bounded_e2e(env_car):

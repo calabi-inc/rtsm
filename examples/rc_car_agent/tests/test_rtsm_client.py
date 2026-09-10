@@ -101,3 +101,18 @@ def test_semantic_query_assembles_snapshot(mock_rtsm):
     assert (top.id, top.confirmed) == ("obj_7", True)
     assert top.xyz_world == [0.5, 0.8, 1.5]
     assert res.results[1].xyz_world is None      # unconfirmed hit without xyz
+
+
+
+def test_pose_parse_ignores_mailbox_diagnostics():
+    """RTSM's robot_pose carries mailbox diagnostics since P1 task 4 (age_s,
+    stale, pose_clock, counters). The client reads only the geometry, the
+    timestamp and the epoch; the extra keys must not change the sample."""
+    from rtsm_client import RtsmClient
+    c = RtsmClient("http://127.0.0.1:1", timeout_s=0.1)
+    plain = {"xyz": [1.0, 2.0, 3.0], "quaternion_xyzw": [0, 0, 0, 1], "timestamp": 1751000000.5, "frame_epoch": 3}
+    rich = dict(plain, sensor_ts_ns=683333172055083, pose_clock="sender", age_s=0.04, stale=False,
+                stale_after_s=0.5, writes_accepted=10, sensor_ts_regressions=0, rejected_writes=0,
+                rejected_by_reason={"older_epoch": 0, "epochless_into_epoch": 0})
+    a, b = c._parse_pose(plain), c._parse_pose(rich)
+    assert (a.xyz, a.quaternion_xyzw, a.timestamp, a.frame_epoch) == (b.xyz, b.quaternion_xyzw, b.timestamp, b.frame_epoch)

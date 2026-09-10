@@ -298,11 +298,13 @@ class WebSocketReceiver:
         self._on_pose_corrections_batch = on_pose_corrections_batch
         self._on_raw_message = on_raw_message
         self._on_handshake_done = on_handshake_done
-        # Called as pose_sink(t_wc, q_wc_xyzw, unix_ts, frame_epoch) for
-        # EVERY frame with normal tracking — including frames the
+        # Called as pose_sink(t_wc, q_wc_xyzw, unix_ts, frame_epoch,
+        # sensor_ts_ns=<header timestamp_ns>, pose_clock="sender"|"server")
+        # for EVERY frame with normal tracking — including frames the
         # keyframe/interval throttle skips — so consumers (e.g.
         # WorkingMemory.update_robot_pose) see pose at the full input rate,
-        # not the pipeline processing rate.
+        # not the pipeline processing rate. The mailbox orders writes on
+        # (frame_epoch, sensor_ts_ns); pose_clock says where unix_ts came from.
         self._pose_sink = pose_sink
         # Called as clearance_sink(clearance_m, valid_frac, wall_ts) for
         # every frame that passes the tracking filter and the non-KF
@@ -794,17 +796,20 @@ class WebSocketReceiver:
             q_xyzw = rotmat_to_quat_xyzw(T_wc_mat[:3, :3].astype(np.float32))
 
         # Treat a missing/zero unix_timestamp as absent and substitute server
-        # wall time; the same value flows into TimeBundle.t_wall_utc_s, so the
-        # pose sink and the pipeline's later update_robot_pose call always
-        # share one clock (the guard compares timestamps across the two).
+        # wall time; the same value flows into TimeBundle.t_wall_utc_s. The
+        # mailbox ORDERS writes on the header's sensor stamp (timestamp_ns),
+        # not on this wall value; pose_clock records which clock it is.
         unix_ts = float(header.get("unix_timestamp") or time.time())
+        pose_clock = "sender" if header.get("unix_timestamp") else "server"
 
         # 5c. Pose sink: latest-pose passthrough for every tracking-normal
         # frame, even ones the throttle below skips. Same (post-flip) pose the
         # FramePacket carries, so consumers see one consistent convention.
         if self._pose_sink is not None:
             try:
-                self._pose_sink(t_wc, q_xyzw, unix_ts, self._frame_epoch)
+                self._pose_sink(t_wc, q_xyzw, unix_ts, self._frame_epoch,
+                                sensor_ts_ns=(int(hdr_ts) if hdr_ts else None),   # 0 / missing = no stamp
+                                pose_clock=pose_clock)
             except Exception as e:
                 logger.error(f"[websocket] pose_sink callback error: {e}")
 

@@ -1,0 +1,9 @@
+== M rc=0 ==
+M: (124, 65) frames 53 sha ad6f71a5b89c8506 | meta policy=lossless clock=sensor | sources {'replay': 240}
+   vs B1: multiset IDENTICAL | dequeue identical (86) | receiver identical (240)
+   vs task-2 S per-line incl. depth_valid_frac: identical (240)
+   robot_pose core == task-2 S: True | (xyz/quat/timestamp/frame_epoch match)
+   new keys present: True | sensor_ts_ns == last received frame stamp: True (683373591451416 vs 683373591451416) | pose_clock sender | stale True age_s 45.156
+   single writer: writes_accepted 240 == tracking-normal receiver lines 240 | regressions 0 | rejected 0 {'older_epoch': 0, 'epochless_into_epoch': 0} -> OK
+HARD GATE: PASS
+P1T4_GATE_DONE
