@@ -17,7 +17,6 @@ import pytest
 
 from rtsm.core.datamodel import FramePacket, IngestMeta, TimeBundle
 from rtsm.core.watchdog import DEGRADED_STATES, FrameFlowMonitor, PipelineHeartbeat
-from rtsm.io import ingest_lanes as L
 from rtsm.io.ingest_lanes import (
     DROP_AGE, DROP_CLOSED, DROP_KF_DROPPED, DROP_KF_LANE_FULL, DROP_SUPERSEDED,
     KF_MINTED, KF_SOURCE, LANE_FIFO, LANE_KEYFRAME, LANE_LATEST,
