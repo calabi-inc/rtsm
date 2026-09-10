@@ -9,7 +9,8 @@ object with a ``kind`` field; the first line is ``kind: "meta"`` and carries
 Line kinds (schema_version 2, 2026-09-09 — P1 task 0 of the Gate 4.5 plan):
 
   meta      once per file: schema_version, wall time, pid, and what the runner
-            adds (ingest_clock: wall | sensor).
+            adds (ingest_clock: wall | sensor; ingest_policy: latest | lossless
+            | legacy).
   receiver  one per RECEIVER DECISION (websocket / replay / zeromq thread):
             enqueued, or dropped with the reason (malformed, parse_error,
             tracking_state, throttle, duplicate_ts, no_camera_frame,
@@ -23,6 +24,20 @@ Line kinds (schema_version 2, 2026-09-09 — P1 task 0 of the Gate 4.5 plan):
             None). ZeroMQ lines never carry it (depth stays encoded for the
             frames it refuses). It is a per-frame statistic, not part of the
             comparator tuple below.
+            lane / rx_seq (P1 task 3): the ingest lane the frame was admitted
+            to and the receiver-local frame count. Under ingest.policy=latest
+            a frame can lose a SECOND receiver line after its enqueued one:
+            source="lanes", decision=dropped, reason superseded | kf_dropped
+            | age, written by the runner's lane drop handler from whichever
+            thread discarded it (put side or dequeue side). Once the pipeline
+            has drained, every enqueued frame is either dequeued or has a
+            lanes-source dropped line; a frame still waiting at shutdown is
+            neither (close() keeps draining, it does not report). Under
+            lossless / legacy the lanes write nothing.
+            rx_seq: websocket / replay = 1-based count of binary messages
+            received by this receiver in this process (malformed and
+            tracking-dropped included, never reset per session); zeromq =
+            count of enqueue attempts (None on its malformed-pose lines).
   dequeue   one per DEQUEUED frame (pipeline thread), including the frames the
             ingest gate or the frame-quality gate rejects and the frames whose
             present pose fails conversion: outcome (processed | gate_rejected
@@ -43,8 +58,10 @@ Line kinds (schema_version 2, 2026-09-09 — P1 task 0 of the Gate 4.5 plan):
             timings (the schema_version-1 line, plus kind and t_sensor_ns;
             timestamp is now time.monotonic() like the other kinds).
 
-A/A comparator contract: compare the receiver and dequeue streams PER KIND as
-ordered sequences of (frame_seq, t_sensor_ns, decision/outcome, reason); never
+A/A comparator contract: compare the receiver and dequeue streams PER (KIND,
+SOURCE) as ordered sequences of (frame_seq, t_sensor_ns, decision/outcome,
+reason) -- lanes-source lines are their own sequence and are nondeterministic
+in file order under policy=latest (two writer threads); never
 compare file order across kinds (an enqueued line is written after put(), so
 the pipeline's dequeue line can precede it), and ignore timestamp,
 queue_wait_s, queue_depth and the meta line, which are run-specific; under
@@ -87,6 +104,16 @@ RX_THROTTLE = "throttle"
 RX_DUPLICATE_TS = "duplicate_ts"
 RX_NO_CAMERA_FRAME = "no_camera_frame"
 RX_QUEUE_FULL = "queue_full"
+# Ingest-lane reasons (rtsm/io/ingest_lanes.py). kf_lane_full / closed are
+# refusals traced by the receiver; the other three happen INSIDE the lanes
+# after the receiver traced the frame as enqueued and are written with
+# source = SOURCE_LANES by the runner's drop handler.
+RX_KF_LANE_FULL = "kf_lane_full"      # source keyframe refused before decode (overflow=reject)
+RX_SUPERSEDED = "superseded"          # waiting non-keyframe replaced by a newer one (latest slot)
+RX_KF_DROPPED = "kf_dropped"          # oldest waiting keyframe discarded (overflow=drop_oldest)
+RX_AGE = "age"                        # non-keyframe older than max_frame_age_s at dequeue
+RX_CLOSED = "closed"                  # put() after the queue was closed (shutdown)
+SOURCE_LANES = "lanes"
 # Dequeue outcomes
 DQ_PROCESSED = "processed"            # admitted to processing (written before segmentation)
 DQ_GATE_REJECTED = "gate_rejected"
@@ -135,7 +162,7 @@ class DequeueEvent:
 class ReceiverEvent:
     """One line per RECEIVER DECISION (websocket / replay / zeromq thread)."""
     timestamp: float                 # time.monotonic() at the decision
-    source: str                      # websocket | replay | zeromq
+    source: str                      # websocket | replay | zeromq | lanes (the runner's lane drop handler)
     decision: str                    # enqueued | dropped
     reason: str                      # "" when enqueued, else the drop reason
     frame_seq: Optional[int] = None  # source seq (header frame_id) when parsed
@@ -144,6 +171,8 @@ class ReceiverEvent:
     frame_count: Optional[int] = None  # receiver's running count after the tracking filter
     queue_depth: Optional[int] = None  # ingest queue depth after the decision
     depth_valid_frac: Optional[float] = None  # finite fraction of the decoded depth BEFORE the confidence filter (websocket/replay; dropped frames included)
+    lane: Optional[str] = None       # IngestMeta.lane once admitted (keyframe | latest | fifo; None = legacy queue / not admitted)
+    rx_seq: Optional[int] = None     # receiver-local count: binary messages received (websocket/replay) | enqueue attempts (zeromq)
     kind: str = "receiver"
 
 

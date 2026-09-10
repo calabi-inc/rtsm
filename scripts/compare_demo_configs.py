@@ -37,7 +37,7 @@ def run_config(config_name: str, replay_dir: str) -> dict:
     from rtsm.core.association import Associator
     from rtsm.core.ingest_gate import IngestGate
     from rtsm.stores.sweep_cache import SweepCache
-    from rtsm.io.ingest_queue import IngestQueue
+    from rtsm.io.ingest_lanes import LaneConfig, make_ingest_queue
     from rtsm.io.replayer import ReplayReceiver
     from rtsm.core.pipeline import Pipeline
 
@@ -79,7 +79,7 @@ def run_config(config_name: str, replay_dir: str) -> dict:
         from rtsm.stores.vectors.faiss_client import FaissClient
         vectors = FaissClient(cfg)
 
-    ingest_q = IngestQueue(maxsize=512)
+    ingest_q = make_ingest_queue(LaneConfig.from_cfg(cfg, replay=True))   # auto -> lossless under replay
     sweep_cache = SweepCache(
         grid_size_m=float(scfg.get("grid_size_m", 0.25)),
         per_cell_cap=int(scfg.get("per_cell_cap", 64)),
@@ -145,10 +145,20 @@ def run_config(config_name: str, replay_dir: str) -> dict:
     pipe_thread = threading.Thread(target=run_pipeline, daemon=True)
     pipe_thread.start()
 
-    # Wait for replay to complete, then give pipeline time to drain
-    replay.wait()
-    time.sleep(1.0)  # let pipeline drain remaining frames
-    pipe.stop()
+    # Wait for replay to complete, then give pipeline time to drain. Under
+    # ingest.policy=lossless the replayer BLOCKS when the FIFO is full, so a
+    # pipeline thread that died would leave replay.wait() hanging forever:
+    # poll with a bound, and close the queue (wakes the producer) if the
+    # consumer is gone or on any exit.
+    try:
+        while not replay.wait(timeout=1.0):
+            if not pipe_thread.is_alive():
+                ingest_q.close()
+                raise RuntimeError("pipeline thread exited before the replay finished (see log above)")
+        time.sleep(1.0)  # let pipeline drain remaining frames
+    finally:
+        pipe.stop()
+        ingest_q.close()
     pipe_thread.join(timeout=5.0)
 
     total_time = time.monotonic() - t_start

@@ -134,6 +134,7 @@ class VisualizationServer:
         port: int = 8081,
         seg_analytics: Any = None,
         latency_analytics: Any = None,
+        ingest_queue: Any = None,
     ):
         """
         Initialize visualization server.
@@ -148,6 +149,7 @@ class VisualizationServer:
         self.wm = working_memory
         self.host = host
         self.port = port
+        self._ingest_queue = ingest_queue   # for the config echo (maxsize / policy)
 
         # Analytics buffers (optional)
         self._seg_analytics = seg_analytics
@@ -393,7 +395,10 @@ class VisualizationServer:
                 "keyframe_every_n": ws.get("keyframe_every_n", 30),
                 "nonkf_min_interval_s": ws.get("nonkf_min_interval_s", 0.5),
                 "confidence_threshold": ws.get("confidence_threshold", 2),
-                "queue_maxsize": 512,  # matches IngestQueue(maxsize=512) in run.py
+                # From the live queue object: 512 (legacy), lossless_depth, or
+                # keyframe_lane_depth + 1 (latest). 512 only if none was wired.
+                "queue_maxsize": int(getattr(self._ingest_queue, "maxsize", 512) or 512),
+                "ingest_policy": str(getattr(self._ingest_queue, "policy", "legacy")),
             },
             "pipeline": {
                 "topk_preclip": self.cfg.get("staging", {}).get("topk_preclip", 15),

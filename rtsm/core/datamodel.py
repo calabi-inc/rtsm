@@ -128,6 +128,23 @@ class PinholeIntrinsics:
 # ---------- canonical frame packet ----------
 
 @dataclass(slots=True)
+class IngestMeta:
+    """Per-frame ingest bookkeeping (Gate 4.5 plan, P1 task 3). The receiver
+    creates it at packet build (keyframe_origin, depth_valid_frac, rx_seq);
+    the ingest queue fills the admission fields in put(). The legacy
+    IngestQueue leaves them None (lane None == legacy). P2's ledgers read it.
+    """
+    lane: Optional[str] = None               # keyframe | latest | fifo (None under the legacy queue)
+    admitted_mono: Optional[float] = None    # time.monotonic() at admission
+    admitted_sensor_ns: Optional[int] = None
+    lane_depth_at_admit: Optional[int] = None
+    keyframe_origin: Optional[str] = None    # minted (receiver every-Nth) | source (SLAM kf_pose) | None
+    depth_valid_frac: Optional[float] = None  # finite fraction of the decoded depth BEFORE the confidence filter
+    rx_seq: Optional[int] = None             # receiver-local count: binary messages received (websocket/replay) | enqueue attempts (zeromq)
+    drop_reason: Optional[str] = None        # set when the queue refused or later discarded the frame
+
+
+@dataclass(slots=True)
 class FramePacket:
     """
     Canonical, ROS-free payload the CORE consumes.
@@ -156,11 +173,10 @@ class FramePacket:
     # new client session; None for sources without the notion). The dispatcher's
     # SensorClock re-bases on a change so sensor time stays continuous.
     frame_epoch: Optional[int] = None
-    # Finite fraction of the decoded depth BEFORE the confidence filter, set by
-    # the websocket/replay receiver when a frame-flow trace sink is attached
-    # (else None). The enqueued trace line reads it, so every receiver line
-    # carries one statistic. Moves into IngestMeta with P1 task 3.
-    depth_valid_frac: Optional[float] = None
+    # Ingest bookkeeping: created by the receiver, completed by the ingest
+    # queue at admission (see IngestMeta). None only for packets built by code
+    # that predates it (tests, probes).
+    ingest: Optional[IngestMeta] = None
 
     # convenience helpers
     @property

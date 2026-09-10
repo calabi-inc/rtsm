@@ -72,7 +72,7 @@ No hardware needed — replay uses a bundled recording.
 │         └────────────────┴────────────────┘                              │
 │                          │                                               │
 │                   ┌──────▼───────┐     ┌──────────────┐                  │
-│                   │ IngestQueue  │────>│ FramePacket  │                  │
+│                   │ ingest lanes │────>│ FramePacket  │                  │
 │                   │  (buffer)    │     │ (RGB,D,Pose) │                  │
 │                   └──────────────┘     └──────┬───────┘                  │
 │                                               │                          │

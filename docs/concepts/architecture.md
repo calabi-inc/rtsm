@@ -15,7 +15,7 @@ RTSM processes RGB-D frames through a 10-stage pipeline that extracts, tracks, a
          ▼                      ▼                       ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │  I/O Layer                                                      │
-│  WebSocket / ZMQ / Replay → IngestQueue → FramePacket           │
+│  WebSocket / ZMQ / Replay → ingest lanes → FramePacket          │
 └─────────────────────────────┬───────────────────────────────────┘
                               │
                     ┌─────────▼──────────┐
@@ -66,7 +66,7 @@ Receives RGB-D frames and camera poses from multiple sources:
 - **ZeroMQ** — Intel RealSense D435i + RTAB-Map
 - **Replay** — Recorded sessions for deterministic benchmarking
 
-Frames are buffered in an `IngestQueue`. The **Ingest Gate** selects which frames to process based on keyframe priority and sweep-cache novelty, throttling 30 Hz input to ~1-5 Hz processing.
+Frames wait in the **ingest lanes** (`rtsm/io/ingest_lanes.py`; `ingest.policy`): live, a small keyframe FIFO drained first plus one non-keyframe slot a newer frame supersedes (`latest`); under replay and evaluation a producer-paced FIFO that never drops (`lossless`); the previous 512-deep tail-drop `IngestQueue` remains as the `legacy` rollback. The **Ingest Gate** selects which frames to process based on keyframe priority and sweep-cache novelty, throttling 30 Hz input to ~1-5 Hz processing.
 
 ### Perception Pipeline
 

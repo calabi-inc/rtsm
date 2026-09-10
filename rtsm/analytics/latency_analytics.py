@@ -46,7 +46,9 @@ class LatencySecondBucket:
     processing_hz: float = 0.0
     effective_ratio: float = 0.0
     # Drop counters (per second)
-    queue_drops: int = 0
+    queue_drops: int = 0        # refused by the ingest queue / oldest keyframe dropped (frames lost to capacity)
+    superseded: int = 0         # waiting non-keyframe replaced by a newer one (ingest.policy=latest; not a loss)
+    age_drops: int = 0          # non-keyframe discarded at dequeue for age (ingest.policy=latest; a stall)
     gate_rejections: int = 0
     frame_rejections: int = 0   # frame-quality gate (gates.*)
     throttle_skips: int = 0
@@ -114,6 +116,8 @@ class PipelineLatencyBuffer:
         self._gate_rejections: int = 0
         self._frame_rejections: int = 0
         self._queue_drops: int = 0
+        self._age_drops: int = 0
+        self._superseded: int = 0
         self._throttle_skips: int = 0
         self._tracking_drops: int = 0
 
@@ -126,6 +130,8 @@ class PipelineLatencyBuffer:
         self._last_rollup_rejections: int = 0
         self._last_rollup_frame_rejections: int = 0
         self._last_rollup_queue_drops: int = 0
+        self._last_rollup_age_drops: int = 0
+        self._last_rollup_superseded: int = 0
         self._last_rollup_throttle_skips: int = 0
         self._last_rollup_tracking_drops: int = 0
 
@@ -162,9 +168,29 @@ class PipelineLatencyBuffer:
             self._frame_rejections += 1
 
     def record_queue_drop(self) -> None:
-        """Called when IngestQueue.put() returns False (queue full)."""
+        """A frame lost to ingest capacity: a receiver-side refusal
+        (queue_full / kf_lane_full, before the RGB decode) or, under
+        ingest.policy=latest, the oldest waiting keyframe dropped on overflow.
+        Comparable across policies as "frames the ingest stage did not hand to
+        the pipeline". Superseded non-keyframes are NOT counted here (see
+        record_superseded): replacing a waiting frame with a newer one is the
+        designed steady state under congestion, not a loss."""
         with self._lock:
             self._queue_drops += 1
+
+    def record_superseded(self) -> None:
+        """A waiting non-keyframe was replaced by a newer one in the latest
+        slot (ingest.policy=latest). Informational: how often input outpaced
+        the pipeline; the dashboard shows it as a neutral count."""
+        with self._lock:
+            self._superseded += 1
+
+    def record_age_drop(self) -> None:
+        """A non-keyframe discarded at dequeue for exceeding max_frame_age_s
+        (ingest.policy=latest only). Counted apart from queue drops: it means
+        the pipeline stalled, not that input outpaced it."""
+        with self._lock:
+            self._age_drops += 1
 
     def record_throttle_skip(self) -> None:
         """Called when non-KF throttle skips a frame (by design)."""
@@ -205,6 +231,8 @@ class PipelineLatencyBuffer:
                 self._last_rollup_rejections = self._gate_rejections
                 self._last_rollup_frame_rejections = self._frame_rejections
                 self._last_rollup_queue_drops = self._queue_drops
+                self._last_rollup_age_drops = self._age_drops
+                self._last_rollup_superseded = self._superseded
                 self._last_rollup_throttle_skips = self._throttle_skips
                 self._last_rollup_tracking_drops = self._tracking_drops
                 self._queue_depth_samples.clear()
@@ -227,6 +255,8 @@ class PipelineLatencyBuffer:
             gate_rej = self._gate_rejections - self._last_rollup_rejections
             frame_rej = self._frame_rejections - self._last_rollup_frame_rejections
             q_drops = self._queue_drops - self._last_rollup_queue_drops
+            age_drops = self._age_drops - self._last_rollup_age_drops
+            superseded = self._superseded - self._last_rollup_superseded
             throttle = self._throttle_skips - self._last_rollup_throttle_skips
             tracking = self._tracking_drops - self._last_rollup_tracking_drops
 
@@ -243,6 +273,8 @@ class PipelineLatencyBuffer:
                 processing_hz=round(processing_hz, 2),
                 effective_ratio=round(processing_hz / max(0.001, input_hz), 3),
                 queue_drops=q_drops,
+                superseded=superseded,
+                age_drops=age_drops,
                 gate_rejections=gate_rej,
                 frame_rejections=frame_rej,
                 throttle_skips=throttle,
@@ -272,6 +304,8 @@ class PipelineLatencyBuffer:
             self._last_rollup_rejections = self._gate_rejections
             self._last_rollup_frame_rejections = self._frame_rejections
             self._last_rollup_queue_drops = self._queue_drops
+            self._last_rollup_age_drops = self._age_drops
+            self._last_rollup_superseded = self._superseded
             self._last_rollup_throttle_skips = self._throttle_skips
             self._last_rollup_tracking_drops = self._tracking_drops
             self._queue_depth_samples.clear()
@@ -306,6 +340,8 @@ class PipelineLatencyBuffer:
                 "gate_rejections": self._gate_rejections,
                 "frame_rejections": self._frame_rejections,
                 "queue_drops": self._queue_drops,
+                "superseded": self._superseded,
+                "age_drops": self._age_drops,
                 "throttle_skips": self._throttle_skips,
                 "tracking_drops": self._tracking_drops,
             }
@@ -398,6 +434,8 @@ class PipelineLatencyBuffer:
             self._gate_rejections = 0
             self._frame_rejections = 0
             self._queue_drops = 0
+            self._age_drops = 0
+            self._superseded = 0
             self._throttle_skips = 0
             self._tracking_drops = 0
             self._queue_depth_samples.clear()
@@ -406,6 +444,8 @@ class PipelineLatencyBuffer:
             self._last_rollup_rejections = 0
             self._last_rollup_frame_rejections = 0
             self._last_rollup_queue_drops = 0
+            self._last_rollup_age_drops = 0
+            self._last_rollup_superseded = 0
             self._last_rollup_throttle_skips = 0
             self._last_rollup_tracking_drops = 0
             self._total_appended = 0

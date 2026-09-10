@@ -172,6 +172,10 @@ npm run build
 # Output: demo/dist/
 ```
 
+`demo/dist/` is gitignored. The copy that ships in the wheel is `rtsm/static/`; refresh it with
+`scripts/build_frontend.sh` (build, replace the hashed bundle pair, copy `index.html`) and commit the result.
+The runner prefers a valid `demo/dist/` when one exists (dev build wins), so keep the two in step.
+
 Serve with any static file server. The demo server is still required for real-time streaming.
 
 ## Keyboard Shortcuts

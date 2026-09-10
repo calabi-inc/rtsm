@@ -25,6 +25,7 @@ from rtsm.core.association import Associator
 from rtsm.core.ingest_gate import IngestGate
 from rtsm.stores.sweep_cache import SweepCache
 from rtsm.io.ingest_queue import IngestQueue
+from rtsm.io.ingest_lanes import LaneConfig, lane_drop_handler, make_ingest_queue
 from rtsm.io.zeromq import ZeroMQSubscriber
 from rtsm.io.websocket import WebSocketReceiver
 from rtsm.utils.net import print_server_addresses, get_local_ipv4_addresses
@@ -116,6 +117,14 @@ def main():
     clock = make_clock(clock_mode)
     logger.info("Ingest clock: %s (ingest.clock=%s)", clock_mode,
                 (cfg.get("ingest") or {}).get("clock", "auto"))
+    # Ingest policy (ingest.policy: auto|latest|lossless|legacy) -- validated
+    # here too, so a typo fails before any model loads; lossless is refused
+    # for live receivers (its producer-paced put would block the receive loop).
+    try:
+        lane_cfg = LaneConfig.from_cfg(cfg, replay=bool(args.replay))
+    except ValueError as exc:
+        parser.error(str(exc))
+    logger.info("Ingest policy: %s (ingest.policy=%s)", lane_cfg.policy, lane_cfg.configured_policy)
 
     # ── Record-only mode: skip all heavy init, just record raw WebSocket ──
     if args.record and args.record_only:
@@ -125,7 +134,11 @@ def main():
         io_cfg = cfg.get("io", {})
         ws_cfg = io_cfg.get("websocket", {})
         vis_cfg = cfg.get("visualization", {})
-        ingest_q = IngestQueue(maxsize=512)
+        # Record-only has no consumer: one slot, then every frame is refused
+        # BEFORE its RGB decode (the recorder reads raw bytes upstream of the
+        # parser). Deliberately not the lane object -- a latest slot would keep
+        # admitting and decoding frames nobody reads.
+        ingest_q = IngestQueue(maxsize=1)
 
         ws_receiver = WebSocketReceiver(
             ingest_queue=ingest_q,
@@ -219,7 +232,7 @@ def main():
 
     # Prepare ingest plumbing
     # Note: Intrinsics are now dynamic per-frame from camera.rgbd topic
-    ingest_q = IngestQueue(maxsize=512)
+    ingest_q = make_ingest_queue(lane_cfg)
     sweep_cache = SweepCache(
         grid_size_m=float(cfg.get("sweep_cache", {}).get("grid_size_m", 0.25)),
         per_cell_cap=int(cfg.get("sweep_cache", {}).get("per_cell_cap", 64)),
@@ -245,6 +258,7 @@ def main():
             port=int(vis_cfg.get("port", 8081)),
             seg_analytics=seg_analytics,
             latency_analytics=latency_analytics,
+            ingest_queue=ingest_q,
         )
         logger.info("Visualization server initialized")
 
@@ -275,9 +289,12 @@ def main():
     event_log = EventLogWriter(
         enabled=bool(diag_cfg.get("enabled", False)),
         configured_path=diag_cfg.get("event_log_path"),
-        extra_meta={"ingest_clock": clock_mode},
+        extra_meta={"ingest_clock": clock_mode, "ingest_policy": lane_cfg.policy},
     )
     event_sink = event_log.sink()
+    # Lane-side drops (superseded / kf_dropped / age under policy latest) ->
+    # trace lines with source "lanes" + the analytics counters.
+    ingest_q.set_on_drop(lane_drop_handler(event_sink, latency_analytics, ingest_q))
 
     # Will be set to FrameWindow or None depending on receiver
     frame_window_for_reset = None
@@ -412,6 +429,7 @@ def main():
             watchdog = Watchdog(
                 heartbeat=pipe.heartbeat,
                 queue_size=ingest_q.qsize,
+                backlog=ingest_q.backlog_signal,
                 receiver_liveness=receiver_liveness,
                 starved_after_s=float(wd_cfg.get("starved_after_s", 5.0)),
                 hung_after_s=float(wd_cfg.get("hung_after_s", 10.0)),
@@ -447,6 +465,7 @@ def main():
         vectors=vectors,
         extra_stats_provider=lambda: {
             "ingest_q": ingest_q.qsize(),
+            "ingest_lanes": ingest_q.stats(),
             "pose_conversion_failures": pipe.pose_conversion_failures,
         },
         reset_components=reset_components,

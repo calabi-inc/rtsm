@@ -117,6 +117,25 @@ def run_demo(argv: list[str] | None = None) -> None:
     for advisory in validate_tuning(cfg):
         logger.warning("Configuration: %s", advisory)
     print(f"        Backend: {cfg['segmentation']['backend']}")
+    # Ingest clock + policy are validated HERE, before the ~1 GB model load, so a
+    # typo in ingest.* fails through parser.error immediately.
+    # Ingest clock (ingest.clock: auto|wall|sensor). The demo always replays a
+    # recording, so `auto` resolves to sensor: memory timing follows the frames'
+    # own timestamps and the result does not depend on replay pacing.
+    from rtsm.core.clock import make_clock, resolve_clock_mode
+    try:
+        clock_mode = resolve_clock_mode((cfg.get("ingest") or {}).get("clock", "auto"), replay=True)
+    except ValueError as exc:
+        parser.error(str(exc))
+    clock = make_clock(clock_mode)
+    logger.info("Ingest clock: %s (ingest.clock=%s)", clock_mode, (cfg.get("ingest") or {}).get("clock", "auto"))
+    # Ingest policy (ingest.policy: auto|latest|lossless|legacy); the demo
+    # replays, so `auto` resolves to lossless (producer-paced FIFO, no drops).
+    try:
+        lane_cfg = LaneConfig.from_cfg(cfg, replay=True)
+    except ValueError as exc:
+        parser.error(str(exc))
+    logger.info("Ingest policy: %s (ingest.policy=%s)", lane_cfg.policy, lane_cfg.configured_policy)
 
     # ── Load models ──
     print(f"  [3/5] Loading segmentation model ({cfg['segmentation']['backend']})...")
@@ -146,7 +165,7 @@ def run_demo(argv: list[str] | None = None) -> None:
     from rtsm.core.association import Associator
     from rtsm.core.ingest_gate import IngestGate
     from rtsm.stores.sweep_cache import SweepCache
-    from rtsm.io.ingest_queue import IngestQueue
+    from rtsm.io.ingest_lanes import LaneConfig, lane_drop_handler, make_ingest_queue
     from rtsm.io.replayer import ReplayReceiver
     from rtsm.api.server import create_app, start_server, ResetComponents
     from rtsm.utils.net import get_local_ipv4_addresses
@@ -165,16 +184,6 @@ def run_demo(argv: list[str] | None = None) -> None:
         up_axis=up_axis,
     )
     proximity_index = ProximityIndex(pi_grid)
-    # Ingest clock (ingest.clock: auto|wall|sensor). The demo always replays a
-    # recording, so `auto` resolves to sensor: memory timing follows the frames'
-    # own timestamps and the result does not depend on replay pacing.
-    from rtsm.core.clock import make_clock, resolve_clock_mode
-    try:
-        clock_mode = resolve_clock_mode((cfg.get("ingest") or {}).get("clock", "auto"), replay=True)
-    except ValueError as exc:
-        parser.error(str(exc))
-    clock = make_clock(clock_mode)
-    logger.info("Ingest clock: %s (ingest.clock=%s)", clock_mode, (cfg.get("ingest") or {}).get("clock", "auto"))
     wm = WorkingMemory(cfg, index=proximity_index, clock=clock)
     assoc = Associator(cfg)
     ingest_gate = IngestGate(cfg)
@@ -186,7 +195,7 @@ def run_demo(argv: list[str] | None = None) -> None:
         from rtsm.stores.vectors.faiss_client import FaissClient
         vectors = FaissClient(cfg)
 
-    ingest_q = IngestQueue(maxsize=512)
+    ingest_q = make_ingest_queue(lane_cfg)
     sweep_cache = SweepCache(
         grid_size_m=float(scfg.get("grid_size_m", 0.25)),
         per_cell_cap=int(scfg.get("per_cell_cap", 64)),
@@ -221,6 +230,7 @@ def run_demo(argv: list[str] | None = None) -> None:
             port=int(vis_cfg.get("port", 8083)),
             seg_analytics=seg_analytics,
             latency_analytics=latency_analytics,
+            ingest_queue=ingest_q,
         )
         vis_broadcaster = vis_server.broadcaster
         vis_server_registry = vis_server.registry
@@ -232,9 +242,12 @@ def run_demo(argv: list[str] | None = None) -> None:
     event_log = EventLogWriter(
         enabled=bool(diag_cfg.get("enabled", False)),
         configured_path=diag_cfg.get("event_log_path"),
-        extra_meta={"ingest_clock": clock_mode},
+        extra_meta={"ingest_clock": clock_mode, "ingest_policy": lane_cfg.policy},
     )
     event_sink = event_log.sink()
+    # Lane-side drops (superseded / kf_dropped / age under policy latest) ->
+    # trace lines with source "lanes" + analytics counters.
+    ingest_q.set_on_drop(lane_drop_handler(event_sink, latency_analytics, ingest_q))
 
     # ── Start replay ──
     replay = ReplayReceiver(
@@ -285,7 +298,7 @@ def run_demo(argv: list[str] | None = None) -> None:
         working_memory=wm,
         clip_adapter=clip,
         vectors=vectors,
-        extra_stats_provider=lambda: {"ingest_q": ingest_q.qsize()},
+        extra_stats_provider=lambda: {"ingest_q": ingest_q.qsize(), "ingest_lanes": ingest_q.stats()},
         reset_components=ResetComponents(sweep_cache=sweep_cache, vis_server=vis_server, clock=clock),
         seg_analytics=seg_analytics,
         latency_analytics=latency_analytics,

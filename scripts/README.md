@@ -89,4 +89,6 @@ Message format (multipart ZeroMQ):
 - `payload` for `rgb`: PNG-encoded bytes (RGB8)
 - `payload` for `depth`: compressed NPZ bytes with key `depth` (float32 meters, HxW)
 
+## build_frontend.sh
 
+Rebuilds the demo frontend (`demo/`, vite) and refreshes the packaged copy under `rtsm/static/` (the tracked bundle that ships in the wheel): replaces the hashed asset pair, copies `index.html`, and prints the resulting `git status`. Run it after editing `demo/src/*` and commit the result.

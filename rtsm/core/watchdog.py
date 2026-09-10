@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 # States that mean "something is wrong". "waiting" (no client has ever
 # connected) and "ok" are healthy.
 DEGRADED_STATES = frozenset(
-    {"receiver_dead", "hung", "starved", "pose_degraded", "no_ingestible_input"}
+    {"receiver_dead", "hung", "starved", "backlogged", "pose_degraded", "no_ingestible_input"}
 )
 
 
@@ -64,6 +64,12 @@ class FrameFlowMonitor:
       than the last pipeline step) but the loop stopped turning.
     - starved: nothing has arrived from the client for starved_after_s
       (stream died, phone slept, WiFi drop).
+    - backlogged: the pipeline is not keeping up with admitted input in a
+      SUSTAINED way: the ingest lane reports itself full for backlog_polls
+      consecutive evaluations, or it discarded a frame for age since the last
+      evaluation. Only after the first frame was processed (model warm-up is
+      not a backlog). Slot supersession under ingest.policy=latest is the
+      designed steady state and is deliberately NOT a backlog signal.
     - pose_degraded: messages ARE arriving but nothing is ingestible and
       tracking drops are climbing (ARKit tracking limited/lost).
     - no_ingestible_input: messages arriving, nothing enqueued, no tracking
@@ -81,6 +87,8 @@ class FrameFlowMonitor:
         starved_after_s: float = 5.0,
         hung_after_s: float = 10.0,
         now_fn: Callable[[], float] = time.monotonic,
+        backlog: Optional[Callable[[], Dict[str, Any]]] = None,
+        backlog_polls: int = 3,
     ) -> None:
         self._hb = heartbeat
         self._queue_size = queue_size
@@ -89,6 +97,12 @@ class FrameFlowMonitor:
         self._hung_after_s = float(hung_after_s)
         self._now = now_fn
         self._prev_tracking_drops: Optional[int] = None
+        # backlog: () -> {"lane_full": bool, "age_dropped": int, ...} from the
+        # ingest queue (IngestLanes.backlog_signal / IngestQueue.backlog_signal)
+        self._backlog = backlog
+        self._backlog_polls = max(1, int(backlog_polls))
+        self._full_streak = 0
+        self._prev_age_dropped: Optional[int] = None
 
     @staticmethod
     def _age(now: float, stamp: Optional[float]) -> Optional[float]:
@@ -112,6 +126,27 @@ class FrameFlowMonitor:
         except Exception:
             qsize = -1
 
+        backlog_sig: Optional[Dict[str, Any]] = None
+        backlogged = False
+        backlog_why = ""
+        if self._backlog is not None:
+            try:
+                backlog_sig = dict(self._backlog() or {})
+            except Exception:
+                backlog_sig = None
+        if backlog_sig is not None:
+            self._full_streak = self._full_streak + 1 if backlog_sig.get("lane_full") else 0
+            age_dropped = int(backlog_sig.get("age_dropped", 0) or 0)
+            age_delta = 0 if self._prev_age_dropped is None else max(0, age_dropped - self._prev_age_dropped)
+            self._prev_age_dropped = age_dropped
+            warm = frame_age is not None            # at least one frame processed
+            if warm and self._full_streak >= self._backlog_polls:
+                backlogged = True
+                backlog_why = f"ingest lane full for {self._full_streak} consecutive polls"
+            elif warm and age_delta > 0:
+                backlogged = True
+                backlog_why = f"{age_delta} frame(s) discarded for age since the last poll"
+
         state = "ok"
         reasons = []
         if not alive:
@@ -130,6 +165,9 @@ class FrameFlowMonitor:
         elif rx_age > self._starved_after_s:
             state = "starved"
             reasons.append(f"no input from client for {rx_age:.1f}s")
+        elif backlogged:
+            state = "backlogged"
+            reasons.append(backlog_why)
         elif enq_age is not None and enq_age > self._starved_after_s:
             if drops_delta > 0:
                 state = "pose_degraded"
@@ -165,6 +203,7 @@ class FrameFlowMonitor:
             "last_frame_age_s": _r(frame_age),
             "ingest_queue_depth": qsize,
             "tracking_drops": drops,
+            "backlog": backlog_sig,
         }
 
 
@@ -181,6 +220,8 @@ class Watchdog(threading.Thread):
         starved_after_s: float = 5.0,
         hung_after_s: float = 10.0,
         poll_interval_s: float = 1.0,
+        backlog: Optional[Callable[[], Dict[str, Any]]] = None,
+        backlog_polls: int = 3,
     ) -> None:
         super().__init__(name="frame-flow-watchdog", daemon=True)
         self._monitor = FrameFlowMonitor(
@@ -189,6 +230,8 @@ class Watchdog(threading.Thread):
             receiver_liveness=receiver_liveness,
             starved_after_s=starved_after_s,
             hung_after_s=hung_after_s,
+            backlog=backlog,
+            backlog_polls=backlog_polls,
         )
         self._poll_interval_s = max(0.1, float(poll_interval_s))
         self._stop_event = threading.Event()
