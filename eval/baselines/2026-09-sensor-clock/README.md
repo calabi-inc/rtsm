@@ -65,4 +65,7 @@ to B1; all receiver lines `source: replay`; per-line `(decision, reason, frame_s
 identical. **G1-A PASS.** **T1–T3** = `--set ingest.policy=latest`, info only (not reproducible by construction, never
 compared to the anchor): each superseded exactly one waiting non-keyframe (max depth 2, no keyframe dropped, no age drop,
 enqueued 86 − 1 = 85 dequeued) and still produced 124/65 `ad6f71a5`; the lanes barely engage when dual keeps up with
-session1 at 1×. `gate.out` is the script's verdict; the script itself is `p1t3_gate.sh`.
+session1 at 1×. `gate.out` is the script's verdict; the script itself is `p1t3_gate.sh`. The raw artifacts of these five
+runs (`*.json`, `*.events.jsonl`, ~25k lines) are deliberately NOT committed: nothing compares against them (the references
+stay `B1.*` and `task2-admit-before-decode/S.*`), and the script regenerates them in ~7 min. From this record on, raw
+artifacts are gitignored under `eval/baselines/`; only a new reference anchor is force-added.

@@ -155,3 +155,11 @@ eval/baselines/**/bisect-dual/*/datasheet_raw_*.json
 
 # scripts/benchmark_*.py rewrite the packaged config in place and keep a per-PID backup while a run is live
 rtsm/cfg/rtsm.yaml.*bak*
+
+# Evaluation records: raw run artifacts (datasheet JSON ~4.5k lines each, trace
+# JSONL) are re-derivable by the gate script in each record directory and are NOT
+# committed. Commit only the script, the verdict (gate.out) and the README. A run
+# that becomes a REFERENCE ANCHOR that later gate scripts compare against is the
+# one exception: force-add it (git add -f) and name it in the directory README.
+eval/baselines/**/*.json
+eval/baselines/**/*.events.jsonl
