@@ -123,6 +123,11 @@ def run_demo(argv: list[str] | None = None) -> None:
     # recording, so `auto` resolves to sensor: memory timing follows the frames'
     # own timestamps and the result does not depend on replay pacing.
     from rtsm.core.clock import make_clock, resolve_clock_mode
+    # These two are used by the validation block right below; importing them
+    # further down the function made them unbound locals here (UnboundLocalError
+    # at startup -- `rtsm demo` was broken on main between PR #33 and this fix).
+    from rtsm.io.ingest_lanes import LaneConfig, lane_drop_handler, make_ingest_queue
+    from rtsm.stores.working_memory import WorkingMemory, resolve_pose_stale_after_s
     try:
         clock_mode = resolve_clock_mode((cfg.get("ingest") or {}).get("clock", "auto"), replay=True)
     except ValueError as exc:
@@ -133,6 +138,7 @@ def run_demo(argv: list[str] | None = None) -> None:
     # replays, so `auto` resolves to lossless (producer-paced FIFO, no drops).
     try:
         lane_cfg = LaneConfig.from_cfg(cfg, replay=True)
+        resolve_pose_stale_after_s(cfg)     # robot_pose.stale_after_s: finite, > 0
     except ValueError as exc:
         parser.error(str(exc))
     logger.info("Ingest policy: %s (ingest.policy=%s)", lane_cfg.policy, lane_cfg.configured_policy)
@@ -160,12 +166,10 @@ def run_demo(argv: list[str] | None = None) -> None:
 
     # ── Initialize spatial memory ──
     print("  [5/5] Initializing spatial memory + pipeline...")
-    from rtsm.stores.working_memory import WorkingMemory
     from rtsm.stores.proximity_index import ProximityIndex, GridSpec
     from rtsm.core.association import Associator
     from rtsm.core.ingest_gate import IngestGate
     from rtsm.stores.sweep_cache import SweepCache
-    from rtsm.io.ingest_lanes import LaneConfig, lane_drop_handler, make_ingest_queue
     from rtsm.io.replayer import ReplayReceiver
     from rtsm.api.server import create_app, start_server, ResetComponents
     from rtsm.utils.net import get_local_ipv4_addresses

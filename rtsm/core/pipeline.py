@@ -565,11 +565,14 @@ class Pipeline:
                     look_cell=None,
                     now_mono=self.clock.now_mono(),
                 )
-                # Store latest robot pose for API queries
-                timestamp = float(pkt.time.t_wall_utc_s or pkt.time.t_mono_s or 0.0)
-                self.working_mem.update_robot_pose(twc, q, timestamp)
+                # The robot pose is NOT written here any more (P1 task 4): every
+                # receiver writes it at receive time (websocket / replay /
+                # zeromq pose_sink -> WorkingMemory.update_robot_pose), which
+                # is fresher than any dequeue-time write and leaves the
+                # mailbox with exactly one writer. A pipeline write here was
+                # the only thing the old 2 s guard ever had to arbitrate.
         except Exception:
-            logger.warning("Post-processing ingest bookkeeping or robot-pose update failed", exc_info=True)
+            logger.warning("Post-processing ingest bookkeeping failed", exc_info=True)
 
         # ---- Phase 0 diagnostic event log (no-op when disabled) ----
         if self._event_log.enabled:
