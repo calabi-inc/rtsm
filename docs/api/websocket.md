@@ -86,7 +86,7 @@ Push interval is configurable via `visualization.objects.push_interval_ms`.
 
 ### Runtime Analytics (JSON)
 
-Pushed periodically (default: every 1000ms) with pipeline performance data:
+Pushed every `visualization.analytics.push_interval_ms` (default 1000 ms) with pipeline performance data. The per-second buckets themselves are produced by the analytics ticker (`analytics.enable`; 1 Hz, with or without a client) — the push loop only forwards them, and the first push after a client attaches is always a full sync:
 
 **Full sync** (every 30s by default):
 
@@ -111,7 +111,7 @@ Pushed periodically (default: every 1000ms) with pipeline performance data:
 }
 ```
 
-**Incremental append** (every 1s):
+**Incremental append** — one message per new bucket; `bucket` is `null` when no bucket landed in this push interval, and several appends can follow one push when the push interval is slower than the 1 Hz rollup. Buckets carry `elapsed_s` and `stale_interval` (true when the interval exceeded 2 s, a late tick; counts stay exact):
 
 ```json
 {

@@ -97,13 +97,15 @@ def patch_config(backend: str) -> None:
     # Headless by default (2026-09-08): the viz server auto-opens a browser
     # tab per run and adds per-frame JPEG/broadcast work, and nothing the
     # rendered datasheet reads (latency/segmentation aggregates,
-    # working_memory, /objects) needs it. Two consequences to know:
-    #  * The Tier-2 per-second rollup runs only inside the viz push loop
-    #    while a browser client is attached (the old comment here was wrong:
-    #    it came from the auto-opened tab, not from "keeping viz enabled").
-    #    Headless, the raw JSON's latency_hourly / segmentation_hourly lists
-    #    are empty and aggregate input_hz / effective_ratio read 0.0, until
-    #    the rollup moves to a headless timer (execution plan P1 task 5).
+    # working_memory, /objects) needs it. Two things to know:
+    #  * Since P1 task 5 (2026-09-11) the Tier-2 per-second rollup is owned by
+    #    the analytics ticker and runs whenever analytics.enable is true, so
+    #    headless runs carry a full latency_hourly / segmentation_hourly
+    #    history and real input_hz / effective_ratio. Records made before
+    #    that (eval/baselines/2026-09-sensor-clock/B1.json and older) have
+    #    empty hourly lists, input_hz 0.0 and effective_ratio ~1000
+    #    (processing / 0.001): the rollup then lived in the viz push loop
+    #    and ran only while a browser client was attached.
     #  * Object counts are NOT viz-independent: a faster step shifts the
     #    wall-clock non-KF admission, so headless runs carry a few extra
     #    unconfirmed protos (confirmed set identical). Compare headless runs
@@ -234,6 +236,9 @@ def run_one_backend(backend_info: Dict[str, str]) -> Dict[str, Any]:
         # kept as-is. objects_full is the whole map (server max 500) for the
         # post-reconcile anchors -- do not compare it against the old shas.
         objects_full = api_get("/objects?limit=500") or {}
+        # /healthz: the ingest lane snapshot (P1 task 5; present headless) and,
+        # live, the watchdog verdict — part of every record from here on.
+        healthz = api_get("/healthz") or {}
 
         result = {
             "label": label,
@@ -243,6 +248,8 @@ def run_one_backend(backend_info: Dict[str, str]) -> Dict[str, Any]:
             "latency_hourly": analytics.get("latency", {}).get("hourly", []),
             "segmentation": analytics.get("segmentation", {}).get("aggregate", {}),
             "segmentation_hourly": analytics.get("segmentation", {}).get("hourly", []),
+            "rollup": analytics.get("rollup"),      # the ticker's health (ticks, late_ticks, stale_rollups)
+            "healthz": healthz,
             "working_memory": basic_stats,
             "detailed": detailed,
             "objects": objects_all,

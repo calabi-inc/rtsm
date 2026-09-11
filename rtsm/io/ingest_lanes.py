@@ -450,19 +450,30 @@ class IngestLanes:
         ``age_dropped`` = cumulative non-keyframe age drops. Supersession is
         deliberately NOT a signal: it is the designed steady state."""
         with self._cv:
-            if self._policy == POLICY_LOSSLESS:
-                full = len(self._fifo) >= self._fifo_depth
-            else:
-                full = len(self._kf) >= self._kf_depth
-            return {"lane_full": bool(full), "age_dropped": int(self._c["age_dropped"]),
+            return {"lane_full": self._lane_full_locked(), "age_dropped": int(self._c["age_dropped"]),
                     "depth": self._depth_locked()}
 
+    def _lane_full_locked(self) -> bool:
+        """The bounded lane (keyframe lane under ``latest``, the FIFO under
+        ``lossless``) is at capacity right now. Must hold the lock."""
+        if self._policy == POLICY_LOSSLESS:
+            return len(self._fifo) >= self._fifo_depth
+        return len(self._kf) >= self._kf_depth
+
     def stats(self) -> Dict[str, Any]:
+        """Snapshot served as ``/stats.ingest_lanes`` and ``/healthz.ingest``
+        (P1 task 5): policy, capacity, per-lane depth, ``lane_full`` (the
+        bounded lane is at capacity at read time), ``max_depth_seen``,
+        ``blocked_s``, ``closed`` and the eight cumulative counters. Under
+        ``lossless`` a full lane is a blocking FIFO's steady state, not a
+        fault — read ``blocked_s``; the sustained ``backlogged`` verdict stays
+        with the watchdog (live only)."""
         with self._cv:
             out: Dict[str, Any] = {
                 "policy": self._policy,
                 "maxsize": self.maxsize,
                 "depth": self._depth_locked(),
+                "lane_full": self._lane_full_locked(),
                 "max_depth_seen": self._max_depth_seen,
                 "blocked_s": round(self._blocked_s, 3),
                 "closed": self._closed,

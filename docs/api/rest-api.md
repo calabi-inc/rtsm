@@ -16,11 +16,29 @@ All list endpoints support **offset-based pagination** via `offset` and `limit` 
 GET /healthz
 ```
 
-**Response**:
+**Response** (every key besides `status` appears only when its source is wired):
 
 ```json
-{"status": "ok"}
+{
+  "status": "ok",
+  "frame_flow": {"state": "ok", "degraded": false, "reasons": [], "ingest_queue_depth": 0,
+                 "backlog": {"lane_full": false, "age_dropped": 0, "depth": {"keyframe": 0, "latest": 0}}},
+  "semantic_index": {"confirmed": 62, "indexed": 62, "lag": 0},
+  "ingest": {"policy": "lossless", "maxsize": 32, "depth": {"fifo": 0}, "lane_full": false,
+             "max_depth_seen": 2, "blocked_s": 0.0, "closed": false,
+             "admitted_kf": 9, "admitted_nonkf": 77, "nonkf_superseded": 0, "kf_dropped": 0,
+             "kf_lane_full": 0, "age_dropped": 0, "blocked_puts": 0, "closed_puts": 0}
+}
 ```
+
+| Key | Source | Folds into `status` |
+|-----|--------|---------------------|
+| `frame_flow` | the frame-flow watchdog (live receivers only; off under `--replay`): `state` is one of `waiting`, `ok`, `starved`, `hung`, `receiver_dead`, `backlogged`, `pose_degraded`, `no_ingestible_input`; `backlog` is the lane signal at its last poll | yes, when `degraded` |
+| `semantic_index` | the vector store: confirmed objects vs indexed vectors | yes, on upsert / persistence failures or a large lag |
+| `ingest` | the ingest lane object itself (`IngestLanes.stats()`, the same snapshot as `/stats.ingest_lanes`) — present live, under replay, in eval and in `rtsm demo`, no flag | **never**: under `lossless` (the replay/eval default) a full lane is a blocking FIFO's steady state, not a fault — read `blocked_s`; live runs keep the watchdog's sustained `backlogged` for that. A raising provider yields `{"error": "unavailable"}` |
+| `reasons` | frame-flow reasons first, then semantic-retrieval reasons | present only when `status` is `degraded` |
+
+Live, `lane_full` appears twice: `frame_flow.backlog` is the watchdog's last poll, `ingest` is read time.
 
 ### Readiness
 
@@ -301,7 +319,7 @@ GET /stats
   "avg_hits": 4.2,
   "upserts_total": 28,
   "ingest_q": 0,
-  "ingest_lanes": {"policy": "latest", "maxsize": 4, "depth": {"keyframe": 0, "latest": 0},
+  "ingest_lanes": {"policy": "latest", "maxsize": 4, "depth": {"keyframe": 0, "latest": 0}, "lane_full": false,
                    "nonkf_superseded": 0, "kf_dropped": 0, "age_dropped": 0, "blocked_puts": 0}
 }
 ```
@@ -328,7 +346,24 @@ Returns stats from all components: working memory, sweep cache, frame window, vi
 GET /stats/analytics
 ```
 
-Returns real-time pipeline analytics with per-second time-series history (up to 1 hour).
+Returns real-time pipeline analytics with per-second time-series history (up to 1 hour):
+
+```json
+{
+  "latency": {
+    "aggregate": {"frame_count": 53, "input_hz": 5.4, "processing_hz": 1.16, "effective_ratio": 0.215,
+                  "counters": {"received": 240, "processed": 53, "gate_rejections": 33, "throttle_skips": 154, "...": 0},
+                  "...": {}},
+    "hourly": [{"wall_ts": 1789120519.4, "input_hz": 5.0, "frames_received": 5, "processing_hz": 1.0, "frames_in_bucket": 1,
+                "elapsed_s": 1.0, "stale_interval": false, "wm_total": 124, "wm_confirmed": 65, "...": 0}]
+  },
+  "segmentation": {"aggregate": {"...": 0}, "hourly": [{"...": 0}]},
+  "rollup": {"interval_s": 1.0, "ticks": 84, "late_ticks": 0, "stale_rollups": 0, "ring_truncated": 0,
+             "last_tick_age_s": 0.4, "stalled": false, "alive": true}
+}
+```
+
+The per-second `hourly` buckets are produced by the **analytics ticker**, one daemon thread per process that runs whenever `analytics.enable` is true — with or without a visualization client — so headless runs (`--replay`, `rtsm demo --no-viz`, the eval harness) carry the same history and real `input_hz` / `effective_ratio`. Each bucket covers `elapsed_s` seconds (1.0 at the ticker's cadence); `stale_interval` is true when the interval exceeded 2 s (a late tick), in which case the bucket is wide, not empty — counts stay exact: every processed frame, received frame and drop is in exactly one bucket, so the per-bucket sums equal the lifetime `counters` (the first bucket after start also carries whatever the receiver recorded before the ticker started). `rollup` is the ticker's own health: `late_ticks` counts tick-to-tick gaps above 2 s (a 1 Hz thread that could not get scheduled), `stale_rollups` the buckets the buffers flagged, `ring_truncated` frames whose timings left the Tier-1 ring before a rollup, `stalled` the read-time view (no tick for more than 2 s — the counters only move when a tick eventually happens, so a ticker wedged behind a lock shows `stalled: true` with `late_ticks 0`); it is `null` when no ticker is wired, and none of it is reset by `POST /reset`.
 
 Returns `503` if analytics is disabled (`analytics.enable: false` in config).
 

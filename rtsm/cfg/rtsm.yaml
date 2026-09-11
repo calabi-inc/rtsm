@@ -364,7 +364,7 @@ visualization:
 
   # Runtime analytics dashboard push settings
   analytics:
-    push_interval_ms: 1000        # Tier 2 rollup + push cadence (ms)
+    push_interval_ms: 1000        # Dashboard push cadence (ms); the 1 Hz Tier-2 rollup itself is owned by the analytics ticker (analytics.enable)
     full_sync_interval_s: 30      # Re-send full Tier 2 history every N seconds
 
 # -------------------- SLAM (on-device, via Calabi Lens) --------------------

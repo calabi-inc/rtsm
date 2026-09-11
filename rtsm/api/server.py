@@ -37,6 +37,8 @@ def create_app(
     vis_registry: Optional[Any] = None,
     static_dir: Optional[str] = None,
     frame_flow_provider: Optional[Callable[[], Dict[str, Any]]] = None,
+    ingest_provider: Optional[Callable[[], Dict[str, Any]]] = None,
+    analytics_ticker: Optional[Any] = None,
 ) -> FastAPI:
     """
     Build a FastAPI app exposing:
@@ -122,6 +124,18 @@ def create_app(
                            folds into status and its reasons into "reasons".
           semantic_index - {confirmed, indexed, lag} when a vector store
                            with stats() is wired.
+          ingest         - the ingest lane object's own snapshot (policy,
+                           depth, lane_full, counters; IngestLanes.stats())
+                           when an ingest_provider is wired — present live,
+                           under replay, in eval and in `rtsm demo`, no
+                           flag (P1 task 5). Diagnostic only: it NEVER folds
+                           into status (under the replay/eval default
+                           `lossless` a full lane is a blocking FIFO's steady
+                           state, not a fault — read blocked_s; live runs keep
+                           the watchdog's sustained `backlogged` for that). A
+                           raising provider yields {"error": "unavailable"}.
+                           Live, lane_full appears twice: frame_flow.backlog
+                           is the watchdog's last poll, ingest is read time.
           reasons        - ONE list, frame-flow reasons first, then semantic
                            retrieval reasons; present only when degraded.
 
@@ -152,6 +166,13 @@ def create_app(
             except Exception:
                 # Health endpoint must never fail because the watchdog did.
                 out["frame_flow"] = {"state": "unknown"}
+
+        # ---- ingest lanes (the lane object itself; diagnostic, never folds) ----
+        if ingest_provider is not None:
+            try:
+                out["ingest"] = dict(ingest_provider() or {})
+            except Exception:
+                out["ingest"] = {"error": "unavailable"}
 
         # ---- semantic retrieval (vector store) ----
         if vectors is not None:
@@ -826,7 +847,14 @@ def create_app(
     # ---- Analytics endpoint ----
     @app.get("/stats/analytics")
     def stats_analytics() -> Dict[str, Any]:
-        """Get runtime analytics (segmentation breakdown + latency/throughput)."""
+        """Get runtime analytics (segmentation breakdown + latency/throughput).
+
+        Populated headless: the per-second ``hourly`` history is rolled up by
+        the analytics ticker whenever ``analytics.enable`` is true, with or
+        without a visualization client (P1 task 5). ``rollup`` is the ticker's
+        own health (ticks, late_ticks, stale_rollups, ...) or null when no
+        ticker is wired, so "no buckets" is distinguishable from "no frames".
+        """
         if not seg_analytics and not latency_analytics:
             raise HTTPException(status_code=503, detail="Analytics not enabled")
         result: Dict[str, Any] = {}
@@ -840,6 +868,7 @@ def create_app(
                 "aggregate": seg_analytics.aggregate(),
                 "hourly": seg_analytics.hourly_history(),
             }
+        result["rollup"] = analytics_ticker.stats() if analytics_ticker is not None else None
         return result
 
     # ---- Embedded MCP server (optional) ----

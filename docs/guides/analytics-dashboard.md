@@ -40,10 +40,10 @@ Each stage reports mean, P50, P95, and max latency.
 ### Segmentation analytics
 
 ```bash
-curl http://localhost:8002/analytics/segmentation
+curl http://localhost:8002/stats/analytics
 ```
 
-Returns segmentation-specific metrics:
+The `segmentation` block returns segmentation-specific metrics (the `latency` block carries the throughput history, drop counters and the rollup health; see the [REST API](../api/rest-api.md)):
 
 - Masks per frame (mean, min, max)
 - Dual-confirmation rate (when using `dual` backend)
@@ -71,7 +71,7 @@ The analytics dashboard is built into the 3D visualization frontend. When the vi
 - **Time-series charts** — Throughput, per-stage latency breakdown, segmentation rates (powered by uPlot)
 - **Config display** — Current backend, filtering thresholds, and scoring parameters
 
-The dashboard updates in real-time via WebSocket push from the visualization server.
+The dashboard updates in real-time via WebSocket push from the visualization server. The per-second history behind the charts is produced by the analytics ticker (`analytics.enable`), which runs whether or not the dashboard is open: a browser attaching mid-run receives the whole history since the process started, and headless runs expose the same data on `GET /stats/analytics`.
 
 ---
 
