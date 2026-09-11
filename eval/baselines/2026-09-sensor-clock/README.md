@@ -79,22 +79,3 @@ clock): 124/65 @53 `ad6f71a5b89c8506` = this anchor; dequeue (86) and receiver (
 frame, seq 405, epoch 0); `sensor_ts_ns` = that frame's stamp; `pose_clock: sender`; **one writer:** `writes_accepted`
 240 = every tracking-normal receiver line, `sensor_ts_regressions` 0, `rejected_writes` 0. **PASS.** Script + verdict only
 (raw artifacts gitignored).
-
-## Task 5 reproduction (headless metrics, 2026-09-11) — `task5-headless-metrics/`
-
-Same harness, branch `feature/headless-metrics` (main `ae60117` + the analytics ticker), **no visualization client
-anywhere**. **M** = packaged default (lossless, sensor clock): 124/65 @53 `ad6f71a5b89c8506` = this anchor; dequeue (86)
-and receiver (240) sequences identical to B1; per-line identical to the task-2 record; `robot_pose` predicates of task 4
-unchanged (240 / 0 / 0). **Headless metrics (new):** the raw JSON now carries `rollup` and `healthz`; the rollup owner
-ticked 90 times with `late_ticks` 0, `stale_rollups` 0, `stalled` false and `last_tick_age_s` 0.5 at read time;
-`latency_hourly` has 90 buckets = ticks = `segmentation_hourly` (35 with frames, none flagged `stale_interval`, `elapsed_s`
-max 1.015) whose per-bucket sums equal the lifetime counters exactly — frames 53 = 53,
-received 240 = 240, gate_rejections 33 = 33, throttle_skips 154 = 154, queue_drops + superseded + age_drops 0; the
-aggregate reads `input_hz` 5.0 / `effective_ratio` 0.232 (B1 and the task-2 record, made before the ticker, read 0.0 /
-1163.6); the last bucket's `wm_total` / `wm_confirmed` 124 / 65 equal `/stats`; `segmentation_hourly` sums to 53;
-`/healthz.ingest` = `{policy: lossless, depth: {fifo: 0}, lane_full: false, closed: false, closed_puts: 0, admitted 9 + 77
-= 86 dequeued, no lane drops, max_depth_seen 2, blocked_s 0.0}` with no `frame_flow` key (replay: watchdog off). **PASS.**
-Gate run 1 on the same tree failed one predicate (throttle 148 vs 154: the ticker's start had re-anchored the drop
-cursors, so six skips recorded before it started were in no bucket); the fix (time cursor only) passed in run 2; the
-recorded run 3 is after the code review (`stalled` / tick-age / bucket-count predicates added, `closed` informational).
-Script + verdict only (raw artifacts gitignored).
