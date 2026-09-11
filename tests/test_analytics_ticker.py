@@ -452,8 +452,8 @@ def test_push_loop_cursor_protocol_full_on_attach_then_one_append_per_bucket():
         task.cancel()
         try:
             await task
-        except (asyncio.CancelledError, Exception):
-            pass
+        except asyncio.CancelledError:
+            pass    # the loop ends by cancellation; anything else it raised must surface
 
     # A private loop, not asyncio.run(): run() leaves the main thread with NO
     # current event loop afterwards, which breaks later tests in the same
@@ -484,8 +484,8 @@ def _run_loop(vs, steps):
             task.cancel()
             try:
                 await task
-            except (asyncio.CancelledError, Exception):
-                pass
+            except asyncio.CancelledError:
+                pass    # the loop ends by cancellation; anything else it raised must surface
     loop = asyncio.new_event_loop()
     try:
         loop.run_until_complete(drive())

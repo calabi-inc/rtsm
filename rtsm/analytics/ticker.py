@@ -232,7 +232,11 @@ class AnalyticsTicker(threading.Thread):
                 stale += int(rs.get("stale_rollups", 0) or 0)
                 truncated += int(rs.get("ring_truncated", 0) or 0)
             except Exception:
-                pass
+                # stats() feeds /stats/analytics and the gate: a buffer whose
+                # rollup_stats() raises (an embedder's duck-typed buffer, say)
+                # must not take the health readout down with it; the ticker's
+                # own counters below are still reported.
+                logger.debug("[analytics] rollup_stats() failed for %s", type(buf).__name__, exc_info=True)
         with self._lock:
             last = self._last_tick_mono
             ref = last if last is not None else self._started_mono

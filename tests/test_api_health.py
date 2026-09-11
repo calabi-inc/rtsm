@@ -9,7 +9,6 @@ ticker's own health, `null` when no ticker is wired.
 from __future__ import annotations
 
 import numpy as np
-import pytest
 from fastapi.testclient import TestClient
 from prometheus_client import CollectorRegistry
 
