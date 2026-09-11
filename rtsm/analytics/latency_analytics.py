@@ -6,6 +6,16 @@ and 4 drop points (tracking, throttle, queue full, gate rejection).
 
 Tier 1: Per-frame FrameTimingStats in a ring buffer (deque, maxlen=300).
 Tier 2: Per-second LatencySecondBucket with wall-clock retention (default 1 hour).
+
+The Tier-1 -> Tier-2 rollup (``roll_up_second``) has ONE owner per process:
+``rtsm.analytics.ticker.AnalyticsTicker`` (built by ``build_analytics``), a
+1 Hz daemon thread that runs whenever ``analytics.enable`` is true — with or
+without a visualization client (P1 task 5; before, the rollup lived in the
+visualization push loop and a headless run never produced a bucket). The
+visualization server only consumes the buckets the ticker publishes. Frame
+selection for a bucket is COUNT-based (every appended frame lands in exactly
+one bucket, whatever clock stamped it) and rates are computed over the
+interval actually elapsed.
 """
 from __future__ import annotations
 
@@ -15,6 +25,11 @@ import time
 from collections import deque
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
+
+# A rollup interval longer than this is flagged ``stale_interval`` (a late
+# tick); the owner passes max(STALE_INTERVAL_S, 2 x its interval). Counts stay
+# exact either way — the flag only marks the bucket as covering a long gap.
+STALE_INTERVAL_S = 2.0
 
 
 @dataclass
@@ -43,6 +58,7 @@ class LatencySecondBucket:
     """One-second aggregate for Tier 2 time-series."""
     wall_ts: float              # time.time() — x-axis for charts
     input_hz: float = 0.0
+    frames_received: int = 0    # frames that arrived this interval (input_hz = frames_received / elapsed_s)
     processing_hz: float = 0.0
     effective_ratio: float = 0.0
     # Drop counters (per second)
@@ -70,6 +86,9 @@ class LatencySecondBucket:
     wm_total: int = 0               # total WM objects at snapshot time
     wm_confirmed: int = 0           # confirmed objects at snapshot time
     wm_proto: int = 0               # proto objects at snapshot time
+    # Rollup interval bookkeeping (P1 task 5)
+    elapsed_s: float = 0.0          # monotonic seconds this bucket covers (~1.0 at the ticker's cadence)
+    stale_interval: bool = False    # elapsed_s exceeded the stale threshold (a late tick); counts are still exact
 
 
 def _mean(values: list) -> float:
@@ -121,7 +140,7 @@ class PipelineLatencyBuffer:
         self._throttle_skips: int = 0
         self._tracking_drops: int = 0
 
-        # Queue depth sampling (capped to prevent unbounded growth if no clients)
+        # Queue depth samples for one rollup interval (bounded in case the ticker is stopped)
         self._queue_depth_samples: deque[int] = deque(maxlen=120)  # ~4s at 30 Hz
 
         # Rollup cursors
@@ -134,8 +153,14 @@ class PipelineLatencyBuffer:
         self._last_rollup_superseded: int = 0
         self._last_rollup_throttle_skips: int = 0
         self._last_rollup_tracking_drops: int = 0
+        self._last_rollup_total: int = 0        # count cursor: frames already rolled into a bucket
+        # Rollup-mechanism diagnostics (NOT reset by clear(): they describe the
+        # rollup owner's health, not the session's data; see rollup_stats()).
+        self._rollups: int = 0
+        self._stale_rollups: int = 0
+        self._ring_truncated: int = 0
 
-        # WM snapshot (updated by vis server before rollup)
+        # WM snapshot (updated by the analytics ticker before each rollup)
         self._wm_snapshot: dict = {"total": 0, "confirmed": 0, "proto": 0}
 
         self._lock = threading.Lock()
@@ -203,7 +228,7 @@ class PipelineLatencyBuffer:
             self._tracking_drops += 1
 
     def snapshot_wm(self, total: int, confirmed: int, proto: int) -> None:
-        """Inject WM state snapshot for next rollup. Called by vis server."""
+        """Inject WM state snapshot for the next rollup. Called by the analytics ticker."""
         with self._lock:
             self._wm_snapshot = {"total": total, "confirmed": confirmed, "proto": proto}
 
@@ -212,40 +237,38 @@ class PipelineLatencyBuffer:
         with self._lock:
             self._queue_depth_samples.append(depth)
 
-    # ---- Tier 2 rollup (vis server thread, ~1 Hz) ----
+    # ---- Tier 2 rollup (analytics ticker thread, 1 Hz) ----
 
-    def roll_up_second(self) -> LatencySecondBucket:
-        """Aggregate recent Tier 1 data into a Tier 2 bucket.
+    def roll_up_second(self, now_mono: Optional[float] = None,
+                       stale_after_s: float = STALE_INTERVAL_S) -> LatencySecondBucket:
+        """Aggregate everything appended / recorded since the previous rollup
+        into one Tier-2 bucket. Called by the analytics ticker (the one owner
+        per process); never by the pipeline, never by the visualization server.
 
-        Called by the vis server's push loop. Never called by the pipeline.
+        ``now_mono`` lets the owner stamp both buffers with one clock reading;
+        ``stale_after_s`` is the threshold above which the interval is flagged
+        ``stale_interval`` (the ticker passes max(2 s, 2 x its interval)).
+
+        Counts are exact over ANY interval: ``frames_in_bucket`` is the number
+        of frames appended since the previous rollup (a count delta, so each
+        frame is in exactly one bucket regardless of the clock that stamped
+        it — the pipeline stamps with perf_counter, the cursor is monotonic),
+        and the drop fields are cumulative-counter deltas. Rates divide by the
+        interval actually elapsed. A long interval (a late tick) therefore
+        yields one wide, flagged bucket with nothing skipped: the old guard
+        that discarded the interval's data is gone, only its flag remains.
+        When more frames were appended than the ring holds, the timing means
+        cover the ring's tail and ``ring_truncated`` (rollup_stats) grows.
         """
         with self._lock:
-            now_mono = time.monotonic()
-            elapsed = now_mono - self._last_rollup_ts
+            now = time.monotonic() if now_mono is None else float(now_mono)
+            elapsed = max(0.001, now - self._last_rollup_ts)
+            stale = elapsed > float(stale_after_s)
 
-            # Stale cursor guard: if no rollup for >2s (e.g., no clients),
-            # skip accumulated data — rates would be meaningless.
-            if elapsed > 2.0:
-                self._last_rollup_ts = now_mono
-                self._last_rollup_received = self._received_count
-                self._last_rollup_rejections = self._gate_rejections
-                self._last_rollup_frame_rejections = self._frame_rejections
-                self._last_rollup_queue_drops = self._queue_drops
-                self._last_rollup_age_drops = self._age_drops
-                self._last_rollup_superseded = self._superseded
-                self._last_rollup_throttle_skips = self._throttle_skips
-                self._last_rollup_tracking_drops = self._tracking_drops
-                self._queue_depth_samples.clear()
-                bucket = LatencySecondBucket(wall_ts=time.time(), frames_in_bucket=0)
-                self._second_buckets.append(bucket)
-                self._evict_old()
-                return bucket
-
-            elapsed = max(0.001, elapsed)
-
-            # Frames processed since last rollup
-            recent = [f for f in self._buffer if f.timestamp > self._last_rollup_ts]
-            n = len(recent)
+            # Frames appended since the last rollup (count-based selection)
+            n = max(0, self._total_appended - self._last_rollup_total)
+            truncated = max(0, n - len(self._buffer))
+            recent = list(self._buffer)[-n:] if n > 0 else []
 
             # Input rate since last rollup
             received_since = self._received_count - self._last_rollup_received
@@ -260,7 +283,7 @@ class PipelineLatencyBuffer:
             throttle = self._throttle_skips - self._last_rollup_throttle_skips
             tracking = self._tracking_drops - self._last_rollup_tracking_drops
 
-            # Queue depth stats
+            # Queue depth stats (samples taken by the receivers at enqueue)
             samples = list(self._queue_depth_samples)
             q_mean = round(_mean(samples), 1) if samples else 0.0
             q_max = max(samples) if samples else 0
@@ -270,8 +293,11 @@ class PipelineLatencyBuffer:
             bucket = LatencySecondBucket(
                 wall_ts=time.time(),
                 input_hz=round(input_hz, 1),
+                frames_received=received_since,
                 processing_hz=round(processing_hz, 2),
-                effective_ratio=round(processing_hz / max(0.001, input_hz), 3),
+                # Undefined without input this interval (the lossless drain after a
+                # replay ends, a live pause): 0.0, not processing / 0.001.
+                effective_ratio=round(processing_hz / input_hz, 3) if received_since > 0 else 0.0,
                 queue_drops=q_drops,
                 superseded=superseded,
                 age_drops=age_drops,
@@ -293,24 +319,57 @@ class PipelineLatencyBuffer:
                 wm_total=self._wm_snapshot.get('total', 0),
                 wm_confirmed=self._wm_snapshot.get('confirmed', 0),
                 wm_proto=self._wm_snapshot.get('proto', 0),
+                elapsed_s=round(elapsed, 3),
+                stale_interval=stale,
             )
 
             self._second_buckets.append(bucket)
             self._evict_old()
-
-            # Advance rollup cursors + reset per-interval state
-            self._last_rollup_ts = now_mono
-            self._last_rollup_received = self._received_count
-            self._last_rollup_rejections = self._gate_rejections
-            self._last_rollup_frame_rejections = self._frame_rejections
-            self._last_rollup_queue_drops = self._queue_drops
-            self._last_rollup_age_drops = self._age_drops
-            self._last_rollup_superseded = self._superseded
-            self._last_rollup_throttle_skips = self._throttle_skips
-            self._last_rollup_tracking_drops = self._tracking_drops
-            self._queue_depth_samples.clear()
-
+            self._advance_cursors_locked(now)
+            self._rollups += 1
+            if stale:
+                self._stale_rollups += 1
+            self._ring_truncated += truncated
             return bucket
+
+    def _advance_cursors_locked(self, now: float) -> None:
+        """Move every rollup cursor to the present. Must hold lock."""
+        self._last_rollup_ts = now
+        self._last_rollup_total = self._total_appended
+        self._last_rollup_received = self._received_count
+        self._last_rollup_rejections = self._gate_rejections
+        self._last_rollup_frame_rejections = self._frame_rejections
+        self._last_rollup_queue_drops = self._queue_drops
+        self._last_rollup_age_drops = self._age_drops
+        self._last_rollup_superseded = self._superseded
+        self._last_rollup_throttle_skips = self._throttle_skips
+        self._last_rollup_tracking_drops = self._tracking_drops
+        self._queue_depth_samples.clear()
+
+    def reset_rollup_clock(self, now_mono: Optional[float] = None) -> None:
+        """Start the Tier-2 clock now (called by the ticker's start()): ONLY the
+        time cursor moves, so the first bucket the owner rolls covers one
+        interval rather than the time since construction (model loads happen in
+        between) and is not flagged stale. Every COUNT cursor stays where it is:
+        frames appended, frames received and drops recorded before the owner
+        started (the receiver runs before the ticker) land in the first bucket,
+        so for every counter sum(bucket field) == the lifetime counter over the
+        whole process. The first gate run proved the need: with the drop
+        cursors re-anchored, six throttle skips recorded between the replayer's
+        start and the ticker's start were in no bucket (148 vs 154)."""
+        with self._lock:
+            self._last_rollup_ts = time.monotonic() if now_mono is None else float(now_mono)
+
+    def rollup_stats(self, now_mono: Optional[float] = None) -> Dict[str, Any]:
+        """Health of the rollup mechanism itself; survives clear()."""
+        with self._lock:
+            now = time.monotonic() if now_mono is None else float(now_mono)
+            return {
+                "rollups": self._rollups,
+                "stale_rollups": self._stale_rollups,
+                "ring_truncated": self._ring_truncated,
+                "last_rollup_age_s": round(max(0.0, now - self._last_rollup_ts), 2),
+            }
 
     # ---- Read methods (vis server + API) ----
 
@@ -329,11 +388,17 @@ class PipelineLatencyBuffer:
             total_appended = self._total_appended
             if last_n is not None:
                 entries = entries[-last_n:]
-            # Grab recent Tier 2 buckets for input_hz estimation
-            recent_t2 = [b for b in self._second_buckets if b.frames_in_bucket > 0][-10:]
-            # Lifetime (process-monotonic) counters. Reported cumulatively so a
-            # headless run — no viz client, hence no Tier-2 rollup — still
-            # exposes every drop point.
+            # The last 10 Tier-2 buckets that carried frames, for input_hz
+            # estimation (bounded reverse scan: the deque holds up to 3600).
+            recent_t2: List[LatencySecondBucket] = []
+            for b in reversed(self._second_buckets):
+                if b.frames_in_bucket > 0:
+                    recent_t2.append(b)
+                    if len(recent_t2) == 10:
+                        break
+            recent_t2.reverse()
+            # Lifetime (process-monotonic) counters, independent of the Tier-2
+            # rollup: every drop point is visible even before a bucket exists.
             counters = {
                 "received": self._received_count,
                 "processed": total_appended,
@@ -421,15 +486,21 @@ class PipelineLatencyBuffer:
         }
 
     def hourly_history(self) -> List[Dict[str, Any]]:
-        """Return Tier 2 buckets as list of dicts for chart rendering."""
+        """Return Tier 2 buckets as list of dicts for chart rendering. The
+        buckets are immutable once appended, so only the snapshot is taken
+        under the lock; serialising up to 3600 of them (~13 ms) happens
+        outside it, off the receiver's and the pipeline's hot path."""
         with self._lock:
-            return [dataclasses.asdict(b) for b in self._second_buckets]
+            buckets = list(self._second_buckets)
+        return [dataclasses.asdict(b) for b in buckets]
 
     def clear(self) -> None:
-        """Reset all state — called on /reset."""
+        """Reset the session's data — called on /reset. The rollup-mechanism
+        counters (rollup_stats) survive: they describe the owner, not the data."""
         with self._lock:
             self._buffer.clear()
             self._second_buckets.clear()
+            self._last_rollup_total = 0
             self._received_count = 0
             self._gate_rejections = 0
             self._frame_rejections = 0
@@ -439,7 +510,6 @@ class PipelineLatencyBuffer:
             self._throttle_skips = 0
             self._tracking_drops = 0
             self._queue_depth_samples.clear()
-            self._last_rollup_ts = time.monotonic()
             self._last_rollup_received = 0
             self._last_rollup_rejections = 0
             self._last_rollup_frame_rejections = 0
@@ -450,6 +520,11 @@ class PipelineLatencyBuffer:
             self._last_rollup_tracking_drops = 0
             self._total_appended = 0
             self._wm_snapshot = {"total": 0, "confirmed": 0, "proto": 0}
+            # _last_rollup_ts is deliberately NOT touched: the count cursors
+            # were reset with the counters, so the next bucket's deltas are
+            # already post-reset, and keeping the time cursor tick-to-tick
+            # keeps elapsed_s the real interval (a reset 0.1 s before a tick
+            # would otherwise produce a 10x rate spike) on the ticker's clock.
 
     def _evict_old(self) -> None:
         """Remove Tier 2 buckets older than retention window. Must hold lock."""

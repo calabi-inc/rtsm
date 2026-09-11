@@ -4,7 +4,7 @@ Tests for rtsm.analytics — SegAnalyticsBuffer and PipelineLatencyBuffer.
 Covers:
 - Tier 1 append/aggregate
 - Tier 2 rollup + time-based eviction
-- Stale cursor guard
+- Stale-interval flag (a long gap is flagged, never skipped; rollup owner = the analytics ticker)
 - Drop counters and queue depth sampling
 - Thread safety (concurrent append + rollup)
 - Empty buffer edge cases
@@ -94,7 +94,8 @@ class TestSegAnalyticsBuffer:
 
     def test_rollup_produces_bucket(self):
         buf = SegAnalyticsBuffer(max_frames=100, retention_s=3600)
-        # Advance cursor past init time so appended entry is visible
+        # Widen the interval so the rates are finite (selection is count-based; the
+        # cursor no longer decides visibility)
         time.sleep(0.02)
         buf._last_rollup_ts = time.monotonic() - 0.5
         buf.append(SegFrameStats(
@@ -116,14 +117,18 @@ class TestSegAnalyticsBuffer:
         assert bucket.frames_in_bucket == 0
         assert bucket.dual_rate == 0.0
 
-    def test_stale_cursor_guard(self):
+    def test_stale_interval_is_flagged_not_skipped(self):
         buf = SegAnalyticsBuffer(max_frames=100)
         buf.append(SegFrameStats(timestamp=time.monotonic(), n_dual=5, n_total=5))
-        # Simulate stale cursor by backdating it
+        # A long gap since the previous rollup (a late tick)
         buf._last_rollup_ts = time.monotonic() - 10.0
         bucket = buf.roll_up_second()
-        # Stale guard returns empty bucket
-        assert bucket.frames_in_bucket == 0
+        # P1 task 5: the interval is flagged, the frame is still counted
+        assert bucket.frames_in_bucket == 1 and bucket.dual_rate == 1.0
+        assert bucket.stale_interval is True and bucket.elapsed_s >= 10.0
+        assert buf.rollup_stats()["stale_rollups"] == 1
+        time.sleep(0.01)
+        assert buf.roll_up_second().stale_interval is False
 
     def test_hourly_history(self):
         buf = SegAnalyticsBuffer(max_frames=100, retention_s=3600)
@@ -283,7 +288,8 @@ class TestPipelineLatencyBuffer:
 
     def test_rollup_produces_bucket(self):
         buf = PipelineLatencyBuffer(max_frames=100, retention_s=3600)
-        # Advance cursor past init time so appended entry is visible
+        # Widen the interval so the rates are finite (selection is count-based; the
+        # cursor no longer decides visibility)
         time.sleep(0.02)
         buf._last_rollup_ts = time.monotonic() - 0.5
         for _ in range(5):
@@ -334,18 +340,20 @@ class TestPipelineLatencyBuffer:
         assert bucket2.queue_drops == 0
         assert bucket2.frames_in_bucket == 0
 
-    def test_stale_cursor_guard(self):
+    def test_stale_interval_is_flagged_not_skipped(self):
         buf = PipelineLatencyBuffer(max_frames=100)
         buf.append(FrameTimingStats(timestamp=time.monotonic(), t_total=0.1))
         buf.record_frame_received()
         buf.record_queue_drop()
-        # Simulate stale cursor
+        # A long gap since the previous rollup (a late tick)
         buf._last_rollup_ts = time.monotonic() - 10.0
         bucket = buf.roll_up_second()
-        # Stale guard resets everything, returns empty bucket
-        assert bucket.frames_in_bucket == 0
-        assert bucket.queue_drops == 0
-        assert bucket.input_hz == 0.0
+        # P1 task 5: counts are exact over any interval, rates use the real elapsed time
+        assert bucket.frames_in_bucket == 1
+        assert bucket.queue_drops == 1
+        assert bucket.input_hz == pytest.approx(0.1, abs=0.01)
+        assert bucket.stale_interval is True and bucket.elapsed_s >= 10.0
+        assert buf.rollup_stats()["stale_rollups"] == 1
 
     def test_hourly_history(self):
         buf = PipelineLatencyBuffer(max_frames=100, retention_s=3600)

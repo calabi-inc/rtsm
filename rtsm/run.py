@@ -176,17 +176,6 @@ def main():
     segmenter.warmup()
     logger.info(f"Segmentation models loaded and ready: {segmenter.name}")
 
-    # ── Runtime analytics buffers (optional) ──
-    from rtsm.analytics import SegAnalyticsBuffer, PipelineLatencyBuffer
-    analytics_cfg = cfg.get("analytics", {})
-    seg_analytics = None
-    latency_analytics = None
-    if analytics_cfg.get("enable", True):
-        retention_s = float(analytics_cfg.get("retention_s", 3600))
-        buffer_frames = int(analytics_cfg.get("buffer_frames", 300))
-        seg_analytics = SegAnalyticsBuffer(max_frames=buffer_frames, retention_s=retention_s)
-        latency_analytics = PipelineLatencyBuffer(max_frames=buffer_frames, retention_s=retention_s)
-        logger.info(f"Runtime analytics initialized (retention={retention_s}s, buffer={buffer_frames} frames)")
     clip_cfg = cfg.get("clip", {})
     clip_model = clip_cfg.get("model", "ViT-B-32")
     clip_pretrained = clip_cfg.get("pretrained", "openai")
@@ -210,6 +199,18 @@ def main():
     logger.info(f"Proximity index successfully initialized")
     wm = WorkingMemory(cfg, index=proximity_index, clock=clock)
     logger.info(f"Working memory successfully initialized")
+    # ── Runtime analytics (optional): Tier-1 buffers + the Tier-2 rollup owner ──
+    # build_analytics returns the two buffers and the AnalyticsTicker (the ONE
+    # owner of the 1 Hz rollup, viz or not); it is started right before
+    # pipe.run_forever() below, so its late_ticks / stale_rollups measure the
+    # run and not the model loads. Sits below WorkingMemory because the ticker
+    # snapshots wm.stats() each tick; the buffers' first consumer is further down.
+    from rtsm.analytics import build_analytics
+    analytics = build_analytics(cfg, wm=wm)
+    seg_analytics = analytics.seg
+    latency_analytics = analytics.latency
+    if analytics.enabled:
+        logger.info(f"Runtime analytics initialized (retention={analytics.retention_s}s, buffer={analytics.buffer_frames} frames; rollup owner = analytics ticker)")
     assoc = Associator(cfg)
     ingest_gate = IngestGate(cfg)
     logger.info(f"Ingest gate successfully initialized")
@@ -260,6 +261,7 @@ def main():
             seg_analytics=seg_analytics,
             latency_analytics=latency_analytics,
             ingest_queue=ingest_q,
+            analytics_ticker=analytics.ticker,
         )
         logger.info("Visualization server initialized")
 
@@ -481,6 +483,8 @@ def main():
         vis_registry=vis_server_registry,
         static_dir=static_dir,
         frame_flow_provider=watchdog.status if watchdog else None,
+        ingest_provider=ingest_q.stats,
+        analytics_ticker=analytics.ticker,
     )
     start_server(app, host=host, port=port)
     logger.info(f"FastAPI server started on http://{display_host}:{port}")
@@ -540,6 +544,9 @@ def main():
         flush_thread = threading.Thread(target=_flush_after_replay, daemon=True, name="replay-flush")
         flush_thread.start()
 
+    # The Tier-2 rollup starts with the consumer: every load, the receiver and
+    # the API server are up, so the ticker's counters describe the run only.
+    analytics.start()
     try:
         pipe.run_forever()
     except KeyboardInterrupt:
@@ -548,6 +555,7 @@ def main():
         if recorder is not None:
             recorder.close()
         event_log.close()   # no-op if the pipeline already closed it
+        analytics.stop()
 
 if __name__ == "__main__":
     main()

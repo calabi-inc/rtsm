@@ -174,7 +174,7 @@ def run_demo(argv: list[str] | None = None) -> None:
     from rtsm.api.server import create_app, start_server, ResetComponents
     from rtsm.utils.net import get_local_ipv4_addresses
     from rtsm.utils.static_dir import find_static_dir
-    from rtsm.analytics import SegAnalyticsBuffer, PipelineLatencyBuffer
+    from rtsm.analytics import build_analytics
 
     io_cfg = cfg.get("io", {})
     ws_cfg = io_cfg.get("websocket", {})
@@ -212,13 +212,11 @@ def run_demo(argv: list[str] | None = None) -> None:
         up_axis=up_axis,
     )
 
-    # Analytics
-    analytics_cfg = cfg.get("analytics", {})
-    seg_analytics = None
-    latency_analytics = None
-    if analytics_cfg.get("enable", True):
-        seg_analytics = SegAnalyticsBuffer()
-        latency_analytics = PipelineLatencyBuffer()
+    # Analytics: Tier-1 buffers + the Tier-2 rollup owner (AnalyticsTicker),
+    # started right before pipe.run_forever() below (see rtsm/analytics/ticker.py).
+    analytics = build_analytics(cfg, wm=wm)
+    seg_analytics = analytics.seg
+    latency_analytics = analytics.latency
 
     # ── Visualization server (processing only, WebSocket merged into API) ──
     vis_server = None
@@ -235,6 +233,7 @@ def run_demo(argv: list[str] | None = None) -> None:
             seg_analytics=seg_analytics,
             latency_analytics=latency_analytics,
             ingest_queue=ingest_q,
+            analytics_ticker=analytics.ticker,
         )
         vis_broadcaster = vis_server.broadcaster
         vis_server_registry = vis_server.registry
@@ -311,6 +310,8 @@ def run_demo(argv: list[str] | None = None) -> None:
         vis_broadcaster=vis_broadcaster,
         vis_registry=vis_server_registry,
         static_dir=static_dir,
+        ingest_provider=ingest_q.stats,
+        analytics_ticker=analytics.ticker,
     )
     start_server(app, host="0.0.0.0", port=port)
 
@@ -365,12 +366,17 @@ def run_demo(argv: list[str] | None = None) -> None:
     flush_thread = threading.Thread(target=_flush_after_replay, daemon=True, name="demo-flush")
     flush_thread.start()
 
+    # The Tier-2 rollup starts with the consumer (after the loads, the replayer
+    # and the API server), so the ticker's counters describe the run only.
+    analytics.start()
+
     try:
         pipe.run_forever()
     except KeyboardInterrupt:
         pass
     finally:
         event_log.close()   # no-op if the pipeline already closed it
+        analytics.stop()
         # Print summary
         all_objs = list(wm.iter_objects())
         confirmed = sum(1 for o in all_objs if o.confirmed)

@@ -135,6 +135,7 @@ class VisualizationServer:
         seg_analytics: Any = None,
         latency_analytics: Any = None,
         ingest_queue: Any = None,
+        analytics_ticker: Any = None,
     ):
         """
         Initialize visualization server.
@@ -151,9 +152,18 @@ class VisualizationServer:
         self.port = port
         self._ingest_queue = ingest_queue   # for the config echo (maxsize / policy)
 
-        # Analytics buffers (optional)
+        # Analytics buffers (optional) + the Tier-2 rollup owner. This server
+        # only CONSUMES the buckets the ticker publishes (P1 task 5); buffers
+        # without a ticker would mean either no rollup or a second owner.
         self._seg_analytics = seg_analytics
         self._latency_analytics = latency_analytics
+        self._analytics_ticker = analytics_ticker
+        if (seg_analytics is not None or latency_analytics is not None) and analytics_ticker is None:
+            raise ValueError(
+                "VisualizationServer: analytics buffers were passed without analytics_ticker; "
+                "the Tier-2 rollup is owned by rtsm.analytics.AnalyticsTicker — build the buffers with "
+                "rtsm.analytics.build_analytics(cfg, wm=...) and pass analytics_ticker=bundle.ticker"
+            )
 
         # Visualization config
         vis_cfg = cfg.get("visualization", {})
@@ -411,77 +421,108 @@ class VisualizationServer:
         }
 
     async def _push_analytics_loop(self) -> None:
-        """Periodically roll up Tier 1 → Tier 2 and push analytics to clients."""
-        import dataclasses
+        """Push analytics to clients every ``visualization.analytics.push_interval_ms``.
 
+        CONSUMER ONLY (P1 task 5): the Tier-1 -> Tier-2 rollup and the WM
+        snapshot are done by the analytics ticker at 1 Hz whether or not a
+        client is attached; this loop reads the ticks it has not pushed yet.
+
+        Cursor protocol. A full sync (``mode: full``, the whole history since
+        process start plus the config) is sent whenever the client count
+        increased since the last push — so every attaching browser gets the
+        history within one push interval — every ``full_sync_interval_s``
+        pushes, and whenever the ticker's history no longer covers the cursor
+        (a gap: the loop fell more than the ticker's retained ticks behind).
+        Otherwise one ``append`` per new bucket (the frontend takes one bucket
+        per message, so a push interval slower than the tick loses nothing),
+        or one aggregate-only append (``bucket: null``) when no tick landed in
+        this interval. The cursor is committed only after the messages went
+        out, and a full sync reads the cursor BEFORE the history, so a bucket
+        landing in between is sent twice at worst (the chart tolerates a
+        duplicate x), never skipped.
+        """
+        ticker = self._analytics_ticker
+        last_tick: Optional[int] = None
         ticks_since_full = 0
+        prev_clients = 0
 
         while self._running:
             try:
                 await asyncio.sleep(self._analytics_push_s)
 
-                if self.broadcaster.client_count == 0:
-                    continue  # skip rollup when nobody is listening
-
-                # Snapshot WM state before rollup (for object health metrics)
-                if self._latency_analytics and self.wm:
-                    try:
-                        wm_stats = self.wm.stats()
-                        total = int(wm_stats.get('objects', 0))
-                        confirmed = int(wm_stats.get('confirmed', 0))
-                        self._latency_analytics.snapshot_wm(
-                            total=total, confirmed=confirmed, proto=total - confirmed
-                        )
-                    except Exception:
-                        pass
-
-                # Roll up Tier 1 → Tier 2
-                lat_bucket = self._latency_analytics.roll_up_second() if self._latency_analytics else None
-                seg_bucket = self._seg_analytics.roll_up_second() if self._seg_analytics else None
+                n_clients = self.broadcaster.client_count
+                if n_clients == 0:
+                    prev_clients = 0
+                    continue
 
                 ticks_since_full += 1
-                is_full = ticks_since_full >= self._analytics_full_sync_interval
+                is_full = (n_clients > prev_clients) or last_tick is None \
+                    or ticks_since_full >= self._analytics_full_sync_interval
+                prev_clients = n_clients
+
+                new_ticks: list = []
+                if not is_full and ticker is not None:
+                    new_ticks = ticker.since(last_tick)
+                    if new_ticks and new_ticks[0].tick != last_tick + 1:
+                        is_full = True            # gap: the ticker's history no longer covers the cursor
+                        new_ticks = []
+
+                if is_full:
+                    rec = ticker.latest() if ticker is not None else None
+                    next_cursor = rec.tick if rec is not None else last_tick     # cursor first, history second
+                    msgs = self._analytics_messages(True, [])
+                else:
+                    next_cursor = new_ticks[-1].tick if new_ticks else last_tick
+                    msgs = self._analytics_messages(False, new_ticks)
+
+                for msg in msgs:
+                    await self.broadcaster._broadcast_json(msg)
+                last_tick = next_cursor                # committed only after the sends
                 if is_full:
                     ticks_since_full = 0
-
-                backend = self.cfg.get("segmentation", {}).get("backend", "fastsam")
-                msg: dict = {"type": "runtime_analytics"}
-
-                if is_full:
-                    msg["mode"] = "full"
-                    msg["config"] = self._extract_analytics_config()
-                    if self._latency_analytics:
-                        msg["latency"] = {
-                            "aggregate": self._latency_analytics.aggregate(),
-                            "hourly": self._latency_analytics.hourly_history(),
-                        }
-                    if self._seg_analytics:
-                        msg["segmentation"] = {
-                            "backend": backend,
-                            "aggregate": self._seg_analytics.aggregate(),
-                            "hourly": self._seg_analytics.hourly_history(),
-                        }
-                else:
-                    msg["mode"] = "append"
-                    if self._latency_analytics:
-                        msg["latency"] = {
-                            "aggregate": self._latency_analytics.aggregate(),
-                            "bucket": dataclasses.asdict(lat_bucket) if lat_bucket else None,
-                        }
-                    if self._seg_analytics:
-                        msg["segmentation"] = {
-                            "backend": backend,
-                            "aggregate": self._seg_analytics.aggregate(),
-                            "bucket": dataclasses.asdict(seg_bucket) if seg_bucket else None,
-                        }
-
-                await self.broadcaster._broadcast_json(msg)
 
             except asyncio.CancelledError:
                 break
             except Exception:
                 logger.debug("[visualization] analytics push error", exc_info=True)
                 await asyncio.sleep(self._analytics_push_s)
+
+    def _analytics_messages(self, is_full: bool, new_ticks: list) -> List[dict]:
+        """Build the ``runtime_analytics`` messages for one push: one ``full``
+        message (aggregates + whole history + config), or one ``append`` per
+        tick record (``bucket`` = that tick's bucket, ``null`` for a buffer the
+        record has no bucket for), or a single aggregate-only ``append`` when
+        ``new_ticks`` is empty. Never rolls up, never snapshots the WM."""
+        import dataclasses
+
+        backend = self.cfg.get("segmentation", {}).get("backend", "fastsam")
+
+        def _lat() -> dict:
+            return {"aggregate": self._latency_analytics.aggregate()}
+
+        def _seg() -> dict:
+            return {"backend": backend, "aggregate": self._seg_analytics.aggregate()}
+
+        if is_full:
+            msg: dict = {"type": "runtime_analytics", "mode": "full",
+                         "config": self._extract_analytics_config()}
+            if self._latency_analytics:
+                msg["latency"] = {**_lat(), "hourly": self._latency_analytics.hourly_history()}
+            if self._seg_analytics:
+                msg["segmentation"] = {**_seg(), "hourly": self._seg_analytics.hourly_history()}
+            return [msg]
+
+        out: List[dict] = []
+        for rec in (list(new_ticks) or [None]):
+            lat_b = getattr(rec, "latency", None) if rec is not None else None
+            seg_b = getattr(rec, "seg", None) if rec is not None else None
+            msg = {"type": "runtime_analytics", "mode": "append"}
+            if self._latency_analytics:
+                msg["latency"] = {**_lat(), "bucket": dataclasses.asdict(lat_b) if lat_b is not None else None}
+            if self._seg_analytics:
+                msg["segmentation"] = {**_seg(), "bucket": dataclasses.asdict(seg_b) if seg_b is not None else None}
+            out.append(msg)
+        return out
 
     def handle_kf_packet(
         self,

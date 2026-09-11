@@ -316,8 +316,9 @@ pacing and vector-flush cadence always stay on wall time. Object `created_mono`
 - `auto` (packaged default) — `lossless` under `--replay` and `rtsm demo`,
   `latest` for live receivers.
 
-`/stats.ingest_lanes` reports the policy, per-lane depth and the counters
-(`nonkf_superseded`, `kf_dropped`, `age_dropped`, `blocked_puts`); the
+`/stats.ingest_lanes` and `/healthz.ingest` (the same snapshot, present in
+every mode with no flag) report the policy, per-lane depth, `lane_full` and the
+counters (`nonkf_superseded`, `kf_dropped`, `age_dropped`, `blocked_puts`); the
 frame-flow trace writes lane-side drops as receiver lines with `source:
 "lanes"`. The watchdog reports `backlogged` only when a lane stays full for
 three consecutive polls or a frame was discarded for age.
@@ -536,7 +537,7 @@ visualization:
     include_proto: true          # include unconfirmed objects
 
   analytics:
-    push_interval_ms: 1000       # analytics push cadence
+    push_interval_ms: 1000       # dashboard push cadence (the 1 Hz rollup itself is the analytics ticker's)
     full_sync_interval_s: 30     # full history re-send interval
 ```
 
@@ -553,7 +554,7 @@ analytics:
   buffer_frames: 300             # Tier 1 per-frame ring buffer size
 ```
 
-When enabled, analytics are available via `GET /stats/analytics` and pushed to visualization clients.
+When enabled, the **analytics ticker** (one daemon thread per process) rolls the per-frame buffers into per-second buckets at 1 Hz whether or not a visualization client is connected, so headless runs (`--replay`, `rtsm demo --no-viz`, the eval harness) expose the same `GET /stats/analytics` history and real `input_hz` / `effective_ratio` as a run with the dashboard open; the visualization server only forwards the buckets. `/stats/analytics.rollup` reports the ticker's health (`ticks`, `late_ticks`, `stale_rollups`). `analytics.enable: false` disables the buffers and the ticker together (`/stats/analytics` then returns 503).
 
 ---
 

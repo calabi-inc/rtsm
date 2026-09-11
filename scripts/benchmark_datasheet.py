@@ -23,8 +23,9 @@ Options (everything else on the command line is a backend name):
                      clobbers the default-config run.
     --viz            keep the visualization server on (browser tab opens per
                      run) for human review. Default is headless: no viz
-                     server, no browser; the raw JSON's Tier-2 hourly lists
-                     are empty and object counts differ slightly from viz-on
+                     server, no browser. The Tier-2 hourly lists are filled
+                     either way (the analytics ticker owns the rollup since
+                     P1 task 5); object counts differ slightly from viz-on
                      runs (compare against headless anchors only; see
                      benchmark_backends.patch_config).
     --set K=V        pass `--set K=V` to the runner (repeatable), e.g.

@@ -60,7 +60,9 @@ class IngestQueue:
         return {"lane_full": n >= self._q.maxsize, "age_dropped": 0, "depth": {"legacy": n}}
 
     def stats(self) -> dict:
-        return {"policy": self.policy, "maxsize": self.maxsize, "depth": self.depth()}
+        n = self._q.qsize()
+        return {"policy": self.policy, "maxsize": self.maxsize, "depth": {"legacy": n},
+                "lane_full": n >= self._q.maxsize}
 
     def set_on_drop(self, cb) -> None:
         """No lane-side drops exist in the legacy queue (tail-drop refusals
