@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import logging
 from pathlib import Path
 import subprocess
 import sys
@@ -224,3 +225,109 @@ runpy.run_module('rtsm', run_name='__main__')
     result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
     assert "Tuning controls valid" in result.stdout
+
+
+# ---------------- deprecated paths (P1 task 6: io.websocket.* -> ingest.*) ----------------
+
+
+def _deprecations(caplog):
+    return [r.getMessage() for r in caplog.records if r.name == "rtsm.cfg" and r.levelno >= logging.WARNING]
+
+
+def test_old_websocket_paths_are_moved_via_set_and_profile(tmp_path, caplog):
+    caplog.set_level(logging.WARNING, logger="rtsm.cfg")
+    with pytest.warns(DeprecationWarning, match="io.websocket.keyframe_every_n"):
+        cfg = load_config(set_values=["io.websocket.keyframe_every_n=7"])
+    assert cfg["ingest"]["keyframe_every_n"] == 7
+    assert "keyframe_every_n" not in cfg["io"]["websocket"]
+    assert cfg["io"]["websocket"]["port"] == 8765                      # the rest of io.websocket is intact
+    assert any("io.websocket.keyframe_every_n" in m and "ingest.keyframe_every_n" in m for m in _deprecations(caplog))
+    profile = tmp_path / "old.yaml"
+    profile.write_text("io:\n  websocket:\n    port: 9000\n    nonkf_min_interval_s: 0.25\n", encoding="utf-8")
+    with pytest.warns(DeprecationWarning, match="io.websocket.nonkf_min_interval_s"):
+        cfg = load_config(profiles=[profile])
+    assert cfg["ingest"]["nonkf_min_interval_s"] == 0.25 and cfg["io"]["websocket"]["port"] == 9000
+
+
+def test_old_path_resolves_to_the_same_config_and_fingerprint_as_the_new_path(tmp_path):
+    with pytest.warns(DeprecationWarning):
+        old = load_config(set_values=["io.websocket.nonkf_min_interval_s=1.0"])
+    new = load_config(set_values=["ingest.nonkf_min_interval_s=1.0"])
+    assert old == new and config_fingerprint(old) == config_fingerprint(new)
+    # a full base file written in the old layout (host / port stay under io.websocket)
+    base = load_config()
+    base["io"]["websocket"]["keyframe_every_n"] = base["ingest"].pop("keyframe_every_n")
+    path = tmp_path / "old_base.yaml"
+    path.write_text(yaml.safe_dump(base), encoding="utf-8")
+    with pytest.warns(DeprecationWarning):
+        aliased = load_config(path)                                    # no profiles / --set: the early-return path
+    assert aliased == load_config() and config_fingerprint(aliased) == config_fingerprint(load_config())
+
+
+def test_new_path_wins_when_one_source_names_both(tmp_path, caplog):
+    caplog.set_level(logging.WARNING, logger="rtsm.cfg")
+    profile = tmp_path / "both.yaml"
+    profile.write_text("ingest:\n  keyframe_every_n: 9\nio:\n  websocket:\n    keyframe_every_n: 4\n", encoding="utf-8")
+    with pytest.warns(DeprecationWarning, match="IGNORED"):
+        cfg = load_config(profiles=[profile])
+    assert cfg["ingest"]["keyframe_every_n"] == 9
+    assert any("IGNORED" in m for m in _deprecations(caplog))
+
+
+def test_last_write_wins_across_sources_with_old_paths(tmp_path):
+    profile = tmp_path / "p.yaml"
+    profile.write_text("io:\n  websocket:\n    keyframe_every_n: 5\n", encoding="utf-8")
+    with pytest.warns(DeprecationWarning):
+        cfg = load_config(profiles=[profile], set_values=["io.websocket.keyframe_every_n=7"])
+    assert cfg["ingest"]["keyframe_every_n"] == 7
+
+
+def test_typos_of_old_paths_are_hinted_to_the_new_path():
+    with pytest.raises(ConfigError, match="Did you mean 'ingest.keyframe_every_n'"):
+        load_config(set_values=["io.websocket.keyfram_every_n=5"])
+    with pytest.raises(ConfigError, match="Did you mean 'ingest.nonkf_min_interval_s'"):
+        load_config(set_values=["io.websocket.nonkf_min_interval=0.4"])
+
+
+def test_dotted_literal_old_key_is_rejected_not_silently_merged(tmp_path):
+    profile = tmp_path / "dotted.yaml"
+    profile.write_text("io.websocket.keyframe_every_n: 5\n", encoding="utf-8")
+    with pytest.raises(ConfigError, match="Did you mean 'ingest.keyframe_every_n'"):
+        load_config(profiles=[profile])
+
+
+def test_shim_refuses_to_overwrite_a_malformed_target_section(tmp_path):
+    base = tmp_path / "bad.yaml"
+    base.write_text("ingest: 5\nio:\n  websocket:\n    keyframe_every_n: 3\n", encoding="utf-8")
+    with pytest.raises(ConfigError, match="'ingest' is not a mapping"):
+        load_config(base)
+
+
+def test_packaged_bases_carry_the_moved_keys_and_no_old_ones():
+    for name, expected in (("rtsm.yaml", (30, 0.5)), ("demo_config.yaml", (5, 0.3))):
+        cfg = load_config(name)
+        assert (cfg["ingest"]["keyframe_every_n"], cfg["ingest"]["nonkf_min_interval_s"]) == expected, name
+        assert "keyframe_every_n" not in cfg["io"]["websocket"] and "nonkf_min_interval_s" not in cfg["io"]["websocket"]
+        assert cfg["ingest"]["non_kf_grace_s"] == 0.0
+        assert (cfg["ingest"]["pair_window_s"], cfg["ingest"]["pair_window_fps"]) == (2.0, 30)
+
+
+def test_throttle_control_lives_under_ingest_for_every_receiver():
+    assert "ingest.nonkf_min_interval_s = 0.5" in explain_tuning(load_config(), "latency")
+    zmq = load_config(set_values=["io.receiver=zeromq"])
+    assert "ingest.nonkf_min_interval_s = 0.5" in explain_tuning(zmq, "latency")      # no longer hidden under ZeroMQ
+    assert "io.websocket.nonkf_min_interval_s" not in explain_tuning(load_config(), "latency")
+    with pytest.raises(ConfigError, match="ingest.nonkf_min_interval_s"):
+        validate_tuning(load_config(set_values=["ingest.nonkf_min_interval_s=-1"]))
+
+
+def test_config_show_prints_the_new_layout_for_an_old_style_file(tmp_path, capsys):
+    base = load_config()
+    base["io"]["websocket"]["nonkf_min_interval_s"] = base["ingest"].pop("nonkf_min_interval_s")
+    path = tmp_path / "old.yaml"
+    path.write_text(yaml.safe_dump(base), encoding="utf-8")
+    with pytest.warns(DeprecationWarning):
+        main(["show", "--config", str(path)])
+    shown = yaml.safe_load(capsys.readouterr().out)
+    assert shown["ingest"]["nonkf_min_interval_s"] == 0.5
+    assert "nonkf_min_interval_s" not in shown["io"]["websocket"]

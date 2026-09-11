@@ -134,19 +134,43 @@ def resolve_policy(configured: Any, *, replay: bool) -> str:
 
 @dataclass(frozen=True)
 class LaneConfig:
-    """Validated ``ingest:`` lane settings. Build with :meth:`from_cfg` at
+    """The validated ``ingest:`` block: lane policy + depths, the receiver
+    timing that moved here from ``io.websocket.*`` in P1 task 6
+    (``keyframe_every_n`` -- websocket / replay only, ZeroMQ keyframes are the
+    SLAM node's; ``nonkf_min_interval_s`` -- every receiver), and the ZeroMQ
+    pairing window (``pair_window_s`` / ``pair_window_fps`` -> the derived
+    frame cap; nothing else reads the rate). Build with :meth:`from_cfg` at
     startup so a typo fails through the config-error path before any model
-    loads."""
+    loads; the runners read these values from here, never from ``io.websocket``."""
     policy: str
     keyframe_lane_depth: int = 3
     keyframe_lane_overflow: str = OVERFLOW_DROP_OLDEST
     max_frame_age_s: Optional[float] = 2.0
     lossless_depth: int = 32
     configured_policy: str = POLICY_AUTO
+    keyframe_every_n: int = 30
+    nonkf_min_interval_s: float = 0.5
+    pair_window_s: float = 2.0
+    pair_window_fps: float = 30.0
+    # Ingest-gate timing (read by IngestGate from the cfg; validated HERE so a
+    # bad value exits before any model loads): 0 = off for both.
+    non_kf_grace_s: float = 0.0
+    dup_window_ns: int = 200_000_000
+
+    @property
+    def pair_window_frames(self) -> int:
+        """ZeroMQ FrameWindow count cap: ceil(pair_window_s x pair_window_fps x 1.5)
+        (90 at the defaults; the 1.5 is the same margin the kwarg carried).
+        Rounded to 1e-6 first so a float product a hair above an integer does
+        not ceil one frame too high (4.48 x 25 x 1.5 = 168.00000000000003)."""
+        v = round(float(self.pair_window_s) * float(self.pair_window_fps) * 1.5, 6)
+        return max(1, int(-(-v // 1)))
 
     @classmethod
     def from_cfg(cls, cfg: Optional[Dict[str, Any]], *, replay: bool) -> "LaneConfig":
         ing = (cfg or {}).get("ingest") or {}
+        if not isinstance(ing, dict):
+            raise ValueError(f"ingest: must be a mapping; got {ing!r}")
         configured = ing.get("policy", POLICY_AUTO)
         policy = resolve_policy(configured, replay=replay)
         kf_depth = _positive_int(ing.get("keyframe_lane_depth", 3), "ingest.keyframe_lane_depth")
@@ -162,8 +186,48 @@ class LaneConfig:
             if age <= 0:
                 raise ValueError(f"ingest.max_frame_age_s must be > 0 or null; got {age!r}")
         depth = _positive_int(ing.get("lossless_depth", 32), "ingest.lossless_depth")
+        kf_every = _positive_int(ing.get("keyframe_every_n", 30), "ingest.keyframe_every_n")
+        interval = _finite_float(ing.get("nonkf_min_interval_s", 0.5), "ingest.nonkf_min_interval_s", minimum=0.0)
+        window_s = _finite_float(ing.get("pair_window_s", 2.0), "ingest.pair_window_s", minimum=0.0, strict=True)
+        window_fps = _finite_float(ing.get("pair_window_fps", 30.0), "ingest.pair_window_fps", minimum=0.0, strict=True)
+        grace = _finite_float(ing.get("non_kf_grace_s", 0.0), "ingest.non_kf_grace_s", minimum=0.0)
+        dup_ns = _nonneg_int(ing.get("dup_window_ns", 200_000_000), "ingest.dup_window_ns")
         return cls(policy=policy, keyframe_lane_depth=kf_depth, keyframe_lane_overflow=overflow,
-                   max_frame_age_s=age, lossless_depth=depth, configured_policy=str(configured))
+                   max_frame_age_s=age, lossless_depth=depth, configured_policy=str(configured),
+                   keyframe_every_n=kf_every, nonkf_min_interval_s=interval,
+                   pair_window_s=window_s, pair_window_fps=window_fps,
+                   non_kf_grace_s=grace, dup_window_ns=dup_ns)
+
+
+def _finite_float(v: Any, key: str, *, minimum: float, strict: bool = False) -> float:
+    """A finite number >= minimum (> minimum when strict). Booleans and strings
+    are not numbers (the same rule the tuning controls apply: YAML 1.1 reads
+    `1e3` as a string; write `1000.0`)."""
+    if isinstance(v, (bool, str)):
+        raise ValueError(f"{key} must be a number; got {v!r}")
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        raise ValueError(f"{key} must be a number; got {v!r}")
+    if f != f or f in (float("inf"), float("-inf")):
+        raise ValueError(f"{key} must be finite; got {v!r}")
+    if (f <= minimum) if strict else (f < minimum):
+        raise ValueError(f"{key} must be {'>' if strict else '>='} {minimum:g}; got {v!r}")
+    return f
+
+
+def _nonneg_int(v: Any, key: str) -> int:
+    """A whole number >= 0 (0 = off for a window); booleans are not numbers."""
+    if isinstance(v, (bool, str)):
+        raise ValueError(f"{key} must be a whole number >= 0; got {v!r}")
+    try:
+        f = float(v)
+        i = int(f)
+    except (TypeError, ValueError):
+        raise ValueError(f"{key} must be a whole number >= 0; got {v!r}")
+    if f != i or i < 0:
+        raise ValueError(f"{key} must be a whole number >= 0; got {v!r}")
+    return i
 
 
 def _positive_int(v: Any, key: str) -> int:

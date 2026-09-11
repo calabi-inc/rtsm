@@ -207,10 +207,15 @@ io:
     host: "0.0.0.0"
     port: 8765
     require_tracking_normal: true    # drop frames with bad tracking
-    keyframe_every_n: 30             # mark every Nth frame as keyframe
-    nonkf_min_interval_s: 0.5        # throttle non-keyframes (~2/s)
     confidence_threshold: 2          # 0=all, 1=medium+high, 2=high only
 ```
+
+The keyframe cadence and the non-keyframe throttle live under `ingest:`
+(`keyframe_every_n`, `nonkf_min_interval_s`); see [Ingest Clock & Admission
+Timing](#ingest-clock-admission-timing). Their former paths
+`io.websocket.keyframe_every_n` / `io.websocket.nonkf_min_interval_s` still
+work in a config file, a profile or `--set` with a deprecation warning until
+0.3.0 (see "Deprecated paths" below).
 
 ### Receive-Time Forward Clearance (opt-in)
 
@@ -240,7 +245,7 @@ io:
   rtabmap_endpoint: tcp://127.0.0.1:6000     # RTABMap pose topics
 ```
 
-The subscriber pairs each RTABMap pose with the nearest camera frame (30 ms slop) from a window of **encoded** JPEG/PNG frames — 2 s or at most 90 frames (≈ 30 MB worst case; `ZeroMQSubscriber(frame_window_ttl_s=, frame_window_max_items=)` until these become `ingest:` keys) — and decodes a frame only once its pose has been admitted to the ingest queue. The window has to outlast the latency of a keyframe pose stamp behind the newest camera frame (RTABMap can trail by more than a second during loop closure); an unpaired keyframe is dropped as `no_camera_frame`, not retried.
+The subscriber pairs each RTABMap pose with the nearest camera frame (30 ms slop) from a window of **encoded** JPEG/PNG frames — `ingest.pair_window_s` (2 s) or at most `ceil(pair_window_s × pair_window_fps × 1.5)` frames (90 at the defaults, ≈ 30 MB worst case; `pair_window_fps` is read by nothing else) — and decodes a frame only once its pose has been admitted to the ingest queue. Its non-keyframe throttle reads `ingest.nonkf_min_interval_s` like the other receivers (it was a fixed 0.5 s before). The window has to outlast the latency of a keyframe pose stamp behind the newest camera frame (RTABMap can trail by more than a second during loop closure); an unpaired keyframe is dropped as `no_camera_frame`, not retried.
 
 ### Unit Conversion
 
@@ -328,7 +333,7 @@ rtsm config show --profile room.yaml --set object.promote_hits=3 > trial.yaml
 rtsm --replay recordings/my-room --config trial.yaml
 ```
 
-`show` writes valid YAML to stdout and advisories to stderr. Each resolved
+`show` writes valid YAML to stdout and advisories to stderr; a file written in a deprecated layout is printed in the current one (see [Deprecated paths](#deprecated-paths)). Each resolved
 configuration has a SHA-256 fingerprint, also printed at runner startup.
 Keep the snapshot with the recording and evaluation results. The fingerprint
 identifies settings, not model weights, input data or code version.
@@ -343,16 +348,51 @@ of hardware/model compatibility.
 ingest:
   clock: auto                # auto | wall | sensor (see above)
   dup_window_ns: 200000000   # a non-keyframe within this sensor-time window of the last keyframe is skipped
-  non_kf_grace_s: 0.03       # non-keyframe grace right after a keyframe arrives (on the ingest clock)
+  non_kf_grace_s: 0.0        # non-keyframe grace right after a keyframe arrives (ingest clock); 0 = off, > 0 enables
   policy: auto               # latest | lossless | legacy | auto (lossless under replay / demo, latest live)
   keyframe_lane_depth: 3     # latest: waiting keyframes kept; overflow drops the oldest
   keyframe_lane_overflow: drop_oldest   # latest: drop_oldest | reject (reject refuses SLAM keyframes before decode)
   max_frame_age_s: 2.0       # latest: non-keyframe older than this at dequeue is discarded (null disables)
   lossless_depth: 32         # lossless: FIFO depth before the replayer waits
+  keyframe_every_n: 30       # websocket / replay: every Nth frame is a keyframe (ZeroMQ keyframes come from the SLAM node)
+  nonkf_min_interval_s: 0.5  # every receiver: minimum interval between admitted non-keyframes, on the ingest clock
+  pair_window_s: 2.0         # ZeroMQ only: how long an encoded camera frame waits for its pose
+  pair_window_fps: 30        # ZeroMQ only: with pair_window_s, sizes the window's frame cap (ceil(s × fps × 1.5))
 ```
 
-`dup_window_ns` and `non_kf_grace_s` were always read by the ingest gate with
-these defaults; shipping them makes them `--set`-able.
+`dup_window_ns` was always read by the ingest gate with this default. The
+non-keyframe grace is **off by default** (was 0.03): it fired zero times on
+session1 under either clock, the dup window covers the same frames under the
+sensor clock, and 0.03 sat 3 ms under the 30 Hz frame period. Setting it
+above 0 re-enables it (a negative value is rejected at startup, not treated as
+off); the one live case it can reach is a non-keyframe dequeued right after a
+keyframe that a later stage skipped, which the dup window and the sweep policy
+now decide instead.
+
+The keyframe cadence and the throttle are validated at startup with the lane
+keys (a bad value exits before any model loads) and the runners read them
+from there: the cadence for the websocket and replay receivers, the throttle
+for all three (the ZeroMQ throttle was a fixed 0.5 s before). A hand-written demo base that omits them
+gets 30 / 0.5, not the demo's 5 / 0.3; the packaged `demo_config.yaml` sets
+them explicitly.
+
+### Deprecated paths
+
+| Old path | New path | Removed in |
+|----------|----------|------------|
+| `io.websocket.keyframe_every_n` | `ingest.keyframe_every_n` | 0.3.0 |
+| `io.websocket.nonkf_min_interval_s` | `ingest.nonkf_min_interval_s` | 0.3.0 |
+
+An old path in a full `--config` file, a profile or a `--set` is applied to
+the new path before validation and merging (ordinary last-write-wins order),
+logged as a WARNING on the `rtsm.cfg` logger and raised as a
+`DeprecationWarning`. When one source names both, the new path wins and the
+old value is ignored. `rtsm config show` on an old-style file prints the new
+layout, and the same settings resolve to the same configuration and
+fingerprint whichever path carried them (an `io.websocket` block the move
+emptied is dropped). Typos are hinted to the new path, never the old one.
+Under `python -W error::DeprecationWarning` an old path is a hard error, as
+any deprecation is.
 
 ## Frame-Quality Gate
 

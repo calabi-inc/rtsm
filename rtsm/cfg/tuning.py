@@ -85,8 +85,9 @@ CONTROLS = (
     Control("ltm.ltm_min_view_bins", 2, ("search",),
             "View diversity required for vector upsert; defaults to object.require_view_bins.",
             minimum=1, integer=True),
-    Control("io.websocket.nonkf_min_interval_s", .5, ("latency",),
-            "Receiver throttle for non-keyframes. Higher reduces observations; keyframes follow a separate path."),
+    Control("ingest.nonkf_min_interval_s", .5, ("latency",),
+            "Receiver throttle for non-keyframes (websocket, replay and ZeroMQ alike). "
+            "Higher reduces observations; keyframes follow a separate path."),
 )
 
 SYMPTOMS = {
@@ -124,8 +125,6 @@ def active_controls(cfg: dict):
         if control.path == "assoc.cos_min" and not _get(cfg, "assoc.use_embeddings", True):
             continue
         if control.path.startswith("gates.") and not _get(cfg, "gates.enable", True):
-            continue
-        if control.path.startswith("io.websocket.") and _get(cfg, "io.receiver", "zeromq") != "websocket":
             continue
         yield control
 

@@ -9,7 +9,8 @@
 #   stability_promote: 0.40 (vs 0.55) -- easier confirmation
 #   stab_k: 0.55 (vs 0.45) -- faster stability rise
 #   proto_ttl_s: 5.0 (vs 10.0) -- cleaner proto cleanup
-#   keyframe_every_n: 5 (vs 30) -- more KFs from short clip
+#   ingest.keyframe_every_n: 5 (vs 30) -- more KFs from short clip
+#   ingest.nonkf_min_interval_s: 0.3 (vs 0.5) -- faster non-KF throughput
 #   tsdf.enable: false -- skip volumetric fusion
 #   mcp.enable: false -- not needed for demo
 #
@@ -103,9 +104,24 @@ io:
     host: "0.0.0.0"
     port: 8765
     require_tracking_normal: true
-    keyframe_every_n: 5              # DEMO: more keyframes from short clip
-    nonkf_min_interval_s: 0.3        # DEMO: faster non-KF throughput
     confidence_threshold: 2
+
+# -------------------- Ingest (frame admission timing) --------------------
+# Same keys as rtsm.yaml (see there for the semantics). The demo replays, so
+# auto resolves to the sensor clock and the lossless FIFO.
+ingest:
+  clock: auto
+  dup_window_ns: 200000000
+  non_kf_grace_s: 0.0
+  policy: auto
+  keyframe_lane_depth: 3
+  keyframe_lane_overflow: drop_oldest
+  max_frame_age_s: 2.0
+  lossless_depth: 32
+  keyframe_every_n: 5              # DEMO: more keyframes from the short clip
+  nonkf_min_interval_s: 0.3        # DEMO: faster non-KF throughput
+  pair_window_s: 2.0
+  pair_window_fps: 30
 
 units:
   depth_m_per_unit: 0.001

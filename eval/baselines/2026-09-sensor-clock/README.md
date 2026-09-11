@@ -98,3 +98,24 @@ Gate run 1 on the same tree failed one predicate (throttle 148 vs 154: the ticke
 cursors, so six skips recorded before it started were in no bucket); the fix (time cursor only) passed in run 2; the
 recorded run 3 is after the code review (`stalled` / tick-age / bucket-count predicates added, `closed` informational).
 Script + verdict only (raw artifacts gitignored).
+
+## Task 6 reproduction (config key moves, 2026-09-11) — `task6-config-keys/`
+
+Same harness, branch `feature/config-ingest-keys` (main `1fcd4d9` + the moves), three headless `dual` replays.
+**M** (packaged defaults, 1×): 124/65 @53 `ad6f71a5b89c8506` = this anchor; dequeue (86) and receiver (240) sequences
+identical to B1 (reasons included — `non_kf_grace_s: 0.0` and the moves change nothing); every task-5 predicate holds
+(pose 240/0/0, rollup 90 ticks = 90 buckets per buffer / 0 late / 0 stale / not stalled, Σ frames 53 / received 240 /
+gate_rejections 33 / throttle 154 / drops 0 / seg 53, last bucket WM 124/65, `/healthz.ingest` idle + drained with
+9 + 77 admitted); the runner's logged
+config `SHA-256` equals the CPU-side fingerprint of the same profiles on the harness-patched base (validates the
+fingerprint replication). **L** (a profile setting the OLD paths `io.websocket.keyframe_every_n: 30` /
+`io.websocket.nonkf_min_interval_s: 0.5`, 1×): identical to M; the run log carries both `rtsm.cfg` deprecation lines;
+its fingerprint equals the CPU-side fingerprint with and without the legacy profile (old path → same resolved dict).
+**T — the falsifying run** (`io.websocket.nonkf_min_interval_s: 1.0` through the OLD path, 5×): receiver enqueued 48
+(9 keyframes + 39 non-keyframes) / throttled 192, dequeue keyframes 9 — exactly the counts derived offline from B1's
+receiver lines with the attempt-based throttle rule (which reproduces 86/154 at 0.5 s line for line); deprecation
+line present; fingerprint equal via the old and the new path; multiset 97/45 `670dca82b330db26` (fewer admitted
+frames, as expected). A runner site still reading `io.websocket` (or dropping the kwargs) would have reproduced
+86/154 here. **PASS** (recorded run = after the code review). `gate.out` is the script's verbatim output: the six
+`DeprecationWarning` lines are the gate's own CPU-side `load_config` calls echoing the shim on stderr. Script + verdict
+only (raw artifacts gitignored).

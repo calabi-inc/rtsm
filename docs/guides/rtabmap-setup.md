@@ -145,6 +145,15 @@ usbipd wsl attach --busid <BUSID>
 
 ---
 
+## Throttle and pairing window
+
+The subscriber's non-keyframe throttle reads `ingest.nonkf_min_interval_s`
+(default 0.5 s, the value it had hardcoded before P1 task 6), on the ingest
+clock like the websocket and replay receivers. Its pairing window, how long an
+encoded camera frame waits for its pose, is `ingest.pair_window_s` (2 s) with
+a frame cap of `ceil(pair_window_s × pair_window_fps × 1.5)` (90 at the
+defaults); see the [configuration guide](../getting-started/configuration.md#ingest-clock-admission-timing).
+
 ## Next Steps
 
 - [RealSense Setup](realsense-setup.md) — Camera configuration

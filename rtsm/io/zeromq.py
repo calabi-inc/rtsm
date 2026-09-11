@@ -55,6 +55,10 @@ class ZeroMQSubscriber:
         latency_analytics: Optional[Any] = None,
         event_sink: Optional[Callable[[Any], None]] = None,
         throttle_clock: str = "wall",
+        # ingest.nonkf_min_interval_s: min interval between admitted non-keyframe
+        # (tracking) poses, on the throttle clock. Hardcoded at 0.5 until P1
+        # task 6; the same default, now the runner passes the configured value.
+        nonkf_min_interval_s: float = 0.5,
         # Receive-time robot-pose passthrough (WorkingMemory.update_robot_pose):
         # called for EVERY parsed tracking_pose at input rate (NOT for
         # kf_pose: a keyframe carries the node's pose, 50-300 ms behind the
@@ -71,8 +75,9 @@ class ZeroMQSubscriber:
         # closure / graph optimisation), not just the pairing slop -- an
         # unpaired keyframe is not retried. The TTL is meant to be the
         # binding bound, so max_items >= ttl * fps with margin (90 = 2 s *
-        # 30 Hz * 1.5, <= ~32 MB); at 45+ fps the count binds first. Task 6
-        # moves these to `ingest:` keys, deriving the count from ttl * fps.
+        # 30 Hz * 1.5, <= ~32 MB); at 45+ fps the count binds first. The
+        # runner passes `ingest.pair_window_s` and the count derived from it
+        # and `ingest.pair_window_fps` (LaneConfig.pair_window_frames, P1 task 6).
         frame_window_ttl_s: float = 2.0,
         frame_window_max_items: int = 90,
     ) -> None:
@@ -87,6 +92,9 @@ class ZeroMQSubscriber:
             pose_m_per_unit: Scale factor for pose translation (default 1.0, already in meters)
             on_kf_packet: Optional callback for rtabmap.kf_packet (visualization)
             on_kf_pose_update: Optional callback for rtabmap.kf_pose_update (visualization)
+            nonkf_min_interval_s: ingest.nonkf_min_interval_s (non-keyframe throttle)
+            frame_window_ttl_s / frame_window_max_items: the pairing window
+                (ingest.pair_window_s and the count LaneConfig derives from it)
         """
         self.camera_endpoint = camera_endpoint
         self.rtabmap_endpoint = rtabmap_endpoint
@@ -167,7 +175,7 @@ class ZeroMQSubscriber:
         # restarted source -> new epoch on the pose mailbox, on every
         # FramePacket (SensorClock re-bases on it) and in liveness().
         self._frame_epoch: int = 0
-        self._nonkf_min_interval_s: float = 0.5  # Max ~2 non-KF per second
+        self._nonkf_min_interval_s: float = float(nonkf_min_interval_s)  # ingest.nonkf_min_interval_s
 
         # Frame-flow liveness stamps (read by the watchdog). The subscriber
         # thread is created externally; run.py assigns it to self._thread.

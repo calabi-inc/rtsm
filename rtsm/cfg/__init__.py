@@ -10,6 +10,12 @@ Usage:
     cfg = load_config()                     # loads rtsm.yaml
     cfg = load_config("demo_config.yaml")   # loads demo_config.yaml
     path = cfg_path("clip/vocab.yaml")      # resolves to file path
+
+Deprecated paths (DEPRECATED_PATHS): a setting that moved keeps working under
+its old path in a full --config file, a profile or a --set until the removal
+release named there; every use is rewritten to the new path before override
+validation and merging, logged at WARNING on the `rtsm.cfg` logger and raised
+as a DeprecationWarning.
 """
 
 from __future__ import annotations
@@ -21,11 +27,79 @@ from copy import deepcopy
 import difflib
 import hashlib
 import json
+import logging
 import math
+import warnings
+
+logger = logging.getLogger(__name__)
 
 
 class ConfigError(ValueError):
     """A configuration cannot be applied as written."""
+
+
+# Settings that moved (P1 task 6): old dotted path -> new dotted path. Any
+# source that names an old path -- a full --config base, a profile, a --set --
+# is rewritten to the new path BEFORE override validation and merging, so the
+# ordinary last-write-wins order is unchanged and a typo is hinted to the NEW
+# path (the old paths are deliberately NOT part of the known set). When one
+# source names both, the new path wins and the old value is ignored. Each use
+# emits an `rtsm.cfg` WARNING log line (the documented surface: the runners
+# configure logging and `rtsm config` reaches stderr through logging's
+# last-resort handler) plus a DeprecationWarning (hidden by default outside
+# __main__; tests assert it).
+DEPRECATED_PATHS = {
+    "io.websocket.keyframe_every_n": "ingest.keyframe_every_n",
+    "io.websocket.nonkf_min_interval_s": "ingest.nonkf_min_interval_s",
+}
+DEPRECATED_REMOVAL = "0.3.0"
+
+
+def _prune_empty(tree: dict, parts: list) -> None:
+    """Delete the innermost mapping along `parts` if a rewrite left it empty
+    (only that one: an emptied `io.websocket` goes, its parent `io` stays)."""
+    if not parts:
+        return
+    node = tree
+    for part in parts[:-1]:
+        node = node.get(part) if isinstance(node, dict) else None
+        if not isinstance(node, dict):
+            return
+    if isinstance(node.get(parts[-1]), dict) and not node[parts[-1]]:
+        del node[parts[-1]]
+
+
+def _apply_deprecated_paths(tree: Any, source: str) -> None:
+    """Rewrite every DEPRECATED_PATHS occurrence in the nested mapping `tree` (in place)."""
+    if not isinstance(tree, dict):
+        return
+    for old, new in DEPRECATED_PATHS.items():
+        parts = old.split(".")
+        node: Any = tree
+        for part in parts[:-1]:
+            node = node.get(part) if isinstance(node, dict) else None
+        if not isinstance(node, dict) or parts[-1] not in node:
+            continue
+        value = node.pop(parts[-1])
+        _prune_empty(tree, parts[:-1])
+        new_parts = new.split(".")
+        target = tree
+        for i, part in enumerate(new_parts[:-1]):
+            if part in target and not isinstance(target[part], dict):
+                # Never paper over a malformed section: `ingest: 5` plus an old
+                # key would otherwise become `ingest: {keyframe_every_n: ...}`.
+                raise ConfigError(f"{source}: cannot apply deprecated {old!r} to {new!r}: "
+                                  f"{'.'.join(new_parts[:i + 1])!r} is not a mapping")
+            target = target.setdefault(part, {})
+        if new_parts[-1] in target:
+            msg = (f"{source}: {old!r} is deprecated and was IGNORED because {new!r} is set too "
+                   f"(the old path is removed in {DEPRECATED_REMOVAL})")
+        else:
+            target[new_parts[-1]] = value
+            msg = (f"{source}: {old!r} is deprecated; the value was applied to {new!r} "
+                   f"(the old path is removed in {DEPRECATED_REMOVAL})")
+        warnings.warn(msg, DeprecationWarning, stacklevel=3)
+        logger.warning(msg)
 
 
 def cfg_path(name: str | Path = "rtsm.yaml") -> Path:
@@ -88,6 +162,7 @@ def load_config(
     import yaml
 
     cfg = _read_yaml(cfg_path(name))
+    _apply_deprecated_paths(cfg, str(name))      # before the early return: a bare --config old.yaml too
     if not profiles and not set_values:
         return cfg
 
@@ -100,6 +175,7 @@ def load_config(
 
     for profile in profiles:
         patch = _read_yaml(cfg_path(Path(profile)))
+        _apply_deprecated_paths(patch, str(profile))
         _check_override_keys(patch, known)
         _merge(cfg, patch)
     for assignment in set_values:
@@ -117,6 +193,7 @@ def load_config(
         for part in parts[:-1]:
             node = node.setdefault(part, {})
         node[parts[-1]] = value
+        _apply_deprecated_paths(patch, f"--set {key}")
         _check_override_keys(patch, known)
         _merge(cfg, patch)
     return cfg
