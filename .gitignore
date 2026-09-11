@@ -163,3 +163,7 @@ rtsm/cfg/rtsm.yaml.*bak*
 # one exception: force-add it (git add -f) and name it in the directory README.
 eval/baselines/**/*.json
 eval/baselines/**/*.events.jsonl
+
+# Local run logs (stdout/stderr captured with shell redirection during live
+# sessions and campaigns). Keep them under logs/, never at the repo root.
+logs/
