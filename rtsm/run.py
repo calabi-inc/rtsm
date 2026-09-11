@@ -57,11 +57,14 @@ logging.getLogger("rtsm.core.association").setLevel(logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-def main():
+def main(argv: "list[str] | None" = None):
+    # argv: the console entries (rtsm.cli) call main() bare -> sys.argv; tests
+    # pass a list, so the startup block below is executable on CPU (P1 task 6).
+    argv = sys.argv[1:] if argv is None else list(argv)
     # Dispatch 'demo' subcommand before argparse (preserves backward compat)
-    if len(sys.argv) > 1 and sys.argv[1] == "demo":
+    if argv and argv[0] == "demo":
         from rtsm.demo import run_demo
-        run_demo(sys.argv[2:])
+        run_demo(argv[1:])
         return
 
     parser = argparse.ArgumentParser(description="RTSM - Real-Time Spatio-Semantic Memory")
@@ -78,7 +81,7 @@ def main():
                              "(headless replay / eval / CI); same as "
                              "--set visualization.enable=false")
     add_config_arguments(parser)
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     try:
         cfg = config_from_args(args)
     except (ConfigError, OSError) as exc:
@@ -89,13 +92,6 @@ def main():
     print("=" * 60)
     print("  RTSM - Real-Time Spatio-Semantic Memory")
     print("=" * 60)
-
-    # ── Check GPU dependencies unless in record-only mode ──
-    if not (args.record and args.record_only) and not _GPU_AVAILABLE:
-        print(f"\nERROR: GPU dependencies not installed: {_GPU_IMPORT_ERROR}")
-        print("Install with:  pip install \"rtsm[gpu]\"  or  pip install \"rtsm[all]\"")
-        print("For CUDA support, add:  --extra-index-url https://download.pytorch.org/whl/cu128")
-        return
 
     logger.info("Configuration loaded: %s (SHA-256 %s)",
                 cfg_path(args.config if args.config is not None else "rtsm.yaml"),
@@ -127,6 +123,15 @@ def main():
         parser.error(str(exc))
     logger.info("Ingest policy: %s (ingest.policy=%s)", lane_cfg.policy, lane_cfg.configured_policy)
 
+    # After the ingest validation on purpose: a bad config exits through
+    # parser.error on any machine (CPU test), before this check can return.
+    # ── Check GPU dependencies unless in record-only mode ──
+    if not (args.record and args.record_only) and not _GPU_AVAILABLE:
+        print(f"\nERROR: GPU dependencies not installed: {_GPU_IMPORT_ERROR}")
+        print("Install with:  pip install \"rtsm[gpu]\"  or  pip install \"rtsm[all]\"")
+        print("For CUDA support, add:  --extra-index-url https://download.pytorch.org/whl/cu128")
+        return
+
     # ── Record-only mode: skip all heavy init, just record raw WebSocket ──
     if args.record and args.record_only:
         from rtsm.io.recorder import SessionRecorder
@@ -146,8 +151,8 @@ def main():
             host=str(ws_cfg.get("host", "0.0.0.0")),
             port=int(ws_cfg.get("port", 8765)),
             require_tracking_normal=bool(ws_cfg.get("require_tracking_normal", True)),
-            keyframe_every_n=int(ws_cfg.get("keyframe_every_n", 30)),
-            nonkf_min_interval_s=float(ws_cfg.get("nonkf_min_interval_s", 0.5)),
+            keyframe_every_n=lane_cfg.keyframe_every_n,
+            nonkf_min_interval_s=lane_cfg.nonkf_min_interval_s,
             confidence_threshold=int(ws_cfg.get("confidence_threshold", 1)),
             apply_camera_flip=bool(vis_cfg.get("apply_camera_flip", False)),
             on_raw_message=recorder.on_message,
@@ -309,8 +314,8 @@ def main():
             recording_dir=args.replay,
             ingest_queue=ingest_q,
             require_tracking_normal=bool(ws_cfg.get("require_tracking_normal", True)),
-            keyframe_every_n=int(ws_cfg.get("keyframe_every_n", 30)),
-            nonkf_min_interval_s=float(ws_cfg.get("nonkf_min_interval_s", 0.5)),
+            keyframe_every_n=lane_cfg.keyframe_every_n,
+            nonkf_min_interval_s=lane_cfg.nonkf_min_interval_s,
             confidence_threshold=int(ws_cfg.get("confidence_threshold", 1)),
             apply_camera_flip=bool(vis_cfg.get("apply_camera_flip", False)),
             on_keyframe=vis_server.handle_frame_packet if vis_server else None,
@@ -339,8 +344,8 @@ def main():
             host=str(ws_cfg.get("host", "0.0.0.0")),
             port=int(ws_cfg.get("port", 8765)),
             require_tracking_normal=bool(ws_cfg.get("require_tracking_normal", True)),
-            keyframe_every_n=int(ws_cfg.get("keyframe_every_n", 30)),
-            nonkf_min_interval_s=float(ws_cfg.get("nonkf_min_interval_s", 0.5)),
+            keyframe_every_n=lane_cfg.keyframe_every_n,
+            nonkf_min_interval_s=lane_cfg.nonkf_min_interval_s,
             confidence_threshold=int(ws_cfg.get("confidence_threshold", 1)),
             apply_camera_flip=bool(vis_cfg.get("apply_camera_flip", False)),
             on_keyframe=vis_server.handle_frame_packet if vis_server else None,
@@ -383,6 +388,9 @@ def main():
             pose_sink=wm.update_robot_pose,
             event_sink=event_sink,
             throttle_clock=clock_mode,
+            nonkf_min_interval_s=lane_cfg.nonkf_min_interval_s,      # ingest.* (P1 task 6; was hardcoded 0.5)
+            frame_window_ttl_s=lane_cfg.pair_window_s,
+            frame_window_max_items=lane_cfg.pair_window_frames,
             latency_analytics=latency_analytics,
         )
         t = threading.Thread(target=sub.run_forever, daemon=True)

@@ -37,8 +37,17 @@ class IngestGate:
 
         ingest_cfg = self.cfg.get("ingest", {})
         self.dup_window_ns: int = int(ingest_cfg.get("dup_window_ns", int(0.2 * 1e9)))
-        # Non-keyframe grace delay after a keyframe arrives (monotonic seconds)
-        self.non_kf_grace_s: float = float(ingest_cfg.get("non_kf_grace_s", 0.03))
+        # Non-keyframe grace after a keyframe's arrival (seconds on the ingest
+        # clock). Default 0 = off (P1 task 6): it fired zero times on session1
+        # under either clock (wall record A, sensor anchor B1), under the
+        # sensor clock the dup window below covers the same frames, and at
+        # 30 Hz its old 0.03 sat 3 ms under the frame period (a knife edge).
+        # > 0 enables it; the only live case it can reach is a non-keyframe
+        # dequeued right after a keyframe that a later stage skipped.
+        grace = ingest_cfg.get("non_kf_grace_s", 0.0)
+        if isinstance(grace, bool) or float(grace) < 0:
+            raise ValueError(f"ingest.non_kf_grace_s must be a number >= 0 (0 = off); got {grace!r}")
+        self.non_kf_grace_s: float = float(grace)
 
         self._last_keyframe_ts_ns: Optional[int] = None
         self._last_kf_arrival_mono: float = 0.0
@@ -71,8 +80,11 @@ class IngestGate:
             self._last_kf_arrival_mono = now_mono
             return IngestDecision(True, "keyframe")
 
-        # Non-keyframe grace: if a keyframe just arrived, delay non-KF acceptance
-        if (now_mono - self._last_kf_arrival_mono) < self.non_kf_grace_s:
+        # Non-keyframe grace (opt-in, > 0): a non-KF right after a keyframe
+        # arrival is deferred. Guarded so 0 is truly off (a bare `dt < 0.0`
+        # would fire after /reset, when the sensor clock falls back to wall
+        # time behind a stored sensor-time arrival).
+        if self.non_kf_grace_s > 0 and (now_mono - self._last_kf_arrival_mono) < self.non_kf_grace_s:
             return IngestDecision(False, "non_kf_grace")
 
         # Non-keyframe: check for proximity to last accepted keyframe by sensor time

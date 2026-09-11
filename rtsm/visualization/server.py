@@ -392,6 +392,7 @@ class VisualizationServer:
         seg = self.cfg.get("segmentation", {})
         io_cfg = self.cfg.get("io", {})
         ws = io_cfg.get("websocket", {})
+        ing = self.cfg.get("ingest", {}) or {}
         return {
             "segmentation": {
                 "backend": seg.get("backend", "fastsam"),
@@ -402,12 +403,16 @@ class VisualizationServer:
             },
             "receiver": {
                 "type": io_cfg.get("receiver", "websocket"),
-                "keyframe_every_n": ws.get("keyframe_every_n", 30),
-                "nonkf_min_interval_s": ws.get("nonkf_min_interval_s", 0.5),
+                # Receiver timing lives under ingest: since P1 task 6 (the echo
+                # field names are unchanged; the frontend renders them as is).
+                "keyframe_every_n": ing.get("keyframe_every_n", 30),
+                "nonkf_min_interval_s": ing.get("nonkf_min_interval_s", 0.5),
                 "confidence_threshold": ws.get("confidence_threshold", 2),
-                # From the live queue object: 512 (legacy), lossless_depth, or
-                # keyframe_lane_depth + 1 (latest). 512 only if none was wired.
-                "queue_maxsize": int(getattr(self._ingest_queue, "maxsize", 512) or 512),
+                # From the live queue object: LEGACY_DEPTH (legacy queue),
+                # lossless_depth, or keyframe_lane_depth + 1 (latest); None
+                # when no queue object was wired (tests / embedders only).
+                "queue_maxsize": (int(self._ingest_queue.maxsize)
+                                  if getattr(self._ingest_queue, "maxsize", None) else None),
                 "ingest_policy": str(getattr(self._ingest_queue, "policy", "legacy")),
             },
             "pipeline": {

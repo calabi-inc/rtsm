@@ -89,6 +89,55 @@ class TestPolicyResolution:
             IngestLanes("latest", max_frame_age_s=0)                       # one validation path, not a silent off
         assert LaneConfig.from_cfg({}, replay=True).policy == "lossless"   # empty cfg -> defaults
 
+    def test_lane_config_carries_the_receiver_timing_and_the_pairing_window(self):
+        """P1 task 6: keyframe_every_n / nonkf_min_interval_s moved here from
+        io.websocket.*; pair_window_s / pair_window_fps size the ZeroMQ window."""
+        dflt = LaneConfig.from_cfg({}, replay=True)
+        assert (dflt.keyframe_every_n, dflt.nonkf_min_interval_s, dflt.pair_window_s, dflt.pair_window_fps,
+                dflt.pair_window_frames) == (30, 0.5, 2.0, 30.0, 90)
+        assert (dflt.non_kf_grace_s, dflt.dup_window_ns) == (0.0, 200_000_000)
+        timed = LaneConfig.from_cfg({"ingest": {"keyframe_every_n": 5, "nonkf_min_interval_s": 0,
+                                                 "pair_window_s": 4.48, "pair_window_fps": 25}}, replay=True)
+        assert (timed.keyframe_every_n, timed.nonkf_min_interval_s, timed.pair_window_frames) == (5, 0.0, 168)   # not 169
+        assert LaneConfig(policy="latest", pair_window_s=1.0, pair_window_fps=10).pair_window_frames == 15   # a property
+        for bad, key in (({"keyframe_every_n": 0}, "keyframe_every_n"),
+                         ({"keyframe_every_n": 2.5}, "whole number"),
+                         ({"nonkf_min_interval_s": -1}, "nonkf_min_interval_s"),
+                         ({"nonkf_min_interval_s": True}, "nonkf_min_interval_s"),
+                         ({"pair_window_s": 0}, "pair_window_s"),
+                         ({"pair_window_fps": 0}, "pair_window_fps"),
+                         ({"pair_window_fps": "fast"}, "pair_window_fps"),
+                         ({"pair_window_s": "2"}, "pair_window_s"),          # strings are not numbers (YAML 1e3 rule)
+                         ({"non_kf_grace_s": -1}, "non_kf_grace_s"),       # negative is rejected, not "off"
+                         ({"non_kf_grace_s": True}, "non_kf_grace_s"),     # a YAML true would have been a 1 s grace
+                         ({"dup_window_ns": -5}, "dup_window_ns"),
+                         ({"dup_window_ns": 1.5}, "dup_window_ns")):
+            with pytest.raises(ValueError, match=key):
+                LaneConfig.from_cfg({"ingest": bad}, replay=True)
+        with pytest.raises(ValueError, match="ingest: must be a mapping"):
+            LaneConfig.from_cfg({"ingest": "fast"}, replay=True)
+
+    def test_packaged_bases_resolve_through_lane_config(self):
+        from rtsm.cfg import load_config
+        main_cfg = LaneConfig.from_cfg(load_config("rtsm.yaml"), replay=True)
+        demo_cfg = LaneConfig.from_cfg(load_config("demo_config.yaml"), replay=True)
+        assert (main_cfg.keyframe_every_n, main_cfg.nonkf_min_interval_s) == (30, 0.5)
+        assert (demo_cfg.keyframe_every_n, demo_cfg.nonkf_min_interval_s) == (5, 0.3)   # the demo's 5 / 0.3 live in the yaml now
+
+    def test_zeromq_takes_the_throttle_and_window_from_kwargs(self):
+        from rtsm.io.zeromq import ZeroMQSubscriber
+        sub = ZeroMQSubscriber(ingest_queue=IngestQueue(4), nonkf_min_interval_s=1.25,
+                               frame_window_ttl_s=3.0, frame_window_max_items=135)
+        assert sub._nonkf_min_interval_s == 1.25
+        assert (sub.fw.max, sub.fw.ttl_ns) == (135, 3_000_000_000)
+        assert ZeroMQSubscriber(ingest_queue=IngestQueue(4))._nonkf_min_interval_s == 0.5   # default unchanged
+        # ...and the kwarg is what _nonkf_due enforces (sensor mode: pose stamps; wall mode: process time)
+        sensor = ZeroMQSubscriber(ingest_queue=IngestQueue(4), nonkf_min_interval_s=1.25, throttle_clock="sensor")
+        sensor._stamp_nonkf(10_000_000_000)
+        assert sensor._nonkf_due(10_900_000_000) is False and sensor._nonkf_due(11_300_000_000) is True
+        sub._stamp_nonkf(None)
+        assert sub._nonkf_due(None) is False                              # 1.25 s have not passed on the wall clock
+
     def test_factory_builds_the_right_object(self):
         legacy = make_ingest_queue(LaneConfig.from_cfg({"ingest": {"policy": "legacy"}}, replay=False))
         assert isinstance(legacy, IngestQueue) and legacy.policy == "legacy" and legacy.maxsize == 512
@@ -467,7 +516,16 @@ class TestConfigEcho:
         rx = self._echo(IngestLanes("lossless", lossless_depth=7))
         assert (rx["queue_maxsize"], rx["ingest_policy"]) == (7, "lossless")
         rx = self._echo(None)
+        assert (rx["queue_maxsize"], rx["ingest_policy"]) == (None, "legacy")   # nothing wired: no invented 512
+        rx = self._echo(IngestQueue(maxsize=512))
         assert (rx["queue_maxsize"], rx["ingest_policy"]) == (512, "legacy")
+
+    def test_receiver_timing_is_echoed_from_the_ingest_block(self):
+        from rtsm.visualization.server import VisualizationServer
+        cfg = {"ingest": {"keyframe_every_n": 7, "nonkf_min_interval_s": 0.25},
+               "io": {"websocket": {"keyframe_every_n": 99, "nonkf_min_interval_s": 9.9}}}   # a stale old block is ignored
+        rx = VisualizationServer(cfg=cfg, working_memory=None, ingest_queue=None)._extract_analytics_config()["receiver"]
+        assert (rx["keyframe_every_n"], rx["nonkf_min_interval_s"]) == (7, 0.25)
 
 
 # ── receivers call the lanes before decoding ─────────────────────────────────

@@ -79,7 +79,8 @@ def run_config(config_name: str, replay_dir: str) -> dict:
         from rtsm.stores.vectors.faiss_client import FaissClient
         vectors = FaissClient(cfg)
 
-    ingest_q = make_ingest_queue(LaneConfig.from_cfg(cfg, replay=True))   # auto -> lossless under replay
+    lane_cfg = LaneConfig.from_cfg(cfg, replay=True)   # the validated ingest: block (auto -> lossless under replay)
+    ingest_q = make_ingest_queue(lane_cfg)
     sweep_cache = SweepCache(
         grid_size_m=float(scfg.get("grid_size_m", 0.25)),
         per_cell_cap=int(scfg.get("per_cell_cap", 64)),
@@ -114,8 +115,8 @@ def run_config(config_name: str, replay_dir: str) -> dict:
         recording_dir=replay_dir,
         ingest_queue=ingest_q,
         require_tracking_normal=bool(ws_cfg.get("require_tracking_normal", True)),
-        keyframe_every_n=int(ws_cfg.get("keyframe_every_n", 30)),
-        nonkf_min_interval_s=float(ws_cfg.get("nonkf_min_interval_s", 0.5)),
+        keyframe_every_n=lane_cfg.keyframe_every_n,          # ingest.* (moved from io.websocket.* in P1 task 6)
+        nonkf_min_interval_s=lane_cfg.nonkf_min_interval_s,
         pose_sink=wm.update_robot_pose,   # receive-time pose (the pipeline no longer writes it)
         confidence_threshold=int(ws_cfg.get("confidence_threshold", 1)),
         apply_camera_flip=bool(vis_cfg.get("apply_camera_flip", False)),

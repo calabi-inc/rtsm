@@ -36,8 +36,9 @@ def _kw_tuples(code):
 
 
 def _attr_calls_on(code, var: str, attr: str):
-    """Offsets of `<var>.<attr>` loads in the top-level function body."""
-    ins = list(dis.get_instructions(code))
+    """Offsets of `<var>.<attr>` loads in the top-level function body
+    (EXTENDED_ARG prefixes, present once a body has > 256 names, are skipped)."""
+    ins = [x for x in dis.get_instructions(code) if x.opname != "EXTENDED_ARG"]
     out = []
     for prev, cur in zip(ins, ins[1:]):
         if cur.opname == "LOAD_ATTR" and cur.argval == attr and prev.opname in ("LOAD_FAST", "LOAD_DEREF", "LOAD_FAST_CHECK") \
@@ -88,3 +89,37 @@ def test_runner_builds_wires_starts_and_stops_the_ticker(modname, fn):
     # so late_ticks / stale_rollups describe the run, not startup GIL holds.
     srv = _first(code, "LOAD_", "start_server")
     assert srv is not None and starts[0] > srv, "analytics.start() must follow start_server()"
+
+
+# ---------------- P1 task 6: receiver timing comes from lane_cfg, never from io.websocket ----------------
+
+
+@pytest.mark.parametrize("modname,fn,sites,zmq", [("rtsm.demo", "run_demo", 1, 0), ("rtsm.run", "main", 3, 1)])
+def test_runner_receivers_read_timing_from_lane_cfg_not_ws_cfg(modname, fn, sites, zmq):
+    """The silent-fallback trap: a leftover ws_cfg.get("keyframe_every_n", 30) would
+    keep every default-valued run green. The receivers must take the validated
+    LaneConfig values (run.py: record-only, replay, websocket; + ZeroMQ for the
+    throttle), and the two key names must not be read through `.get()` anywhere
+    in the runner body."""
+    code = getattr(importlib.import_module(modname), fn).__code__
+    # Exact counts: one read per receiver site (an extra read of the old block cannot hide behind a >=).
+    assert len(_attr_calls_on(code, "lane_cfg", "keyframe_every_n")) == sites
+    assert len(_attr_calls_on(code, "lane_cfg", "nonkf_min_interval_s")) == sites + zmq
+    if zmq:
+        assert _attr_calls_on(code, "lane_cfg", "pair_window_s") and _attr_calls_on(code, "lane_cfg", "pair_window_frames")
+    # The key names may legitimately remain as constants: a receiver call with
+    # many kwargs is compiled through CALL_FUNCTION_EX with a dict of names.
+    # What must be gone is reading them through a mapping: `.get("<key>", ...)`.
+    keys = ("keyframe_every_n", "nonkf_min_interval_s")
+    for cc in _codes(code):
+        ins = [x for x in dis.get_instructions(cc) if x.opname != "EXTENDED_ARG"]
+        for i, x in enumerate(ins):
+            if x.opname == "LOAD_CONST" and x.argval in keys:
+                window = [y.argval for y in ins[max(0, i - 3):i] if y.opname.startswith("LOAD_ATTR")]
+                assert "get" not in window, f"{modname}.{fn} still reads {x.argval!r} via .get() (offset {x.offset})"
+
+
+def test_viz_echo_reads_the_ingest_block():
+    from rtsm.visualization.server import VisualizationServer
+    consts = [c for c in VisualizationServer._extract_analytics_config.__code__.co_consts if isinstance(c, str)]
+    assert "ingest" in consts

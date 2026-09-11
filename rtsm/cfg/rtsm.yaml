@@ -87,9 +87,9 @@ io:
     host: "0.0.0.0"
     port: 8765
     require_tracking_normal: true               # drop frames where tracking_state != "normal"
-    keyframe_every_n: 30                        # mark every Nth frame as keyframe
-    nonkf_min_interval_s: 0.5                   # throttle non-KF to max ~2/s
     confidence_threshold: 2                     # 0=accept all, 1=medium+high, 2=high only (2 matches official RTABMap)
+    # keyframe_every_n / nonkf_min_interval_s moved to ingest: (P1 task 6); the
+    # old paths still work here with a deprecation warning until 0.3.0.
 
   # Receive-time forward clearance (websocket receiver only; opt-in). When
   # enabled, every frame that passes the tracking filter and the non-KF
@@ -119,7 +119,12 @@ ingest:
   # cadence always stay on wall time. Also the config-level rollback: set wall.
   clock: auto
   dup_window_ns: 200000000        # non-KF within this sensor-time window of the last keyframe is skipped
-  non_kf_grace_s: 0.03            # non-KF grace right after a keyframe arrives (on the ingest clock)
+  # Non-KF grace right after a keyframe's arrival (ingest clock). 0 = off: it
+  # fired zero times on session1 under either clock, the dup window covers the
+  # same frames under the sensor clock, and its old 0.03 sat 3 ms under the
+  # 30 Hz frame period. > 0 enables it (only reachable after a keyframe a later
+  # stage skipped).
+  non_kf_grace_s: 0.0
   # How frames wait between the receiver and the pipeline (rtsm/io/ingest_lanes.py):
   #   latest   = per-lane admission: a small keyframe FIFO drained first (overflow
   #              drops the OLDEST waiting keyframe) + one non-keyframe slot a newer
@@ -136,6 +141,15 @@ ingest:
   keyframe_lane_overflow: drop_oldest   # latest: drop_oldest | reject (reject refuses SOURCE keyframes before decode)
   max_frame_age_s: 2.0            # latest: non-keyframe older than this at dequeue is discarded (null disables)
   lossless_depth: 32              # lossless: FIFO depth before the producer waits (~8.5 MB per decoded frame)
+  # Receiver timing (moved here from io.websocket.* in P1 task 6; the old paths
+  # are aliased with a deprecation warning until 0.3.0):
+  keyframe_every_n: 30            # websocket / replay: every Nth frame is a keyframe (ZeroMQ keyframes are the SLAM node's)
+  nonkf_min_interval_s: 0.5       # every receiver: min interval between admitted non-keyframes, on the ingest clock (~2/s)
+  # ZeroMQ pairing window (rtsm/stores/frame_window.py): how long an encoded
+  # camera frame waits for its pose. Count cap = ceil(pair_window_s x
+  # pair_window_fps x 1.5) frames (90 here); nothing else reads the rate.
+  pair_window_s: 2.0
+  pair_window_fps: 30
 
 # -------------------- Robot pose (mailbox) --------------------
 robot_pose:

@@ -1,0 +1,20 @@
+== M rc=0 ==
+== L rc=0 ==
+== T rc=0 ==
+<stdin>:28: DeprecationWarning: C:/Users/konam/AppData/Local/Temp/claude/C--Users-konam-Desktop-calabi-repo-rtsm/c99f81f1-d743-4906-85ee-b894ab355ce0/scratchpad/p1t6_gate/legacy_same.yaml: 'io.websocket.keyframe_every_n' is deprecated; the value was applied to 'ingest.keyframe_every_n' (the old path is removed in 0.3.0)
+C:/Users/konam/AppData/Local/Temp/claude/C--Users-konam-Desktop-calabi-repo-rtsm/c99f81f1-d743-4906-85ee-b894ab355ce0/scratchpad/p1t6_gate/legacy_same.yaml: 'io.websocket.keyframe_every_n' is deprecated; the value was applied to 'ingest.keyframe_every_n' (the old path is removed in 0.3.0)
+<stdin>:28: DeprecationWarning: C:/Users/konam/AppData/Local/Temp/claude/C--Users-konam-Desktop-calabi-repo-rtsm/c99f81f1-d743-4906-85ee-b894ab355ce0/scratchpad/p1t6_gate/legacy_same.yaml: 'io.websocket.nonkf_min_interval_s' is deprecated; the value was applied to 'ingest.nonkf_min_interval_s' (the old path is removed in 0.3.0)
+C:/Users/konam/AppData/Local/Temp/claude/C--Users-konam-Desktop-calabi-repo-rtsm/c99f81f1-d743-4906-85ee-b894ab355ce0/scratchpad/p1t6_gate/legacy_same.yaml: 'io.websocket.nonkf_min_interval_s' is deprecated; the value was applied to 'ingest.nonkf_min_interval_s' (the old path is removed in 0.3.0)
+<stdin>:28: DeprecationWarning: C:/Users/konam/AppData/Local/Temp/claude/C--Users-konam-Desktop-calabi-repo-rtsm/c99f81f1-d743-4906-85ee-b894ab355ce0/scratchpad/p1t6_gate/legacy_throttle.yaml: 'io.websocket.nonkf_min_interval_s' is deprecated; the value was applied to 'ingest.nonkf_min_interval_s' (the old path is removed in 0.3.0)
+C:/Users/konam/AppData/Local/Temp/claude/C--Users-konam-Desktop-calabi-repo-rtsm/c99f81f1-d743-4906-85ee-b894ab355ce0/scratchpad/p1t6_gate/legacy_throttle.yaml: 'io.websocket.nonkf_min_interval_s' is deprecated; the value was applied to 'ingest.nonkf_min_interval_s' (the old path is removed in 0.3.0)
+M: (124, 65) frames 53 sha ad6f71a5b89c8506 | meta policy=lossless clock=sensor
+   vs B1: multiset IDENTICAL | dequeue identical (86) | receiver identical (240)
+   task-5 predicates (all of them): pose 240/0/0 | rollup ticks 90 late 0 stale 0 stalled False | buckets 90/90 | sums frames 53==53 received 240==240 gate_rej 33==33 throttle 154==154 drops 0 seg 53 | last wm 124/65 | input_hz 4.9 ratio 0.238 | ingest lossless depth {'fifo': 0} admitted 9+77 -> True
+   fingerprint: log bf6b3b27ffbfd9be0e31d1b3cb428fa77b0f3d38161e4361e4c90b9a00c67201 cpu bf6b3b27ffbfd9be0e31d1b3cb428fa77b0f3d38161e4361e4c90b9a00c67201 -> MATCH
+L: (124, 65) sha ad6f71a5b89c8506 | vs M: multiset IDENTICAL | dequeue identical (86) | receiver identical (240)
+   deprecation lines (kf, throttle): (1, 1) | fingerprint log 439a2d1897f52b3cb6b496312fc817aa36b4a28f8db1c7b0799ae197cb1c9be9 == cpu[diag] True == cpu[diag+legacy] True
+T: (97, 45) sha 670dca82b330db26 | receiver {('enqueued', ''): 48, ('dropped', 'throttle'): 192} | dequeue reasons {'keyframe': 9, 'near_recent_keyframe': 4, 'skip': 7, 'ttl+novelty': 1, 'hard_max_s': 24, 'parallax': 3}
+   expected enqueued 48 / throttled 192 / keyframes 9 -> got 48 / 192 / 9 | deprecation (throttle) 1 | fingerprint log f301bcaefaa56009cdb68e4cb6f471489b6fcb48fe0f056f4c16d43bba436102 == cpu[diag+legacy] True == cpu[diag+new] True
+   T multiset differs from M (expected, fewer admitted frames): True
+HARD GATE: PASS | M True | L True | T True
+P1T6_GATE_DONE
