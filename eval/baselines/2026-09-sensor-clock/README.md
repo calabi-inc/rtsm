@@ -119,3 +119,115 @@ frames, as expected). A runner site still reading `io.websocket` (or dropping th
 86/154 here. **PASS** (recorded run = after the code review). `gate.out` is the script's verbatim output: the six
 `DeprecationWarning` lines are the gate's own CPU-side `load_config` calls echoing the shim on stderr. Script + verdict
 only (raw artifacts gitignored).
+
+## G1-C — the wedge proof (2026-09-18) — `g1c-wedge/` — **FAIL on the production configuration, PASS with the viz TSDF path off; harness valid**
+
+Branch `feature/g1c-wedge-proof` (tree = main `26c2508` + this directory; **no product code changes**). The plan's G1-C
+(execution plan v2, line 145) runs the WHOLE `python -m rtsm` process — packaged defaults: grounded_sam2, visualization
+ON (TSDF fusion on), analytics ON, watchdog ON, diagnostics OFF — with a **separate sender process** streaming
+`recordings/session1/messages.bin` raw bytes through the live websocket receiver (hello/hello_ack per loop, fresh
+`session_id` per loop → frame-epoch bump, **uncompressed** like the phone), a **separate poller** standing in for the
+agent (`/stats` 10 Hz / 0.6 s, `/search/semantic` 0.5 Hz / 3.0 s, `/healthz` + RSS 1 Hz, `Connection: close` per call
+like `rtsm_client.py`) and a **headless dashboard client** on `:8002/ws` (browser-default compression). Scripts:
+`g1c_gate.py` (driver, predicates, `--reeval` from saved artifacts), `g1c_sender.py`, `g1c_poller.py`,
+`g1c_vizclient.py`, `nobrowser/sitecustomize.py` (neutralises the runner's browser auto-open; P10 asserts exactly one
+dashboard client ever connected). `gate.out` = the GPU run's verbatim output (original P5/P6 constants);
+`reeval.out` = the same seven runs re-derived offline after two harness calibrations (below); `summary.json` (force-added)
+= the re-evaluated numbers. Raw `*.jsonl`, `rtsm_*.log`, `finals.json` are local only (the script regenerates them).
+
+**Design review before code** (three lenses — falsifiability, repo feasibility, realism vs E1 — two independent refuters per
+high/critical finding; 32 findings, 13 verified, 9 survived): the sender's default permessage-deflate negotiation
+(it turned the transport ceiling into zlib time — see the table), the non-existent `:8083` viz port (integrated mode),
+the TSDF frame ring inside the RSS budget, uvicorn's 32-message read-ahead queue hiding a steady pose lag (→ the
+end-to-end lag predicate P11), an absolute pose-rate floor that a proportional collapse would pass (→ poll-normalised P2),
+"F only proves the harness can read a queue counter" (→ calibration run C), inline TSDF work on the receive coroutine (→
+attribution runs R1V/R1N), P8 aliasing (→ watchdog transition lines), P10 gaps (six log patterns). Two findings were
+refuted (reconnect-per-loop racing the parked tail; F never filling the legacy queue) and one deferred (a laggy-dashboard
+phase).
+
+### Transport ceiling (CPU-only, before any GPU run; 4.30 MB NV12 frames of session1, localhost, sender "as fast as accepted")
+
+| path | permessage-deflate negotiated | uncompressed |
+|---|---|---|
+| raw asyncio TCP loopback (no websocket layer) | — | ~490 msg/s (2 GB/s) |
+| `websockets` 16.0 client → `websockets.serve` (new impl), no parse | 7.7 Hz | — |
+| **production `WebSocketReceiver`** (uvicorn 0.43 `ws=auto` → `websockets.legacy`) + header/pose/depth parse, queue refuses before RGB decode | **4.67 Hz (221 ms/frame)** | **84.5 Hz (12 ms/frame)** |
+| same receiver with uvicorn `ws="websockets-sansio"` | 7.67 Hz | 96.6 Hz |
+
+Uncompressed, the receiver's transport+parse path is 15× the phone's cadence (5.4 Hz, median gap 186 ms) and is not a
+bottleneck. **With permessage-deflate negotiated it drops to 4.67 Hz — the E1 memo's "4.5 Hz input".** The receiver
+OFFERS the extension (uvicorn `ws_per_message_deflate=True` default; `rtsm/io/websocket.py` does not set it) and this
+repo does not record whether Calabi Lens accepts it (`meta.json` keeps hello/ack only). **Open question, founder (Lens
+source or one packet capture):** if Lens negotiates it, `ws_per_message_deflate=False` in the receiver's `uvicorn.Config`
+is a one-line, 18× receiver-side change and a co-factor of the E1 wedge; if it does not, the transport is exonerated.
+The harness streams uncompressed (the conservative reading).
+
+### Runs and verdicts (`reeval.out`; every number below is from the re-evaluation, gate.out holds the originals)
+
+| run | policy | speed | throttle | s | role | verdict |
+|---|---|---|---|---|---|---|
+| C | latest | 1× | 0.5 | 60 | calibration: rtsm suspended 3.0 s at +25 s | **CALIBRATED** — P1 (6 timeouts), P2 (window 36 < 45.9), P3 (gap 3.17 s, 7 stale), P5 (stall 2.60 s), P9 (`late_ticks` 1), P11 (lag 2.98 s) all tripped |
+| F | **legacy** | 1× | 0.2 | 150 | falsifier | **WEDGE-VISIBLE** — `ingest_q` max 173 (final 137), RSS 4.2 → 6.2 GB, +575 MB/min in the last minute; pose lag p99 0.128 s (the receive-time mailbox is independent of the queue, as designed) |
+| R1 | latest | 1× (phone cadence) | 0.5 | 300 | HARD — the E1 condition | **FAIL**: P1, P3 |
+| RB | latest | 1× | 0.2 | 150 | HARD — pipeline overload, bounded lanes | **FAIL**: P1, P3 |
+| RS | latest | 3× (saturated) | 0.5 | 150 | HARD — achieved 15.79 Hz of 16.27 pushed | **FAIL**: P1, P2 (82 < 85), P3 |
+| R1V | latest | 1× | 0.5 | 150 | attribution: `visualization.tsdf.enable=false`, client attached | **PASS** (all 14) |
+| R1N | latest | 1× | 0.5 | 150 | attribution: `--no-viz` | **PASS** (all 13) |
+
+What holds in every `latest` run, i.e. **the P1 ingest work did what it was built to do**: lanes bounded (`ingest_q` ≤ 3,
+`max_depth_seen` 3, `age_dropped` 0, 95–288 non-KF supersessions per run), `writes_accepted` == frames sent with 0
+regressions / 0 rejects across 4–10 fresh-epoch loops, sender→observed pose lag p99 0.11–0.13 s (max 0.18–0.41 s),
+transport keeping the phone's schedule to within 17 ms (`send()` stall p99 ≤ 25 ms, 0 failures, 0 extensions), no
+watchdog degradation, rollup owner alive with 0 late ticks, RSS plateau (+57 … +182 MB after the 60 s footprint settle,
+ring-credited), and at 3× pacing the whole process still ingests 15.8 Hz.
+
+What fails, only with the viz TSDF path on (R1 / RB / RS vs R1V / R1N):
+
+| symptom | TSDF on (R1) | TSDF off (R1V) | no viz (R1N) |
+|---|---|---|---|
+| `/stats` p99 / max / samples > 0.6 s (n≈1.4–2.8k) | 0.487 s / 0.618 s / 2 | 0.031 / 0.050 / 0 | 0.031 / 0.186 / 0 |
+| max gap between pose changes / stale samples | 0.818 s / 81 of 2771 (2.9 %) | 0.400 s / 0 | 0.400 s / 0 |
+| dashboard stream | **silent from +46 s to the end (300 s), socket still open** | 1 MB/s for the whole run | — |
+| RSS plateau | ~4.7 GB | ~3.75 GB | ~3.8 GB |
+
+**Mechanism (measured, not inferred):** in R1, 48 of the 51 pose gaps > 0.5 s start within 0.11 s of a keyframe send, and
+the 54 slow `/stats` samples (> 0.3 s) sit at the same instants (+16, 22, 27, 33, 38, 44, 50, 56, 61 … every ~5.5 s = the
+keyframe cadence) for all 300 s — also after the dashboard client was gone, so it is not the send path. Every admitted
+keyframe runs `vis_server.handle_frame_packet` synchronously inside the websocket receive coroutine (rtsm/io/websocket.py
+`_on_keyframe`, run.py:351): resize → `TSDFIntegrator.integrate` (33–265 ms real scene, 0.8 s synthetic; **releases the
+GIL** but blocks the receive loop) → `should_extract` is true at every keyframe (`extract_interval_s` 2.0 < KF cadence) →
+a new unguarded `tsdf-extract` thread → `extract_point_cloud` under the same lock — and **Open3D's `extract_point_cloud`
+HOLDS THE GIL**: with a busy Python thread as the probe, other threads run at 2–4 % of their idle rate for the whole
+extraction, which takes 1.07 s at 1.4 M points, 1.65 s at 2.1 M, 2.59 s at 3.2 M (synthetic room; the real R1 cloud was
+~0.6 M points by +45 s because the 44 s loop re-scans one room). The whole interpreter — API thread, receive loop, pipeline
+— freezes for that long every 2–5 s, and the time grows with the explored volume. In E1 (a larger room, 10+ minutes of
+new volume, a browser dashboard) that is a mechanism for "progressive degradation to pose 1 Hz and HTTP dead", separate
+from and additive to the legacy queue (memo `ingest-drop-policy-2026-09.md`). The dashboard's silent death: the extracted
+cloud is broadcast whole every time (3 → 10 MB per message inside 45 s in R1; 21–48 MB in the synthetic run), the API
+uvicorn deflates it on its event loop for a browser-compressed client, `_try_send_bytes` gives up after 5 s and
+`_broadcast_bytes` discards the client without a close frame or a log line; `client_count` drops to 0 and every push stops.
+
+**Verdict:** G1-C FAILS on the production configuration; the ingest path passes every predicate; the failing predicates
+are attributable, reproducible and fixable in the visualization TSDF path. Proposed P1 task 7 (founder decision):
+(1) never call TSDF work from the receive coroutine — a bounded worker (one in flight, latest-wins) like the ingest lanes;
+(2) extraction must not hold the GIL for seconds: a separate process for the viz volume, or an incremental / rate- and
+size-bounded extraction, or `visualization.tsdf.enable: false` as the packaged default with the E1 protocol updated
+(4b already tells the operator to check the pose feed); (3) log a discarded dashboard client and send a close frame;
+(4) answer the permessage-deflate question above and set `ws_per_message_deflate=False` on the receiver if Lens accepts
+it. Re-run G1-C after task 7; R1V is the expected shape of a pass.
+
+**Harness calibrations after the GPU run (both visible in gate.out vs reeval.out):** (a) P5 "delivered load" was evaluated
+per integer second; a 5.4 Hz stream alternates 5/6 frames per second and the recording's own 0.35 s gaps make single
+seconds of 4 frames normal, so it flagged 1–9 seconds in every run including R1V/R1N; it is now the sender's schedule slip
+(max < 1.0 s; measured 15–17 ms in every paced run) plus achieved/target ≥ 0.95. (b) P6's baseline moved from +20 s to
++60 s: the process footprint (TSDF volume + CUDA host allocations) settles by ~60 s (R1 curve: 2.2 GB ready → 4.34 GB at
+30 s → 4.58 at 60 s → 4.72 at 300 s), so the +20 s baseline measured warm-up, not growth; both views are printed.
+Neither calibration changes a verdict's direction on the failing predicates (P1/P3), and F still fails P6 by +1.1 GB.
+
+**Deviations from the plan text:** "3–5× recorded pace" → the phone's own cadence (1×) for the E1 condition plus a 3×
+saturation run in which the achieved ingest Hz is the measurement (a paced sender is backpressured to whatever the receiver
+accepts; "load" is only honest as the delivered rate); `/search/semantic` bound 3.0 s (the agent's real `RTSMClient`
+timeout; the 0.6 s the plan cites is the ESP32 bridge's) with 0.6 s applied to `/stats` as written; age at dequeue asserted
+through `age_dropped == 0` under `max_frame_age_s` 2.0 (diagnostics trace OFF = production) plus P11, the end-to-end lag
+the plan did not have. Windows/3.12 note: `time.monotonic()` ticks at 15.6 ms on this interpreter; every harness
+measurement uses `perf_counter`, cross-process alignment uses `time.time()`.
