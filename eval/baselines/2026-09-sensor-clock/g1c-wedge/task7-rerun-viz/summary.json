@@ -1,0 +1,261 @@
+{
+ "branch": "feature/p1-task7-viz-default-off",
+ "commit": "8c2c0b1",
+ "runs": {
+  "R1Z": {
+   "run": "R1Z",
+   "spec": {
+    "policy": "latest",
+    "speed": 1.0,
+    "duration": 150.0,
+    "nonkf": null,
+    "role": "attribution",
+    "extra_args": [
+     "--viz"
+    ],
+    "what": "dashboard on (--viz), TSDF off = per-keyframe clouds, client attached, 150 s (non-gating)"
+   },
+   "verdict": "PASS",
+   "predicates": {
+    "P1_stats_http": {
+     "ok": true,
+     "detail": "n=1482 errors/timeouts+slow(>0.6s)=0 p50=0.015 p99=0.032 max=0.06 (idle p99=0.027; poll schedule slip p99=0.001)"
+    },
+    "P1b_search_http": {
+     "ok": true,
+     "detail": "n=74 bad=0 (503=0) p50=0.018 p99=0.104 max=0.113 hits_last=[5, 5, 5]"
+    },
+    "P2_pose_rate": {
+     "ok": true,
+     "detail": "distinct poses per 10 s window: min=53 required>=46.351 (floor 30; 0.85 x min(poll 10 Hz, input 5.45 Hz) x 10) windows=[54, 58, 54, 54, 53, 56, 54, 54, 53, 54, 57, 54, 54, 54]"
+    },
+    "P3_pose_gaps": {
+     "ok": true,
+     "detail": "max gap between pose changes=0.4 s (p99=0.3), stale samples=0/1482"
+    },
+    "P4_pose_writer": {
+     "ok": true,
+     "detail": "writes_accepted=819 frames_sent=819 regressions=0 rejected=0 epochs_seen=4 loops=4"
+    },
+    "P5_transport": {
+     "ok": true,
+     "detail": "delivered load: achieved 5.453 Hz = 1.005 x target 5.424 Hz; schedule slip p99=0.014 max=0.016 s (<1.0); info: min frames per 5 s window=25, single seconds below 90%=3/150; max stall=0.02 (<1 s), received=819 sent=819 failures=0 extensions={'header': None, 'negotiated': []}; stall p99 post-KF=0.003 non-KF=0.012; close_s p50=0.006 max=0.007; drain_wait max=0.044"
+    },
+    "P5b_plan_stall": {
+     "ok": true,
+     "detail": "plan text: send() stall p99=0.012 < one inter-frame interval 0.186 s (p50=0.002 p90=0.004)"
+    },
+    "P6_rss": {
+     "ok": true,
+     "detail": "ready=2192 MB base(+60s)=3865 MB max=3876 MB raw growth=11 MB, TSDF ring credit=0 MB (TSDF off) -> adjusted growth=11 MB (<300); slope_last60=45.3 MB/min; from +20 s: base=3732 MB raw growth=144 MB (info)"
+    },
+    "P7_lanes": {
+     "ok": true,
+     "detail": "age_dropped=0 ingest_q max=2 max_depth_seen=2 superseded=52 kf_dropped=0 admitted kf/nonkf=31/267 (depth bounds are structural under `latest`; age_dropped is the evidence)"
+    },
+    "P8_frame_flow": {
+     "ok": true,
+     "detail": "sampled states in window={'ok': 148} backlogged_anywhere=False; log transitions in window=[('waiting', 'ok', '')]"
+    },
+    "P9_rollup": {
+     "ok": true,
+     "detail": "{'interval_s': 1.0, 'ticks': 166, 'late_ticks': 0, 'stale_rollups': 0, 'ring_truncated': 0, 'last_tick_age_s': 0.8, 'stalled': False, 'alive': True}"
+    },
+    "P10_process_log": {
+     "ok": true,
+     "detail": "bad lines={'frame parse error': 0, 'connection error': 0, 'callback error': 0, 'ingest queue refused frame': 0, 'write rejected': 0, 'pose key went backwards': 0} handshakes=4/loops 4 (completed 4) viz clients connected=1 (expected 1: exactly one scripted client, no browser)"
+    },
+    "P11_pose_lag": {
+     "ok": true,
+     "detail": "sender->observed lag p50=0.047 p99=0.106 (<0.5) max=0.13 (<1.0) n=801 (matched 801/801 observed keys)"
+    },
+    "P12_viz_attached": {
+     "ok": true,
+     "detail": "viz client alive at sender end=True; closed early=[]"
+    }
+   },
+   "info": {
+    "objects": [
+     145,
+     83
+    ],
+    "viz_on": true,
+    "tsdf_on": false,
+    "viz": {
+     "camf_per_s_median": 2,
+     "bytes_per_s_median": 848262
+    },
+    "latency_aggregate": {
+     "input_hz": 4.6,
+     "processing_hz": 1.02,
+     "effective_ratio": 0.222,
+     "frame_count": 154
+    },
+    "counters": {
+     "received": 819,
+     "processed": 154,
+     "gate_rejections": 92,
+     "frame_rejections": 0,
+     "queue_drops": 0,
+     "superseded": 52,
+     "age_drops": 0,
+     "throttle_skips": 521,
+     "tracking_drops": 0
+    },
+    "semantic_index": {
+     "confirmed": 83,
+     "indexed": 83,
+     "lag": 0
+    },
+    "health_final": {
+     "status": "degraded",
+     "reasons": [
+      "no input from client for 10.0s"
+     ]
+    },
+    "sender": {
+     "frames_sent": 819,
+     "loops_started": 4,
+     "loops_completed": 4,
+     "achieved_hz": 5.453,
+     "target_hz": 5.424,
+     "streamed_s": 150.205
+    },
+    "log_warn_err": [
+     "WARNING huggingface_hub.utils._http: Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and fas",
+     "WARNING rtsm.core.watchdog: [watchdog] frame flow: ok -> starved (no input from client for 5.9s)",
+     "WARNING rtsm.run: Configuration: Some masks can pass the depth filter but lack enough valid depth for a 3D centroid."
+    ]
+   }
+  },
+  "R1T": {
+   "run": "R1T",
+   "spec": {
+    "policy": "latest",
+    "speed": 1.0,
+    "duration": 150.0,
+    "nonkf": null,
+    "role": "attribution",
+    "extra_args": [
+     "--viz"
+    ],
+    "extra_sets": [
+     "visualization.tsdf.enable=true"
+    ],
+    "what": "dashboard on + TSDF fusion on (the pre-task-7 packaged config), client attached, 150 s (non-gating)"
+   },
+   "verdict": "FAIL",
+   "predicates": {
+    "P1_stats_http": {
+     "ok": false,
+     "detail": "n=1414 errors/timeouts+slow(>0.6s)=0 p50=0.017 p99=0.347 max=0.566 (idle p99=0.028; poll schedule slip p99=0.253)"
+    },
+    "P1b_search_http": {
+     "ok": true,
+     "detail": "n=74 bad=0 (503=0) p50=0.021 p99=0.347 max=0.377 hits_last=[5, 5, 5]"
+    },
+    "P2_pose_rate": {
+     "ok": true,
+     "detail": "distinct poses per 10 s window: min=52 required>=45.9 (floor 30; 0.85 x min(poll 10 Hz, input 5.40 Hz) x 10) windows=[53, 54, 52, 53, 52, 53, 53, 55, 52, 52, 54, 52, 54, 52]"
+    },
+    "P3_pose_gaps": {
+     "ok": false,
+     "detail": "max gap between pose changes=0.565 s (p99=0.488), stale samples=0/1414"
+    },
+    "P4_pose_writer": {
+     "ok": true,
+     "detail": "writes_accepted=812 frames_sent=812 regressions=0 rejected=0 epochs_seen=4 loops=4"
+    },
+    "P5_transport": {
+     "ok": true,
+     "detail": "delivered load: achieved 5.4 Hz = 0.996 x target 5.424 Hz; schedule slip p99=0.014 max=0.015 s (<1.0); info: min frames per 5 s window=24, single seconds below 90%=3/150; max stall=0.021 (<1 s), received=812 sent=812 failures=0 extensions={'header': None, 'negotiated': []}; stall p99 post-KF=0.005 non-KF=0.01; close_s p50=0.009 max=0.186; drain_wait max=0.409"
+    },
+    "P5b_plan_stall": {
+     "ok": true,
+     "detail": "plan text: send() stall p99=0.01 < one inter-frame interval 0.186 s (p50=0.002 p90=0.004)"
+    },
+    "P6_rss": {
+     "ok": true,
+     "detail": "ready=2199 MB base(+60s)=4601 MB max=4699 MB raw growth=97 MB, TSDF ring credit=39 MB (31 KFs x 2.05 MB, ring 200) -> adjusted growth=58 MB (<300); slope_last60=-9.4 MB/min; from +20 s: base=4143 MB raw growth=556 MB (info)"
+    },
+    "P7_lanes": {
+     "ok": true,
+     "detail": "age_dropped=0 ingest_q max=3 max_depth_seen=3 superseded=64 kf_dropped=0 admitted kf/nonkf=31/256 (depth bounds are structural under `latest`; age_dropped is the evidence)"
+    },
+    "P8_frame_flow": {
+     "ok": true,
+     "detail": "sampled states in window={'ok': 148} backlogged_anywhere=False; log transitions in window=[('waiting', 'ok', '')]"
+    },
+    "P9_rollup": {
+     "ok": true,
+     "detail": "{'interval_s': 1.0, 'ticks': 166, 'late_ticks': 0, 'stale_rollups': 0, 'ring_truncated': 0, 'last_tick_age_s': 0.91, 'stalled': False, 'alive': True}"
+    },
+    "P10_process_log": {
+     "ok": true,
+     "detail": "bad lines={'frame parse error': 0, 'connection error': 0, 'callback error': 0, 'ingest queue refused frame': 0, 'write rejected': 0, 'pose key went backwards': 0} handshakes=4/loops 4 (completed 4) viz clients connected=1 (expected 1: exactly one scripted client, no browser)"
+    },
+    "P11_pose_lag": {
+     "ok": true,
+     "detail": "sender->observed lag p50=0.05 p99=0.152 (<0.5) max=0.276 (<1.0) n=777 (matched 777/777 observed keys)"
+    },
+    "P12_viz_attached": {
+     "ok": true,
+     "detail": "viz client alive at sender end=True; closed early=[]"
+    }
+   },
+   "info": {
+    "objects": [
+     136,
+     79
+    ],
+    "viz_on": true,
+    "tsdf_on": true,
+    "viz": {
+     "camf_per_s_median": 0.0,
+     "bytes_per_s_median": 0.0
+    },
+    "latency_aggregate": {
+     "input_hz": 4.6,
+     "processing_hz": 0.94,
+     "effective_ratio": 0.205,
+     "frame_count": 142
+    },
+    "counters": {
+     "received": 812,
+     "processed": 142,
+     "gate_rejections": 81,
+     "frame_rejections": 0,
+     "queue_drops": 0,
+     "superseded": 64,
+     "age_drops": 0,
+     "throttle_skips": 525,
+     "tracking_drops": 0
+    },
+    "semantic_index": {
+     "confirmed": 79,
+     "indexed": 79,
+     "lag": 0
+    },
+    "health_final": {
+     "status": "degraded",
+     "reasons": [
+      "no input from client for 10.0s"
+     ]
+    },
+    "sender": {
+     "frames_sent": 812,
+     "loops_started": 4,
+     "loops_completed": 4,
+     "achieved_hz": 5.4,
+     "target_hz": 5.424,
+     "streamed_s": 150.375
+    },
+    "log_warn_err": [
+     "WARNING huggingface_hub.utils._http: Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and fas",
+     "WARNING rtsm.core.watchdog: [watchdog] frame flow: ok -> starved (no input from client for 6.0s)",
+     "WARNING rtsm.run: Configuration: Some masks can pass the depth filter but lack enough valid depth for a 3D centroid."
+    ]
+   }
+  }
+ }
+}

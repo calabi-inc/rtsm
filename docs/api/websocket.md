@@ -34,7 +34,7 @@ ws.onmessage = (event) => {
 
 ### Mesh Create (Binary)
 
-Sent when a new TSDF mesh extraction completes. Contains packed binary data:
+Sent once per keyframe by default (`mesh_id` `ws_<seq>` for the WebSocket receiver), or when a TSDF extraction completes (`visualization.tsdf.enable: true`, `mesh_id` `tsdf_fused`). Contains packed binary data:
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -43,7 +43,7 @@ Sent when a new TSDF mesh extraction completes. Contains packed binary data:
 | Colors | uint8[] | RGB colors (N×3) |
 | Transform | float32[16] | 4×4 transformation matrix |
 
-Meshes replace naive per-frame point clouds via TSDF volumetric fusion. New mesh extractions are triggered every `extract_every_n` frames (default: 30) or `extract_interval_s` seconds (default: 2.0).
+With `visualization.tsdf.enable: true` (opt-in since 2026-09-18) meshes replace the per-keyframe point clouds via TSDF volumetric fusion; extractions are triggered every `extract_every_n` frames (default: 30) or `extract_interval_s` seconds (default: 2.0). Each extraction re-extracts the whole volume and holds the Python GIL for seconds on a room-sized scan, so the packaged default sends one cloud per keyframe instead (`mesh_id` `ws_<seq>`).
 
 ---
 
@@ -171,12 +171,12 @@ Visualization server settings in `config/rtsm.yaml`:
 
 ```yaml
 visualization:
-  enable: true
+  enable: false      # headless by default; `rtsm --viz` (rtsm demo keeps it on)
   host: 0.0.0.0
   port: 8083
 
   tsdf:
-    enable: true
+    enable: false    # opt-in (GIL-holding extraction)
     voxel_size: 0.01
     extract_every_n: 30
     extract_interval_s: 2.0

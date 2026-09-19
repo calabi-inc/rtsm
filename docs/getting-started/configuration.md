@@ -67,10 +67,12 @@ rtsm demo --profile room.yaml
 Precedence is **base configuration → profiles in order → `--set` values in
 order**. Nested mappings merge; lists replace. Omitted settings retain their
 base values. Use `--profile` for a small patch; `--config` selects a complete
-base file. Both runners support these flags, and both accept `--no-viz` (skip
-the visualization server and the browser auto-open; headless replay, eval,
-CI). The demo's `--port` and either runner's `--no-viz` take precedence over
-configuration values.
+base file. Both runners support these flags. The main runner is headless by
+default (`visualization.enable: false` since P1 task 7): `python -m rtsm --viz`
+starts the 3D dashboard and opens the browser, `--no-viz` forces it off (headless
+replay, eval, CI). `rtsm demo` keeps the dashboard on and accepts `--no-viz`. The
+demo's `--port` and `--no-viz`, and the main runner's `--viz` / `--no-viz`, take
+precedence over configuration values.
 
 Restart to apply a profile. There is no live-update API yet: component
 constructors cache some values. Change one suspected cause, compare against the
@@ -557,7 +559,7 @@ When enabled, the MCP SSE endpoint is available at `http://localhost:8002/mcp/ss
 
 ```yaml
 visualization:
-  enable: true
+  enable: false                  # headless by default; `rtsm --viz` turns the dashboard on
   host: 0.0.0.0
   port: 8083                     # WebSocket port for 3D frontend
 
@@ -566,7 +568,7 @@ visualization:
     max_m: 3.5                   # max depth for point cloud
 
   tsdf:
-    enable: true
+    enable: false                # opt-in: Open3D extraction holds the GIL for seconds (see below)
     voxel_size: 0.01             # 1cm voxels
     sdf_trunc: 0.04              # truncation distance
     max_depth_m: 3.5
@@ -582,6 +584,15 @@ visualization:
 ```
 
 The 3D visualization frontend connects via WebSocket at `ws://localhost:8083/ws`. See [WebSocket API](../api/websocket.md).
+
+**Why both are off by default (2026-09-18).** With the dashboard and TSDF fusion on, the receiver thread ran the
+TSDF integration for every keyframe before reading the next frame, and each keyframe also triggered a full
+extraction of the fused volume, which holds the Python GIL for 1-2.6 s and grows with the scanned space. In a
+whole-process test at the phone's real frame rate that meant `/stats` calls up to 0.62 s (over the 0.6 s bound) and pose gaps up to
+0.82 s at every keyframe, and the dashboard client being dropped silently once the cloud exceeded a few MB. The
+headless configuration passed every predicate; the dashboard with TSDF off (one cloud per keyframe) passed as
+well. Record: `eval/baselines/2026-09-sensor-clock/README.md`, G1-C section. Turn the dashboard on for demos and
+short sessions (`--viz`); turn TSDF on only for short demos.
 
 ---
 

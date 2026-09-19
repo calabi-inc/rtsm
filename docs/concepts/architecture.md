@@ -118,7 +118,7 @@ Confirmed objects are periodically upserted to FAISS (or Milvus) for semantic se
 - **REST API** — Query objects, semantic search, stats, analytics
 - **MCP** — Model Context Protocol interface for AI agents
 - **WebSocket** — Real-time point clouds and object updates
-- **3D Demo** — Three.js visualization with TSDF mesh fusion
+- **3D Demo** — Three.js visualization (opt-in: `--viz`; per-keyframe clouds by default, TSDF fusion opt-in)
 
 ---
 

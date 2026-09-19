@@ -1,0 +1,171 @@
+G1-C wedge proof — feature/p1-task7-viz-default-off @ 8c2c0b1 — runs ['C', 'R1', 'RB', 'RS', 'F', 'R1Z', 'R1T'] — out C:\Users\konam\Desktop\calabi-repo\rtsm\eval\baselines\2026-09-sensor-clock\g1c-wedge\task7-rerun
+
+=== C: CALIBRATION: rtsm suspended 3 s at +25 s; every symptom predicate must trip (policy latest, speed 1.0x, 60.0 s) ===
+  rtsm pid 28608: -m rtsm --set ingest.policy=latest; waiting for models + API...
+  ready: RSS 2163 MB, objects 0, ingest policy latest, viz=off, tsdf=off
+  sender started (pid 50732); streaming 60.0 s at 1.0x ...
+  [calibration] rtsm suspended 3.0 s at +25.0 s
+  sender finished rc=0; draining 10 s
+  --- C predicates ---
+  FAIL P1_stats_http: n=556 errors/timeouts+slow(>0.6s)=4 p50=0.015 p99=0.033 max=0.627 (idle p99=0.027; poll schedule slip p99=0.001)
+  ok   P1b_search_http: n=29 bad=0 (503=0) p50=0.016 p99=2.961 max=2.961 hits_last=[5, 5, 5]
+  FAIL P2_pose_rate: distinct poses per 10 s window: min=41 required>=46.342 (floor 30; 0.85 x min(poll 10 Hz, input 5.45 Hz) x 10) windows=[54, 58, 41, 54, 55]
+  FAIL P3_pose_gaps: max gap between pose changes=2.659 s (p99=0.3), stale samples=1/556
+  ok   P4_pose_writer: writes_accepted=328 frames_sent=328 regressions=0 rejected=0 epochs_seen=2 loops=2
+  FAIL P5_transport: delivered load: achieved 5.452 Hz = 1.005 x target 5.424 Hz; schedule slip p99=1.757 max=2.293 s (<1.0); info: min frames per 5 s window=17, single seconds below 90%=2/59; max stall=2.482 (<1 s), received=328 sent=328 failures=0 extensions={'header': None, 'negotiated': []}; stall p99 post-KF=0.009 non-KF=0.015; close_s p50=0.008 max=0.013; drain_wait max=0.024
+  ok   P5b_plan_stall: plan text: send() stall p99=0.015 < one inter-frame interval 0.186 s (p50=0.002 p90=0.005)
+  ok   P6_rss: ready=2163 MB base(+20s)=3625 MB max=3818 MB raw growth=193 MB, TSDF ring credit=0 MB (TSDF off) -> adjusted growth=193 MB (<300); slope_last60=503.2 MB/min; from +20 s: base=3625 MB raw growth=193 MB (info)
+  ok   P7_lanes: age_dropped=0 ingest_q max=2 max_depth_seen=2 superseded=27 kf_dropped=0 admitted kf/nonkf=12/103 (depth bounds are structural under `latest`; age_dropped is the evidence)
+  ok   P8_frame_flow: sampled states in window={None: 1, 'ok': 57} backlogged_anywhere=False; log transitions in window=[('waiting', 'ok', '')]
+  FAIL P9_rollup: {'interval_s': 1.0, 'ticks': 73, 'late_ticks': 1, 'stale_rollups': 2, 'ring_truncated': 0, 'last_tick_age_s': 0.3, 'stalled': False, 'alive': True}
+  ok   P10_process_log: bad lines={'frame parse error': 0, 'connection error': 0, 'callback error': 0, 'ingest queue refused frame': 0, 'write rejected': 0, 'pose key went backwards': 0} handshakes=2/loops 2 (completed 2) viz clients connected=0 (expected 0: exactly one scripted client, no browser)
+  FAIL P11_pose_lag: sender->observed lag p50=0.055 p99=0.128 (<0.5) max=2.863 (<1.0) n=303 (matched 303/303 observed keys)
+  info: {"objects": [112, 64], "viz_on": false, "tsdf_on": false, "viz": {"camf_per_s_median": null, "bytes_per_s_median": null}, "latency_aggregate": {"input_hz": 4.8, "processing_hz": 0.85, "effective_ratio": 0.177, "frame_count": 51}, "counters": {"received": 328, "processed": 51, "gate_rejections": 37, "frame_rejections": 0, "queue_drops": 0, "superseded": 27, "age_drops": 0, "throttle_skips": 213, "tracking_drops": 0}, "semantic_index": {"confirmed": 64, "indexed": 64, "lag": 0}, "health_final": {"status": "degraded", "reasons": ["no input from client for 10.4s"]}, "sender": {"frames_sent": 328, "loops_started": 2, "loops_completed": 2, "achieved_hz": 5.452, "target_hz": 5.424, "streamed_s": 60.158}, "log_warn_err": ["WARNING huggingface_hub.utils._http: Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and fas", "WARNING rtsm.core.watchdog: [watchdog] frame flow: ok -> starved (no input from client for 5.4s)", "WARNING rtsm.run: Configuration: Some masks can pass the depth filter but lack enough valid depth for a 3D centroid."], "calibration": {"suspend_wall": 1789775294.3920803, "resume_wall": 1789775297.3927295, "P1_trips": true, "P2_trips": true, "P3_trips": true, "P3_stale_samples": 1, "P5_trips": true, "P9_trips": true, "P11_trips": true}}
+  C VERDICT: CALIBRATED
+  [rtsm] stopped (rc=1)
+
+=== R1: the E1 condition: phone cadence (1x), packaged throttle, 300 s (policy latest, speed 1.0x, 300.0 s) ===
+  rtsm pid 59324: -m rtsm --set ingest.policy=latest; waiting for models + API...
+  ready: RSS 2138 MB, objects 0, ingest policy latest, viz=off, tsdf=off
+  sender started (pid 39296); streaming 300.0 s at 1.0x ...
+  sender finished rc=0; draining 10 s
+  --- R1 predicates ---
+  ok   P1_stats_http: n=2980 errors/timeouts+slow(>0.6s)=0 p50=0.016 p99=0.031 max=0.16 (idle p99=0.028; poll schedule slip p99=0.001)
+  ok   P1b_search_http: n=149 bad=0 (503=0) p50=0.014 p99=0.09 max=0.111 hits_last=[5, 5, 5]
+  ok   P2_pose_rate: distinct poses per 10 s window: min=53 required>=46.291 (floor 30; 0.85 x min(poll 10 Hz, input 5.45 Hz) x 10) windows=[54, 58, 54, 53, 53, 56, 54, 54, 53, 54, 57, 54, 54, 55, 57, 54, 55, 54, 55, 56, 54, 53, 54, 58, 53, 55, 54, 55, 55]
+  ok   P3_pose_gaps: max gap between pose changes=0.4 s (p99=0.3), stale samples=0/2980
+  ok   P4_pose_writer: writes_accepted=1634 frames_sent=1634 regressions=0 rejected=0 epochs_seen=7 loops=7
+  ok   P5_transport: delivered load: achieved 5.446 Hz = 1.004 x target 5.424 Hz; schedule slip p99=0.014 max=0.024 s (<1.0); info: min frames per 5 s window=25, single seconds below 90%=1/300; max stall=0.022 (<1 s), received=1634 sent=1634 failures=0 extensions={'header': None, 'negotiated': []}; stall p99 post-KF=0.005 non-KF=0.012; close_s p50=0.007 max=0.031; drain_wait max=0.029
+  ok   P5b_plan_stall: plan text: send() stall p99=0.012 < one inter-frame interval 0.186 s (p50=0.002 p90=0.004)
+  ok   P6_rss: ready=2138 MB base(+60s)=3768 MB max=3858 MB raw growth=89 MB, TSDF ring credit=0 MB (TSDF off) -> adjusted growth=89 MB (<300); slope_last60=34.4 MB/min; from +20 s: base=3636 MB raw growth=221 MB (info)
+  ok   P7_lanes: age_dropped=0 ingest_q max=3 max_depth_seen=3 superseded=100 kf_dropped=0 admitted kf/nonkf=61/531 (depth bounds are structural under `latest`; age_dropped is the evidence)
+  ok   P8_frame_flow: sampled states in window={'ok': 298} backlogged_anywhere=False; log transitions in window=[('waiting', 'ok', '')]
+  ok   P9_rollup: {'interval_s': 1.0, 'ticks': 316, 'late_ticks': 0, 'stale_rollups': 0, 'ring_truncated': 0, 'last_tick_age_s': 0.31, 'stalled': False, 'alive': True}
+  ok   P10_process_log: bad lines={'frame parse error': 0, 'connection error': 0, 'callback error': 0, 'ingest queue refused frame': 0, 'write rejected': 0, 'pose key went backwards': 0} handshakes=7/loops 7 (completed 7) viz clients connected=0 (expected 0: exactly one scripted client, no browser)
+  ok   P11_pose_lag: sender->observed lag p50=0.048 p99=0.111 (<0.5) max=0.136 (<1.0) n=1613 (matched 1613/1613 observed keys)
+  info: {"objects": [138, 94], "viz_on": false, "tsdf_on": false, "viz": {"camf_per_s_median": null, "bytes_per_s_median": null}, "latency_aggregate": {"input_hz": 4.3, "processing_hz": 1.06, "effective_ratio": 0.247, "frame_count": 300}, "counters": {"received": 1634, "processed": 314, "gate_rejections": 178, "frame_rejections": 0, "queue_drops": 0, "superseded": 100, "age_drops": 0, "throttle_skips": 1042, "tracking_drops": 0}, "semantic_index": {"confirmed": 94, "indexed": 94, "lag": 0}, "health_final": {"status": "degraded", "reasons": ["no input from client for 10.0s"]}, "sender": {"frames_sent": 1634, "loops_started": 7, "loops_completed": 7, "achieved_hz": 5.446, "target_hz": 5.424, "streamed_s": 300.04}, "log_warn_err": ["WARNING huggingface_hub.utils._http: Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and fas", "WARNING rtsm.core.watchdog: [watchdog] frame flow: ok -> starved (no input from client for 6.0s)", "WARNING rtsm.run: Configuration: Some masks can pass the depth filter but lack enough valid depth for a 3D centroid."]}
+  R1 VERDICT: PASS
+  [rtsm] stopped (rc=1)
+
+=== RB: phone cadence, throttle 0.2 s (pipeline overload, bounded lanes), 150 s (policy latest, speed 1.0x, 150.0 s) ===
+  rtsm pid 45688: -m rtsm --set ingest.policy=latest --set ingest.nonkf_min_interval_s=0.2; waiting for models + API...
+  ready: RSS 2153 MB, objects 0, ingest policy latest, viz=off, tsdf=off
+  sender started (pid 31016); streaming 150.0 s at 1.0x ...
+  sender finished rc=0; draining 10 s
+  --- RB predicates ---
+  ok   P1_stats_http: n=1482 errors/timeouts+slow(>0.6s)=0 p50=0.016 p99=0.03 max=0.221 (idle p99=0.027; poll schedule slip p99=0.001)
+  ok   P1b_search_http: n=74 bad=0 (503=0) p50=0.016 p99=0.083 max=0.09 hits_last=[5, 5, 5]
+  ok   P2_pose_rate: distinct poses per 10 s window: min=53 required>=46.351 (floor 30; 0.85 x min(poll 10 Hz, input 5.45 Hz) x 10) windows=[54, 58, 53, 54, 54, 55, 54, 54, 54, 54, 57, 54, 54, 56]
+  ok   P3_pose_gaps: max gap between pose changes=0.4 s (p99=0.3), stale samples=0/1482
+  ok   P4_pose_writer: writes_accepted=819 frames_sent=819 regressions=0 rejected=0 epochs_seen=4 loops=4
+  ok   P5_transport: delivered load: achieved 5.453 Hz = 1.005 x target 5.424 Hz; schedule slip p99=0.014 max=0.016 s (<1.0); info: min frames per 5 s window=25, single seconds below 90%=2/150; max stall=0.02 (<1 s), received=819 sent=819 failures=0 extensions={'header': None, 'negotiated': []}; stall p99 post-KF=0.004 non-KF=0.012; close_s p50=0.008 max=0.009; drain_wait max=0.026
+  ok   P5b_plan_stall: plan text: send() stall p99=0.012 < one inter-frame interval 0.186 s (p50=0.002 p90=0.004)
+  ok   P6_rss: ready=2153 MB base(+60s)=3791 MB max=3848 MB raw growth=57 MB, TSDF ring credit=0 MB (TSDF off) -> adjusted growth=57 MB (<300); slope_last60=17.6 MB/min; from +20 s: base=3659 MB raw growth=189 MB (info)
+  ok   P7_lanes: age_dropped=0 ingest_q max=3 max_depth_seen=3 superseded=214 kf_dropped=0 admitted kf/nonkf=31/474 (depth bounds are structural under `latest`; age_dropped is the evidence)
+  ok   P8_frame_flow: sampled states in window={'ok': 148} backlogged_anywhere=False; log transitions in window=[('waiting', 'ok', '')]
+  ok   P9_rollup: {'interval_s': 1.0, 'ticks': 166, 'late_ticks': 0, 'stale_rollups': 0, 'ring_truncated': 0, 'last_tick_age_s': 0.22, 'stalled': False, 'alive': True}
+  ok   P10_process_log: bad lines={'frame parse error': 0, 'connection error': 0, 'callback error': 0, 'ingest queue refused frame': 0, 'write rejected': 0, 'pose key went backwards': 0} handshakes=4/loops 4 (completed 4) viz clients connected=0 (expected 0: exactly one scripted client, no browser)
+  ok   P11_pose_lag: sender->observed lag p50=0.05 p99=0.105 (<0.5) max=0.131 (<1.0) n=805 (matched 805/805 observed keys)
+  info: {"objects": [142, 81], "viz_on": false, "tsdf_on": false, "viz": {"camf_per_s_median": null, "bytes_per_s_median": null}, "latency_aggregate": {"input_hz": 4.8, "processing_hz": 1.06, "effective_ratio": 0.221, "frame_count": 159}, "counters": {"received": 819, "processed": 159, "gate_rejections": 132, "frame_rejections": 0, "queue_drops": 0, "superseded": 214, "age_drops": 0, "throttle_skips": 314, "tracking_drops": 0}, "semantic_index": {"confirmed": 81, "indexed": 81, "lag": 0}, "health_final": {"status": "degraded", "reasons": ["no input from client for 10.4s"]}, "sender": {"frames_sent": 819, "loops_started": 4, "loops_completed": 4, "achieved_hz": 5.453, "target_hz": 5.424, "streamed_s": 150.198}, "log_warn_err": ["WARNING huggingface_hub.utils._http: Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and fas", "WARNING rtsm.core.watchdog: [watchdog] frame flow: ok -> starved (no input from client for 5.4s)", "WARNING rtsm.run: Configuration: Some masks can pass the depth filter but lack enough valid depth for a 3D centroid."]}
+  RB VERDICT: PASS
+  [rtsm] stopped (rc=1)
+
+=== RS: receiver saturated (3x pacing), packaged throttle, 150 s (policy latest, speed 3.0x, 150.0 s) ===
+  rtsm pid 55924: -m rtsm --set ingest.policy=latest; waiting for models + API...
+  ready: RSS 2153 MB, objects 0, ingest policy latest, viz=off, tsdf=off
+  sender started (pid 37952); streaming 150.0 s at 3.0x ...
+  sender finished rc=0; draining 10 s
+  --- RS predicates ---
+  ok   P1_stats_http: n=1481 errors/timeouts+slow(>0.6s)=0 p50=0.016 p99=0.032 max=0.217 (idle p99=0.027; poll schedule slip p99=0.001)
+  ok   P1b_search_http: n=74 bad=0 (503=0) p50=0.015 p99=0.073 max=0.078 hits_last=[5, 5, 5]
+  ok   P2_pose_rate: distinct poses per 10 s window: min=96 required>=85.0 (floor 30; 0.85 x min(poll 10 Hz, input 16.29 Hz) x 10) windows=[100, 100, 100, 100, 96, 100, 100, 100, 100, 99, 100, 99, 99, 99]
+  ok   P3_pose_gaps: max gap between pose changes=0.3 s (p99=0.101), stale samples=0/1481
+  ok   P4_pose_writer: writes_accepted=2445 frames_sent=2445 regressions=0 rejected=0 epochs_seen=11 loops=11
+  ok   P5_transport: SATURATED by design: achieved 16.292 Hz = the receiver's ceiling with the full process (target 16.271); stall p50=0.002 p99=0.015 max=0.065; received=2445 sent=2445 failures=0 extensions={'header': None, 'negotiated': []}; stall p99 post-KF=0.007 non-KF=0.015; close_s p50=0.008 max=0.022; drain_wait max=0.032
+  ok   P6_rss: ready=2153 MB base(+60s)=3765 MB max=3842 MB raw growth=77 MB, TSDF ring credit=0 MB (TSDF off) -> adjusted growth=77 MB (<300); slope_last60=47.8 MB/min; from +20 s: base=3710 MB raw growth=133 MB (info)
+  ok   P7_lanes: age_dropped=0 ingest_q max=3 max_depth_seen=3 superseded=176 kf_dropped=0 admitted kf/nonkf=92/286 (depth bounds are structural under `latest`; age_dropped is the evidence)
+  ok   P8_frame_flow: sampled states in window={'ok': 148} backlogged_anywhere=False; log transitions in window=[('waiting', 'ok', '')]
+  ok   P9_rollup: {'interval_s': 1.0, 'ticks': 166, 'late_ticks': 0, 'stale_rollups': 0, 'ring_truncated': 0, 'last_tick_age_s': 0.27, 'stalled': False, 'alive': True}
+  ok   P10_process_log: bad lines={'frame parse error': 0, 'connection error': 0, 'callback error': 0, 'ingest queue refused frame': 0, 'write rejected': 0, 'pose key went backwards': 0} handshakes=11/loops 11 (completed 11) viz clients connected=0 (expected 0: exactly one scripted client, no browser)
+  ok   P11_pose_lag: SATURATED (info): sender->observed lag p50=0.03 p99=0.08 max=0.105 n=1473 (matched 1473/1473 observed keys)
+  info: {"objects": [136, 39], "viz_on": false, "tsdf_on": false, "viz": {"camf_per_s_median": null, "bytes_per_s_median": null}, "latency_aggregate": {"input_hz": 13.9, "processing_hz": 1.29, "effective_ratio": 0.093, "frame_count": 194}, "counters": {"received": 2445, "processed": 194, "gate_rejections": 8, "frame_rejections": 0, "queue_drops": 0, "superseded": 176, "age_drops": 0, "throttle_skips": 2067, "tracking_drops": 0}, "semantic_index": {"confirmed": 39, "indexed": 39, "lag": 0}, "health_final": {"status": "degraded", "reasons": ["no input from client for 10.5s"]}, "sender": {"frames_sent": 2445, "loops_started": 11, "loops_completed": 11, "achieved_hz": 16.292, "target_hz": 16.271, "streamed_s": 150.076}, "log_warn_err": ["WARNING huggingface_hub.utils._http: Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and fas", "WARNING rtsm.core.watchdog: [watchdog] frame flow: ok -> starved (no input from client for 5.5s)", "WARNING rtsm.run: Configuration: Some masks can pass the depth filter but lack enough valid depth for a 3D centroid."]}
+  RS VERDICT: PASS
+  [rtsm] stopped (rc=1)
+
+=== F: LEGACY 512-deep queue under the RB load, 150 s (must show queue growth) (policy legacy, speed 1.0x, 150.0 s) ===
+  rtsm pid 3592: -m rtsm --set ingest.policy=legacy --set ingest.nonkf_min_interval_s=0.2; waiting for models + API...
+  ready: RSS 2158 MB, objects 0, ingest policy legacy, viz=off, tsdf=off
+  sender started (pid 41616); streaming 150.0 s at 1.0x ...
+  sender finished rc=0; draining 10 s
+  --- F predicates ---
+  ok   P1_stats_http: n=1482 errors/timeouts+slow(>0.6s)=0 p50=0.016 p99=0.03 max=0.21 (idle p99=0.027; poll schedule slip p99=0.001)
+  ok   P1b_search_http: n=74 bad=0 (503=0) p50=0.014 p99=0.083 max=0.227 hits_last=[5, 5, 5]
+  ok   P2_pose_rate: distinct poses per 10 s window: min=53 required>=46.359 (floor 30; 0.85 x min(poll 10 Hz, input 5.45 Hz) x 10) windows=[54, 58, 54, 54, 53, 56, 54, 54, 53, 54, 57, 54, 54, 54]
+  ok   P3_pose_gaps: max gap between pose changes=0.4 s (p99=0.3), stale samples=0/1482
+  ok   P4_pose_writer: writes_accepted=819 frames_sent=819 regressions=0 rejected=0 epochs_seen=4 loops=4
+  ok   P5_transport: delivered load: achieved 5.454 Hz = 1.006 x target 5.424 Hz; schedule slip p99=0.014 max=0.015 s (<1.0); info: min frames per 5 s window=25, single seconds below 90%=0/150; max stall=0.023 (<1 s), received=819 sent=819 failures=0 extensions={'header': None, 'negotiated': []}; stall p99 post-KF=0.012 non-KF=0.012; close_s p50=0.009 max=0.009; drain_wait max=0.022
+  ok   P5b_plan_stall: plan text: send() stall p99=0.012 < one inter-frame interval 0.186 s (p50=0.002 p90=0.004)
+  FAIL P6_rss: ready=2158 MB base(+60s)=3865 MB max=4259 MB raw growth=394 MB, TSDF ring credit=0 MB (TSDF off) -> adjusted growth=394 MB (<300); slope_last60=245.0 MB/min; from +20 s: base=3734 MB raw growth=525 MB (info)
+  ok   P7_lanes: LEGACY wedge signature: ingest_q max=67 (>= 20 required) final depth={'legacy': 23} lane_full=False
+  ok   P8_frame_flow: sampled states in window={'ok': 148} backlogged_anywhere=False; log transitions in window=[('waiting', 'ok', '')]
+  ok   P9_rollup: {'interval_s': 1.0, 'ticks': 166, 'late_ticks': 0, 'stale_rollups': 0, 'ring_truncated': 0, 'last_tick_age_s': 0.3, 'stalled': False, 'alive': True}
+  ok   P10_process_log: bad lines={'frame parse error': 0, 'connection error': 0, 'callback error': 0, 'ingest queue refused frame': 0, 'write rejected': 0, 'pose key went backwards': 0} handshakes=4/loops 4 (completed 4) viz clients connected=0 (expected 0: exactly one scripted client, no browser)
+  ok   P11_pose_lag: sender->observed lag p50=0.045 p99=0.114 (<0.5) max=0.123 (<1.0) n=802 (matched 802/802 observed keys)
+  info: {"objects": [149, 99], "viz_on": false, "tsdf_on": false, "viz": {"camf_per_s_median": null, "bytes_per_s_median": null}, "latency_aggregate": {"input_hz": 0.0, "processing_hz": 1.25, "effective_ratio": 1254.416, "frame_count": 200}, "counters": {"received": 819, "processed": 200, "gate_rejections": 271, "frame_rejections": 0, "queue_drops": 0, "superseded": 0, "age_drops": 0, "throttle_skips": 324, "tracking_drops": 0}, "semantic_index": {"confirmed": 99, "indexed": 99, "lag": 0}, "health_final": {"status": "degraded", "reasons": ["no input from client for 9.6s"]}, "sender": {"frames_sent": 819, "loops_started": 4, "loops_completed": 4, "achieved_hz": 5.454, "target_hz": 5.424, "streamed_s": 150.165}, "log_warn_err": ["WARNING huggingface_hub.utils._http: Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and fas", "WARNING rtsm.core.watchdog: [watchdog] frame flow: ok -> starved (no input from client for 5.5s)", "WARNING rtsm.run: Configuration: Some masks can pass the depth filter but lack enough valid depth for a 3D centroid."]}
+  F VERDICT: WEDGE-VISIBLE
+  [rtsm] stopped (rc=1)
+
+=== R1Z: dashboard on (--viz), TSDF off = per-keyframe clouds, client attached, 150 s (non-gating) (policy latest, speed 1.0x, 150.0 s) ===
+  rtsm pid 27876: -m rtsm --set ingest.policy=latest --viz; waiting for models + API...
+  ready: RSS 2202 MB, objects 0, ingest policy latest, viz=on, tsdf=off
+  viz client attached (log-confirmed)
+  sender started (pid 50996); streaming 150.0 s at 1.0x ...
+  sender finished rc=0; draining 10 s
+  --- R1Z predicates ---
+  ok   P1_stats_http: n=1481 errors/timeouts+slow(>0.6s)=0 p50=0.006 p99=0.03 max=0.122 (idle p99=0.027; poll schedule slip p99=0.001)
+  ok   P1b_search_http: n=74 bad=0 (503=0) p50=0.015 p99=0.049 max=0.075 hits_last=[5, 5, 5]
+  ok   P2_pose_rate: distinct poses per 10 s window: min=53 required>=46.342 (floor 30; 0.85 x min(poll 10 Hz, input 5.45 Hz) x 10) windows=[55, 58, 54, 54, 54, 56, 54, 54, 54, 54, 57, 54, 53, 55]
+  ok   P3_pose_gaps: max gap between pose changes=0.4 s (p99=0.3), stale samples=0/1481
+  ok   P4_pose_writer: writes_accepted=818 frames_sent=818 regressions=0 rejected=0 epochs_seen=4 loops=4
+  ok   P5_transport: delivered load: achieved 5.452 Hz = 1.005 x target 5.424 Hz; schedule slip p99=0.014 max=0.015 s (<1.0); info: min frames per 5 s window=25, single seconds below 90%=0/150; max stall=0.017 (<1 s), received=818 sent=818 failures=0 extensions={'header': None, 'negotiated': []}; stall p99 post-KF=0.004 non-KF=0.007; close_s p50=0.019 max=0.023; drain_wait max=0.025
+  ok   P5b_plan_stall: plan text: send() stall p99=0.007 < one inter-frame interval 0.186 s (p50=0.002 p90=0.003)
+  ok   P6_rss: ready=2202 MB base(+60s)=3794 MB max=3835 MB raw growth=40 MB, TSDF ring credit=0 MB (TSDF off) -> adjusted growth=40 MB (<300); slope_last60=-2.1 MB/min; from +20 s: base=3748 MB raw growth=86 MB (info)
+  ok   P7_lanes: age_dropped=0 ingest_q max=3 max_depth_seen=3 superseded=89 kf_dropped=0 admitted kf/nonkf=31/265 (depth bounds are structural under `latest`; age_dropped is the evidence)
+  ok   P8_frame_flow: sampled states in window={'ok': 148} backlogged_anywhere=False; log transitions in window=[('waiting', 'ok', '')]
+  ok   P9_rollup: {'interval_s': 1.0, 'ticks': 167, 'late_ticks': 0, 'stale_rollups': 0, 'ring_truncated': 0, 'last_tick_age_s': 0.33, 'stalled': False, 'alive': True}
+  FAIL P10_process_log: bad lines={'frame parse error': 0, 'connection error': 0, 'callback error': 0, 'ingest queue refused frame': 0, 'write rejected': 0, 'pose key went backwards': 0} handshakes=4/loops 4 (completed 4) viz clients connected=2 (expected 1: exactly one scripted client, no browser)
+  ok   P11_pose_lag: sender->observed lag p50=0.049 p99=0.111 (<0.5) max=0.169 (<1.0) n=806 (matched 806/806 observed keys)
+  ok   P12_viz_attached: viz client alive at sender end=True; closed early=[]
+  info: {"objects": [128, 70], "viz_on": true, "tsdf_on": false, "viz": {"camf_per_s_median": 0.0, "bytes_per_s_median": 0.0}, "latency_aggregate": {"input_hz": 4.3, "processing_hz": 0.96, "effective_ratio": 0.223, "frame_count": 144}, "counters": {"received": 818, "processed": 144, "gate_rejections": 63, "frame_rejections": 0, "queue_drops": 0, "superseded": 89, "age_drops": 0, "throttle_skips": 522, "tracking_drops": 0}, "semantic_index": {"confirmed": 70, "indexed": 70, "lag": 0}, "health_final": {"status": "degraded", "reasons": ["no input from client for 10.5s"]}, "sender": {"frames_sent": 818, "loops_started": 4, "loops_completed": 4, "achieved_hz": 5.452, "target_hz": 5.424, "streamed_s": 150.042}, "log_warn_err": ["WARNING huggingface_hub.utils._http: Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and fas", "WARNING rtsm.core.watchdog: [watchdog] frame flow: ok -> starved (no input from client for 5.5s)", "WARNING rtsm.run: Configuration: Some masks can pass the depth filter but lack enough valid depth for a 3D centroid."]}
+  R1Z VERDICT: FAIL
+  [vizclient] stopped (rc=1)
+  [rtsm] stopped (rc=1)
+
+=== R1T: dashboard on + TSDF fusion on (the pre-task-7 packaged config), client attached, 150 s (non-gating) (policy latest, speed 1.0x, 150.0 s) ===
+  rtsm pid 45824: -m rtsm --set ingest.policy=latest --set visualization.tsdf.enable=true --viz; waiting for models + API...
+  ready: RSS 2193 MB, objects 0, ingest policy latest, viz=on, tsdf=on
+  viz client attached (log-confirmed)
+  sender started (pid 61132); streaming 150.0 s at 1.0x ...
+  sender finished rc=0; draining 10 s
+  --- R1T predicates ---
+  FAIL P1_stats_http: n=1390 errors/timeouts+slow(>0.6s)=5 p50=0.016 p99=0.378 max=0.63 (idle p99=0.028; poll schedule slip p99=0.279)
+  ok   P1b_search_http: n=74 bad=0 (503=0) p50=0.021 p99=0.456 max=0.538 hits_last=[5, 5, 5]
+  FAIL P2_pose_rate: distinct poses per 10 s window: min=45 required>=45.857 (floor 30; 0.85 x min(poll 10 Hz, input 5.39 Hz) x 10) windows=[51, 51, 48, 45, 50, 54, 53, 55, 52, 52, 55, 52, 53, 52]
+  FAIL P3_pose_gaps: max gap between pose changes=0.829 s (p99=0.522), stale samples=0/1390
+  ok   P4_pose_writer: writes_accepted=811 frames_sent=811 regressions=0 rejected=0 epochs_seen=4 loops=4
+  ok   P5_transport: delivered load: achieved 5.395 Hz = 0.995 x target 5.424 Hz; schedule slip p99=0.014 max=0.015 s (<1.0); info: min frames per 5 s window=24, single seconds below 90%=4/150; max stall=0.024 (<1 s), received=811 sent=811 failures=0 extensions={'header': None, 'negotiated': []}; stall p99 post-KF=0.005 non-KF=0.015; close_s p50=0.019 max=0.265; drain_wait max=0.41
+  ok   P5b_plan_stall: plan text: send() stall p99=0.015 < one inter-frame interval 0.186 s (p50=0.002 p90=0.004)
+  ok   P6_rss: ready=2193 MB base(+60s)=4552 MB max=4706 MB raw growth=155 MB, TSDF ring credit=39 MB (31 KFs x 2.05 MB, ring 200) -> adjusted growth=116 MB (<300); slope_last60=20.4 MB/min; from +20 s: base=4131 MB raw growth=575 MB (info)
+  ok   P7_lanes: age_dropped=0 ingest_q max=3 max_depth_seen=3 superseded=66 kf_dropped=0 admitted kf/nonkf=31/254 (depth bounds are structural under `latest`; age_dropped is the evidence)
+  ok   P8_frame_flow: sampled states in window={'ok': 148} backlogged_anywhere=False; log transitions in window=[('waiting', 'ok', '')]
+  ok   P9_rollup: {'interval_s': 1.0, 'ticks': 167, 'late_ticks': 0, 'stale_rollups': 0, 'ring_truncated': 0, 'last_tick_age_s': 0.73, 'stalled': False, 'alive': True}
+  FAIL P10_process_log: bad lines={'frame parse error': 0, 'connection error': 0, 'callback error': 0, 'ingest queue refused frame': 0, 'write rejected': 0, 'pose key went backwards': 0} handshakes=4/loops 4 (completed 4) viz clients connected=2 (expected 1: exactly one scripted client, no browser)
+  ok   P11_pose_lag: sender->observed lag p50=0.05 p99=0.155 (<0.5) max=0.24 (<1.0) n=759 (matched 759/759 observed keys)
+  ok   P12_viz_attached: viz client alive at sender end=True; closed early=[]
+  info: {"objects": [122, 74], "viz_on": true, "tsdf_on": true, "viz": {"camf_per_s_median": 0.0, "bytes_per_s_median": 0.0}, "latency_aggregate": {"input_hz": 4.7, "processing_hz": 0.91, "effective_ratio": 0.193, "frame_count": 137}, "counters": {"received": 811, "processed": 137, "gate_rejections": 82, "frame_rejections": 0, "queue_drops": 0, "superseded": 66, "age_drops": 0, "throttle_skips": 526, "tracking_drops": 0}, "semantic_index": {"confirmed": 74, "indexed": 74, "lag": 0}, "health_final": {"status": "degraded", "reasons": ["no input from client for 10.1s"]}, "sender": {"frames_sent": 811, "loops_started": 4, "loops_completed": 4, "achieved_hz": 5.395, "target_hz": 5.424, "streamed_s": 150.318}, "log_warn_err": ["WARNING huggingface_hub.utils._http: Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and fas", "WARNING rtsm.core.watchdog: [watchdog] frame flow: ok -> starved (no input from client for 5.0s)", "WARNING rtsm.run: Configuration: Some masks can pass the depth filter but lack enough valid depth for a 3D centroid."]}
+  R1T VERDICT: FAIL
+  [vizclient] stopped (rc=1)
+  [rtsm] stopped (rc=1)
+
+HARD GATE: PASS | harness valid: calibration True, falsifier True | C CALIBRATED | R1 PASS | RB PASS | RS PASS | F WEDGE-VISIBLE | R1Z FAIL | R1T FAIL
+G1C_GATE_DONE
