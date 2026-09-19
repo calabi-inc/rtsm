@@ -97,3 +97,15 @@ def test_e1_profile_layers_only_the_campaign_tuning():
         "segmentation.grounded_sam2.vocab",
         "io.clearance.enable",
     }, f"profile touches unexpected keys: {sorted(changed)}"
+
+
+def test_packaged_visualization_is_opt_in_and_tsdf_is_off():
+    """P1 task 7 (2026-09-18): the core is headless by default and TSDF fusion is opt-in
+    (G1-C: the viz+TSDF path stalled the receive loop and the API at every keyframe; the
+    headless configuration passed every predicate). The demo keeps its dashboard on."""
+    cfg = load_config("rtsm.yaml")
+    assert cfg["visualization"]["enable"] is False
+    assert cfg["visualization"]["tsdf"]["enable"] is False
+    demo = load_config("demo_config.yaml")
+    assert demo["visualization"]["enable"] is True
+    assert demo["visualization"]["tsdf"]["enable"] is False

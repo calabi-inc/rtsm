@@ -43,7 +43,7 @@ No hardware needed — replay uses a bundled recording.
 **Try searching for these objects** (type in the search bar or use the API):
 `tissue box` · `doll` · `laptop` · `pillow` · `curtain` · `lamp` · `humidifier`
 
-> `rtsm demo` runs a short 50-frame clip. For the full room sweep (240 frames), clone the repo with `git lfs install && git clone` then run `rtsm --replay recordings/session1`.
+> `rtsm demo` runs a short 50-frame clip. For the full room sweep (240 frames), clone the repo with `git lfs install && git clone` then run `rtsm --viz --replay recordings/session1`.
 
 **[Watch the full demo on YouTube](https://youtu.be/abhXsbvOLQg)**
 
@@ -214,7 +214,8 @@ python scripts/fetch_models.py --only sam2    # or individually
 ### Live — iPhone (ARKit over WebSocket)
 
 ```bash
-rtsm                   # starts pipeline + API + visualization
+rtsm                   # headless: pipeline + REST API (+ MCP)
+rtsm --viz             # plus the 3D dashboard (opens the browser)
 ```
 
 ### Live — RealSense D435i + RTAB-Map

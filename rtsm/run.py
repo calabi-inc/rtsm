@@ -76,16 +76,21 @@ def main(argv: "list[str] | None" = None):
                         help="Replay speed multiplier (<1 = slower, e.g. 0.5 = half speed)")
     parser.add_argument("--record-only", action="store_true",
                         help="Record without running pipeline (no GPU needed)")
-    parser.add_argument("--no-viz", action="store_true",
-                        help="Skip the visualization server and the browser auto-open "
-                             "(headless replay / eval / CI); same as "
-                             "--set visualization.enable=false")
+    viz_group = parser.add_mutually_exclusive_group()
+    viz_group.add_argument("--viz", action="store_true",
+                           help="Start the visualization server (3D dashboard + browser auto-open); "
+                                "off by default since P1 task 7. Same as --set visualization.enable=true")
+    viz_group.add_argument("--no-viz", action="store_true",
+                           help="Force the visualization server off (headless replay / eval / CI); "
+                                "same as --set visualization.enable=false")
     add_config_arguments(parser)
     args = parser.parse_args(argv)
     try:
         cfg = config_from_args(args)
     except (ConfigError, OSError) as exc:
         parser.error(str(exc))
+    if args.viz:
+        cfg.setdefault("visualization", {})["enable"] = True
     if args.no_viz:
         cfg.setdefault("visualization", {})["enable"] = False
 
@@ -468,8 +473,10 @@ def main(argv: "list[str] | None" = None):
     mcp_cfg = cfg.get("mcp", {})
     mcp_enabled = bool(mcp_cfg.get("enable", False))
 
-    # Resolve frontend static dir and viz broadcaster for single-port serving
-    static_dir = find_static_dir()
+    # Resolve frontend static dir and viz broadcaster for single-port serving.
+    # Headless (visualization.enable false): no dashboard page either -- the API
+    # root would otherwise serve a frontend whose /ws never connects.
+    static_dir = find_static_dir() if vis_server else None
     vis_broadcaster = vis_server.broadcaster if vis_server else None
     vis_server_registry = vis_server.registry if vis_server else None
 

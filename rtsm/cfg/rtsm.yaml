@@ -349,7 +349,11 @@ ltm:
 
 # -------------------- Visualization --------------------
 visualization:
-  enable: true                    # Enable embedded visualization server
+  # OFF by default (P1 task 7, 2026-09-18): the core runs headless (REST + MCP only). Turn the
+  # dashboard on with `rtsm --viz` (or --set visualization.enable=true); `rtsm demo` keeps it on.
+  # G1-C (eval/baselines/2026-09-sensor-clock/README.md) measured the viz+TSDF path stalling the
+  # receive loop and the API at every keyframe; the headless configuration passed every predicate.
+  enable: false
   host: 0.0.0.0
   port: 8083                      # WebSocket port for frontend
   apply_camera_flip: true           # Flip ARKit camera (Y-up, Z-back) to OpenCV (Y-down, Z-forward)
@@ -361,7 +365,11 @@ visualization:
 
   # TSDF volumetric fusion (replaces naive per-frame point cloud accumulation)
   tsdf:
-    enable: true
+    # OFF (G1-C 2026-09-18): TSDF integration ran inline on the receive coroutine for every keyframe, and
+    # every keyframe also spawned a whole-volume extract_point_cloud whose Open3D call holds the GIL
+    # 1-2.6 s (growing with the scanned volume). With it off the dashboard shows one cloud per keyframe
+    # (no fusion). Opt in for short demos only.
+    enable: false
     integration_max_width: 640    # Downsample RGB before integration (depth is 256x192)
     voxel_size: 0.01              # 1cm voxels for indoor
     sdf_trunc: 0.04               # truncation distance (meters)

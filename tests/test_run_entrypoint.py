@@ -97,3 +97,9 @@ def test_validation_precedes_the_gpu_check():
     assert {"LaneConfig", "_GPU_AVAILABLE", "resolve_clock_mode"} <= set(first), first
     assert first["resolve_clock_mode"] < first["_GPU_AVAILABLE"]
     assert first["LaneConfig"] < first["_GPU_AVAILABLE"]
+
+
+def test_viz_and_no_viz_are_mutually_exclusive(no_models, tmp_path, capsys):
+    with pytest.raises(SystemExit):
+        run.main(["--replay", str(tmp_path), "--viz", "--no-viz"])
+    assert "not allowed with argument" in capsys.readouterr().err

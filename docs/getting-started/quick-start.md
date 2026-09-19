@@ -9,7 +9,8 @@ This guide walks you through running RTSM and making your first semantic query.
 Start the main service:
 
 ```bash
-python -m rtsm
+python -m rtsm          # headless: REST API (+ MCP)
+python -m rtsm --viz    # plus the 3D dashboard (opens the browser)
 ```
 
 This launches:
@@ -17,7 +18,7 @@ This launches:
 | Service | Address |
 |---------|---------|
 | REST API | `http://localhost:8002` |
-| WebSocket (visualization) | `ws://localhost:8083/ws` |
+| WebSocket (visualization) | `ws://localhost:8002/ws`, only with `--viz` (headless by default) |
 | MCP (if enabled) | `http://localhost:8002/mcp/sse` |
 
 RTSM listens for RGB-D frames via the configured receiver (WebSocket from Calabi Lens, or ZeroMQ from RealSense + RTABMap).
@@ -156,7 +157,7 @@ curl http://localhost:8002/stats/detailed
 curl http://localhost:8002/analytics/segmentation
 ```
 
-The analytics dashboard is also available in the 3D visualization frontend as a separate tab. See the [Analytics Dashboard Guide](../guides/analytics-dashboard.md) for details.
+The analytics dashboard is also available in the 3D visualization frontend (`--viz`, or `rtsm demo`) as a separate tab. See the [Analytics Dashboard Guide](../guides/analytics-dashboard.md) for details.
 
 ---
 

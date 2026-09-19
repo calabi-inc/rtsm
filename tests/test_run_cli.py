@@ -27,6 +27,8 @@ def test_runner_help_lists_no_viz_and_config_flags():
     # --no-viz: headless runs (benchmarks, eval, CI) must be able to skip the
     # visualization server and its browser auto-open without editing the yaml.
     assert "--no-viz" in out
+    # --viz: the runner is headless by default since P1 task 7; the dashboard is one flag away.
+    assert "--viz" in out
     # PR #25's config surface must survive any runner refactor.
     for flag in ("--config", "--profile", "--set", "--replay", "--replay-speed"):
         assert flag in out, flag

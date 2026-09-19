@@ -65,7 +65,7 @@ The pipeline tracks where frames are dropped:
 
 ## Visualization Dashboard
 
-The analytics dashboard is built into the 3D visualization frontend. When the visualization server is running (`ws://localhost:8083/ws`), the frontend includes:
+The analytics dashboard is built into the 3D visualization frontend. When the visualization server is running (`python -m rtsm --viz`; `rtsm demo` has it on; the frontend connects to `ws://localhost:8002/ws`), the frontend includes:
 
 - **KPI Scorecards** — Input Hz, Processing Hz, Latency, Queue depth, Object count, Association rate
 - **Time-series charts** — Throughput, per-stage latency breakdown, segmentation rates (powered by uPlot)

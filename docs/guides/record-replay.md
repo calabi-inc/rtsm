@@ -47,7 +47,7 @@ Feed a recorded session through the full pipeline:
 python -m rtsm --replay recordings/session1
 ```
 
-This launches the complete RTSM stack (segmentation, CLIP, association, memory, API, visualization) and replays frames at the original recording rate.
+This launches the complete RTSM stack (segmentation, CLIP, association, memory, API; add `--viz` for the 3D dashboard) and replays frames at the original recording rate.
 
 ### Included test dataset
 

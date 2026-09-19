@@ -231,3 +231,34 @@ timeout; the 0.6 s the plan cites is the ESP32 bridge's) with 0.6 s applied to `
 through `age_dropped == 0` under `max_frame_age_s` 2.0 (diagnostics trace OFF = production) plus P11, the end-to-end lag
 the plan did not have. Windows/3.12 note: `time.monotonic()` ticks at 15.6 ms on this interpreter; every harness
 measurement uses `perf_counter`, cross-process alignment uses `time.time()`.
+
+### P1 task 7 re-run (2026-09-18) — packaged default headless → **HARD GATE PASS** — `g1c-wedge/task7-rerun/` + `task7-rerun-viz/`
+
+Founder decision 2026-09-18: the core's packaged default is **viz off, TSDF off** (`visualization.enable: false`,
+`visualization.tsdf.enable: false`; `rtsm --viz` turns the dashboard on; `rtsm demo` keeps it on). Branch
+`feature/p1-task7-viz-default-off` (main `8c2c0b1` + the defaults, a `--viz` flag mutually exclusive with `--no-viz`,
+the API root no longer serving a dashboard page when headless, docs, tests; no ingest code touched). The harness
+reads the viz/TSDF state of every run from the runner's own log lines instead of assuming it, and the dashboard states
+became the non-gating runs R1Z (`--viz`) and R1T (`--viz` + TSDF on = the pre-task-7 packaged config). Two harness
+fixes on the way: `--out` is resolved to an absolute path (the sender runs with the repo root as cwd), and the
+calibration run no longer requires a `stale` sample (a headless process refills the mailbox before the 10 Hz poller can
+catch `age_s > 0.5`; the 2.66 s gap is the symptom). Same matrix otherwise; gate.out per directory is verbatim.
+
+| run | config | verdict | `/stats` p99 / max | max pose gap / stale | pose lag p99 / max | RSS adj. growth / plateau | lanes |
+|---|---|---|---|---|---|---|---|
+| C | headless, rtsm suspended 3 s | **CALIBRATED** (P1 4 timeouts, P2 41 < 46.4, P3 gap 2.66 s, P5 stall 2.45 s, P9 `late_ticks` 1, P11 lag 2.86 s) | — | — | — | — | — |
+| R1 | headless, phone cadence, 300 s | **PASS** (13/13) | 0.031 / 0.16 s | 0.40 s / 0 of 2980 | 0.111 / 0.136 s | +89 MB / 3.86 GB | q ≤ 3, 0 age drops, 100 supersessions |
+| RB | headless, throttle 0.2 s | **PASS** | 0.030 / 0.22 s | 0.40 s / 0 | 0.105 / 0.131 s | +57 MB / 3.85 GB | q ≤ 3, 214 supersessions |
+| RS | headless, 3× pacing | **PASS** — ingests the full 16.29 of 16.27 Hz pushed (no longer saturated) | 0.032 / 0.22 s | 0.30 s / 0 | 0.080 / 0.105 s | +77 MB / 3.84 GB | q ≤ 3, 176 supersessions |
+| F | headless, LEGACY queue, throttle 0.2 s | **WEDGE-VISIBLE** — `ingest_q` 67 (23 at the end), +245 MB/min in the last minute | 0.030 / 0.21 s | 0.40 s / 0 | 0.114 / 0.123 s | +394 MB / 4.26 GB | growing |
+| R1Z | `--viz`, TSDF off, client attached (retry dir) | **PASS** (14/14) | 0.032 / 0.06 s | 0.40 s / 0 | 0.106 / 0.130 s | +40 MB / 3.84 GB | q ≤ 3 |
+| R1T | `--viz` + TSDF on, client attached (retry dir) | **FAIL** P1 (p99 0.347 s, max 0.566 s), P3 (max gap 0.565 s) — the TSDF mechanism, unchanged | 0.347 / 0.566 s | 0.565 s / 0 | 0.15 / 0.24 s | +116 MB / 4.71 GB | q ≤ 3 |
+
+`task7-rerun/gate.out` holds the full matrix; its R1Z/R1T rows there FAIL only P10 ("2 dashboard clients"): the
+built-in browser pane left open from the founder's eyeballing session auto-reconnected to every viz-enabled process
+(main.ts reconnects every 2 s), so those two were repeated with the pane closed into `task7-rerun-viz/` — the table's
+R1Z/R1T rows are from the retry (its own "HARD GATE" line reads FAIL only because that invocation contains no gating
+run). **G1-C is closed as PASS on the packaged configuration.** The dashboard with TSDF off passes as well; the fused
+map stays opt-in with its measured residual, and the worker/child-process designs in
+`plans/permanent-plan/tsdf-viz-fix-2026-09.md` are deferred until a long dashboard-on session is actually needed.
+The 2026-09-18 FAIL record above is unchanged.

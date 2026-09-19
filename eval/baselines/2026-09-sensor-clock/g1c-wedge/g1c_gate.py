@@ -2,19 +2,22 @@
 """G1-C wedge proof — driver (execution plan v2 line 145; design, review outcomes and revisions in the G1-C
 section of eval/baselines/2026-09-sensor-clock/README.md).
 
-Runs the WHOLE `python -m rtsm` process (packaged defaults: grounded_sam2, visualization ON, analytics ON,
-watchdog ON, diagnostics OFF) with a separate sender process streaming recordings/session1 raw bytes through
-the live websocket receiver (uncompressed, like the phone), a separate poller process standing in for the agent
-(/stats 10 Hz, /search/semantic 0.5 Hz, /healthz 1 Hz, RSS 1 Hz), and a headless dashboard client on /ws.
+Runs the WHOLE `python -m rtsm` process (packaged defaults since P1 task 7: grounded_sam2, visualization OFF,
+TSDF OFF, analytics ON, watchdog ON, diagnostics OFF) with a separate sender process streaming
+recordings/session1 raw bytes through the live websocket receiver (uncompressed, like the phone), a separate
+poller process standing in for the agent (/stats 10 Hz, /search/semantic 0.5 Hz, /healthz 1 Hz, RSS 1 Hz), and
+a headless dashboard client on /ws whenever the runner log reports a viz server (the --viz runs).
 Evaluates the predicates that correspond to the E1 wedge symptoms (2026-08-10) and prints a verdict per run.
 
-    python eval/baselines/2026-09-sensor-clock/g1c-wedge/g1c_gate.py [--runs C,R1,RB,RS,F,R1V,R1N] [--out DIR]
+    python eval/baselines/2026-09-sensor-clock/g1c-wedge/g1c_gate.py [--runs C,R1,RB,RS,F,R1Z,R1T] [--out DIR]
 
 Runs: C = calibration (the driver suspends the rtsm process for 3 s mid-stream; every symptom predicate must trip,
 else the harness is INVALID and nothing else runs); R1 = the E1 condition (phone cadence, packaged throttle, 300 s);
 RB = pipeline overload with bounded lanes (throttle 0.2 s); RS = receiver saturated (3x pacing; the achieved ingest
 Hz is the measurement); F = the pre-P1 legacy queue under the RB load (must show queue growth, else the harness
-cannot see a wedge); R1V / R1N = attribution controls for R1 (TSDF off / no viz server at all).
+cannot see a wedge); R1Z / R1T = dashboard runs (--viz; --viz + TSDF on), run by default, non-gating. Since P1 task 7 the
+packaged config is headless, so R1/RB/RS/F run without a viz server; the viz/TSDF state of every run is read from
+the runner's own log lines and recorded in finals.json.
 
 Raw artifacts (poller.jsonl, sender.jsonl, vizclient.jsonl, rtsm_<run>.log, finals.json) go to --out (default:
 this directory; gitignored except the scripts, gate.out and README; summary.json is force-added). Harness timing is
@@ -63,13 +66,22 @@ RUNS = {
                 what="receiver saturated (3x pacing), packaged throttle, 150 s"),
     "F":   dict(policy="legacy", speed=1.0, duration=150.0, nonkf=0.2, role="falsify",
                 what="LEGACY 512-deep queue under the RB load, 150 s (must show queue growth)"),
-    "R1V": dict(policy="latest", speed=1.0, duration=150.0, nonkf=None, role="attribution",
+    # Since P1 task 7 the packaged config is headless (visualization.enable false, tsdf false): R1/RB/RS/F above run
+    # exactly that. The dashboard states are non-gating attribution runs (run by default), launched with the
+    # runner's own flags:
+    "R1Z": dict(policy="latest", speed=1.0, duration=150.0, nonkf=None, role="attribution", extra_args=["--viz"],
+                what="dashboard on (--viz), TSDF off = per-keyframe clouds, client attached, 150 s (non-gating)"),
+    "R1T": dict(policy="latest", speed=1.0, duration=150.0, nonkf=None, role="attribution", extra_args=["--viz"],
+                extra_sets=["visualization.tsdf.enable=true"],
+                what="dashboard on + TSDF fusion on (the pre-task-7 packaged config), client attached, 150 s (non-gating)"),
+    # Pre-task-7 attribution runs, kept only so --reeval of the 2026-09-18 artifacts still resolves their specs:
+    "R1V": dict(policy="latest", speed=1.0, duration=150.0, nonkf=None, role="attribution", legacy=True,
                 extra_sets=["visualization.tsdf.enable=false"],
-                what="attribution: R1 load with TSDF integration OFF (viz client still attached), 150 s"),
-    "R1N": dict(policy="latest", speed=1.0, duration=150.0, nonkf=None, role="attribution", no_viz=True,
-                what="attribution: R1 load with NO viz server (--no-viz: no JPEG encode, no TSDF, no client), 150 s"),
+                what="(2026-09-18) attribution: R1 load with TSDF integration OFF (viz client still attached), 150 s"),
+    "R1N": dict(policy="latest", speed=1.0, duration=150.0, nonkf=None, role="attribution", no_viz=True, legacy=True,
+                what="(2026-09-18) attribution: R1 load with NO viz server (--no-viz), 150 s"),
 }
-DEFAULT_ORDER = "C,R1,RB,RS,F,R1V,R1N"
+DEFAULT_ORDER = "C,R1,RB,RS,F,R1Z,R1T"
 
 # Predicate constants (plan line 145 + task-5 addendum + design review 2026-09-18)
 HTTP_TIMEOUT_S = 0.6        # the plan's bound for /stats (stricter than the agent's RTSMClient 3.0 s default)
@@ -140,6 +152,7 @@ def launch_rtsm(run: str, spec: dict, out: Path):
         cmd += ["--set", f"ingest.nonkf_min_interval_s={spec['nonkf']}"]
     for kv in spec.get("extra_sets", []):
         cmd += ["--set", kv]
+    cmd += list(spec.get("extra_args", []))
     if spec.get("no_viz"):
         cmd += ["--no-viz"]
     log_path = out / f"rtsm_{run}.log"
@@ -220,11 +233,14 @@ def execute(run: str, spec: dict, out: Path) -> dict:
         rss_ready = psutil.Process(rtsm.pid).memory_info().rss
         base_stats = api_get("/stats")
         base_analytics = api_get("/stats/analytics")
+        boot = log_path.read_text(encoding="utf-8", errors="replace")
+        viz_on = "Visualization server initialized" in boot
+        tsdf_on = "TSDF fusion enabled" in boot
         log(f"  ready: RSS {rss_ready/2**20:.0f} MB, objects {base_stats.get('objects')}, "
-            f"ingest policy {(base_stats.get('ingest_lanes') or {}).get('policy')}")
+            f"ingest policy {(base_stats.get('ingest_lanes') or {}).get('policy')}, viz={'on' if viz_on else 'off'}, tsdf={'on' if tsdf_on else 'off'}")
 
         viz_attached = None
-        if not spec.get("no_viz"):
+        if viz_on:
             viz = subprocess.Popen([sys.executable, "-X", "utf8", "-u", str(HERE / "g1c_vizclient.py"),
                                     "--url", VIZ_WS_URL, "--duration", str(spec["duration"] + 400),
                                     "--out-dir", str(rdir)], cwd=str(ROOT))
@@ -289,8 +305,10 @@ def execute(run: str, spec: dict, out: Path) -> dict:
         (rdir / "finals.json").write_text(json.dumps({
             "cmd": cmd, "t_ready": t_ready, "rss_ready": rss_ready, "base_stats": base_stats,
             "base_analytics_rollup": base_analytics.get("rollup"), "viz_attached": viz_attached,
-            "viz_alive_at_end": viz_alive_at_end, "calib": calib, "finals": finals}, indent=1, default=str), encoding="utf-8")
-        result.update(evaluate(run, spec, rdir, log_path, finals, rss_ready, viz_alive_at_end, calib))
+            "viz_alive_at_end": viz_alive_at_end, "calib": calib, "viz_on": viz_on, "tsdf_on": tsdf_on,
+            "finals": finals}, indent=1, default=str), encoding="utf-8")
+        result.update(evaluate(run, spec, rdir, log_path, finals, rss_ready, viz_alive_at_end, calib,
+                               viz_on=viz_on, tsdf_on=tsdf_on))
     finally:
         terminate(sender, "sender", 5)
         terminate(poller, "poller", 5)
@@ -302,12 +320,18 @@ def execute(run: str, spec: dict, out: Path) -> dict:
 
 
 # ---------------------------------------------------------------------------------------------------------------
-def evaluate(run: str, spec: dict, d: Path, log_path: Path, finals: dict, rss_ready: int, viz_alive_at_end, calib: dict) -> dict:
+def evaluate(run: str, spec: dict, d: Path, log_path: Path, finals: dict, rss_ready: int, viz_alive_at_end, calib: dict,
+             viz_on=None, tsdf_on=None) -> dict:
     ss = json.loads((d / "sender_summary.json").read_text(encoding="utf-8"))
     sj = read_jsonl(d / "sender.jsonl")
     pol = read_jsonl(d / "poller.jsonl")
     vz = read_jsonl(d / "vizclient.jsonl")
     txt = log_path.read_text(encoding="utf-8", errors="replace")
+    # Viz / TSDF state: from the runner's own log (task 7+); pre-task-7 artifacts fall back to the spec.
+    if viz_on is None:
+        viz_on = ("Visualization server initialized" in txt) or (not spec.get("no_viz") and "Visualization" in txt)
+    if tsdf_on is None:
+        tsdf_on = ("TSDF fusion enabled" in txt)
     w0 = float(ss["wall_stream0"]) if ss.get("wall_stream0") else None
     if w0 is None:
         return {"verdict": "ERROR", "error": "sender never sent a frame", "sender": ss}
@@ -419,7 +443,6 @@ def evaluate(run: str, spec: dict, d: Path, log_path: Path, finals: dict, rss_re
     base_pt = next(((w, v) for (w, v) in rss if w >= w0 + base_at), None)
     after = [v for (w, v) in rss if w >= w0 + base_at]
     kf_walls = [r["wall"] for r in frames if r.get("kf")]
-    tsdf_on = not spec.get("no_viz") and "visualization.tsdf.enable=false" not in spec.get("extra_sets", [])
     if base_pt and tsdf_on:
         kf_before = sum(1 for w in kf_walls if w < base_pt[0])
         tsdf_bytes = (min(TSDF_RING, len(kf_walls)) - min(TSDF_RING, kf_before)) * TSDF_FRAME_BYTES
@@ -434,7 +457,7 @@ def evaluate(run: str, spec: dict, d: Path, log_path: Path, finals: dict, rss_re
     raw20 = (max(after20) - base20[1]) if (base20 and after20) else None
     P["P6_rss"] = (adj_growth is not None and adj_growth < RSS_GROWTH_MAX,
                    f"ready={mb(rss_ready)} MB base(+{base_at:.0f}s)={mb(base_pt[1]) if base_pt else None} MB max={mb(max(after)) if after else None} MB "
-                   f"raw growth={mb(raw_growth)} MB, TSDF ring credit={mb(tsdf_bytes)} MB ({len(kf_walls)} KFs x 2.05 MB, ring 200) -> "
+                   f"raw growth={mb(raw_growth)} MB, TSDF ring credit={mb(tsdf_bytes)} MB ({(str(len(kf_walls)) + ' KFs x 2.05 MB, ring 200') if tsdf_on else 'TSDF off'}) -> "
                    f"adjusted growth={mb(adj_growth)} MB (<300); slope_last60={slope if slope is None else round(slope, 1)} MB/min; "
                    f"from +20 s: base={mb(base20[1]) if base20 else None} MB raw growth={mb(raw20)} MB (info)")
     # P7 lanes
@@ -472,7 +495,7 @@ def evaluate(run: str, spec: dict, d: Path, log_path: Path, finals: dict, rss_re
     counts = {pat: txt.count(pat) for pat in LOG_BAD_PATTERNS}
     n_hs = txt.count("Handshake OK")
     n_viz_clients = txt.count("[api/ws] Client connected")
-    expect_clients = 0 if spec.get("no_viz") else 1
+    expect_clients = 1 if viz_on else 0
     P["P10_process_log"] = (all(v == 0 for v in counts.values()) and n_hs == ss["loops_started"] and n_viz_clients == expect_clients,
                             f"bad lines={counts} handshakes={n_hs}/loops {ss['loops_started']} (completed {ss['loops_completed']}) "
                             f"viz clients connected={n_viz_clients} (expected {expect_clients}: exactly one scripted client, no browser)")
@@ -492,7 +515,7 @@ def evaluate(run: str, spec: dict, d: Path, log_path: Path, finals: dict, rss_re
         P["P11_pose_lag"] = (bool(lags) and lag_p99 < LAG_P99_S and lag_max < LAG_MAX_S,
                              f"sender->observed lag p50={r3(pct(lags,50))} p99={r3(lag_p99)} (<{LAG_P99_S}) max={r3(lag_max)} (<{LAG_MAX_S}) n={len(lags)} (matched {len(lags)}/{len(first_seen)} observed keys)")
     # viz attachment for the whole run
-    if not spec.get("no_viz"):
+    if viz_on:
         closed_early = [r for r in vz if r.get("closed") and r.get("reason")]
         P["P12_viz_attached"] = (bool(viz_alive_at_end) and not closed_early,
                                  f"viz client alive at sender end={viz_alive_at_end}; closed early={[r.get('reason') for r in closed_early][:2]}")
@@ -500,6 +523,8 @@ def evaluate(run: str, spec: dict, d: Path, log_path: Path, finals: dict, rss_re
     fs = finals.get("/stats") or {}
     vsec = [r for r in vz if "n" in r and r.get("t") is not None and w0 <= r.get("wall", 0) <= w1]
     info["objects"] = (fs.get("objects"), fs.get("confirmed"))
+    info["viz_on"] = viz_on
+    info["tsdf_on"] = tsdf_on
     info["viz"] = {"camf_per_s_median": statistics.median([r["camf"] for r in vsec]) if vsec else None,
                    "bytes_per_s_median": statistics.median([r["bytes"] for r in vsec]) if vsec else None}
     agg = (((finals.get("/stats/analytics") or {}).get("latency") or {}).get("aggregate") or {})
@@ -517,7 +542,11 @@ def evaluate(run: str, spec: dict, d: Path, log_path: Path, finals: dict, rss_re
         c = {}
         c["P1_trips"] = any((not r.get("ok")) or r["latency"] > HTTP_TIMEOUT_S for r in stats if win(r))
         c["P2_trips"] = bool(windows) and min(windows) < expected10
-        c["P3_trips"] = bool(gaps) and max(gaps) >= 2.0 and stale_n >= 1
+        # The gap is the symptom. A `stale` sample needs a poll to land while age_s > 0.5 s AFTER the resume; a
+        # headless process refills the mailbox faster than the 10 Hz poller can catch that (0 stale in the task-7
+        # calibration run despite a 2.68 s gap), so the stale count is reported, not required.
+        c["P3_trips"] = bool(gaps) and max(gaps) >= 2.0
+        c["P3_stale_samples"] = stale_n
         c["P5_trips"] = st["max"] is not None and st["max"] >= 2.0
         c["P9_trips"] = (roll.get("late_ticks") or 0) >= 1
         c["P11_trips"] = lag_max is not None and lag_max >= 2.0
@@ -544,7 +573,7 @@ def main() -> int:
     ap.add_argument("--reeval", action="store_true", help="no GPU: re-derive the predicates of every run under --out from its saved artifacts")
     args = ap.parse_args()
     if args.reeval:
-        out = Path(args.out)
+        out = Path(args.out).resolve()
         runs = [r.strip() for r in args.runs.split(",") if r.strip()]
         results = {}
         log(f"G1-C re-evaluation from saved artifacts — runs {runs} — {out}")
@@ -556,7 +585,7 @@ def main() -> int:
                 continue
             F = json.loads(fin.read_text(encoding="utf-8"))
             log(""); log(f"=== {r}: {RUNS[r]['what']} ===")
-            results[r] = {"run": r, "spec": RUNS[r], **evaluate(r, RUNS[r], rdir, out / f"rtsm_{r}.log", F["finals"], int(F["rss_ready"]), F.get("viz_alive_at_end"), F.get("calib") or {})}
+            results[r] = {"run": r, "spec": RUNS[r], **evaluate(r, RUNS[r], rdir, out / f"rtsm_{r}.log", F["finals"], int(F["rss_ready"]), F.get("viz_alive_at_end"), F.get("calib") or {}, viz_on=F.get("viz_on"), tsdf_on=F.get("tsdf_on"))}
         (out / "summary.json").write_text(json.dumps({"reeval": True, "runs": results}, indent=1, default=str), encoding="utf-8")
         verdicts = {r: results.get(r, {}).get("verdict") for r in runs if r in results}
         hard = [r for r in verdicts if RUNS[r]["role"] in ("hard", "hard-saturated")]
@@ -569,7 +598,7 @@ def main() -> int:
     if args.smoke:
         RUNS["C"] = {**RUNS["C"], "duration": 45.0, "what": "SMOKE (driver mechanics + calibration), 45 s"}
         args.runs = "C"
-    out = Path(args.out)
+    out = Path(args.out).resolve()      # the child processes run with cwd=ROOT; a relative --out must not depend on it
     out.mkdir(parents=True, exist_ok=True)
     runs = [r.strip() for r in args.runs.split(",") if r.strip()]
     try:
@@ -585,6 +614,9 @@ def main() -> int:
     results = {}
     try:
         for r in runs:
+            if RUNS[r].get("legacy"):
+                log(f"  {r}: pre-task-7 attribution run, kept for --reeval only; not launched")
+                continue
             try:
                 results[r] = execute(r, RUNS[r], out)
             except Exception as e:
