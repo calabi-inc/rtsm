@@ -622,6 +622,21 @@ slam:
 
 ---
 
+## Diagnostics & Ledgers
+
+```yaml
+diagnostics:
+  enabled: false        # master switch: false = zero overhead, no file
+  track_drops: false    # per-dropped-mask detail on the frame line
+  event_log_path: null  # null = eval_output/<timestamp>/events.jsonl
+  ledgers: false        # P2: pose ledger (one line per sensor frame) in the same file
+  ledger_format: jsonl  # jsonl | parquet (converted at close; pip install "rtsm[eval]")
+```
+
+One append-only JSONL file per run with a `kind` per line: the frame-flow trace
+(`receiver`, `dequeue`, `frame`) and, with `ledgers: true`, the ledgers `rtsm eval`
+reads. Field-by-field reference and the join keys: [Diagnostics & Ledgers](../guides/diagnostics.md).
+
 ## Logging
 
 ```yaml

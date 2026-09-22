@@ -6,7 +6,8 @@ fresh, auto-timestamped file (no appending across runs). Every line is a JSON
 object with a ``kind`` field; the first line is ``kind: "meta"`` and carries
 ``schema_version``.
 
-Line kinds (schema_version 2, 2026-09-09 — P1 task 0 of the Gate 4.5 plan):
+Line kinds (schema_version 3: 2 = P1 task 0 2026-09-09, 3 = the P2 ledgers 2026-09-21,
+additive):
 
   meta      once per file: schema_version, wall time, pid, and what the runner
             adds (ingest_clock: wall | sensor; ingest_policy: latest | lossless
@@ -57,6 +58,26 @@ Line kinds (schema_version 2, 2026-09-09 — P1 task 0 of the Gate 4.5 plan):
   frame     one per PROCESSED frame: masks, filter, scoring, association,
             timings (the schema_version-1 line, plus kind and t_sensor_ns;
             timestamp is now time.monotonic() like the other kinds).
+  pose      LEDGER (P2 stage A, ledger schema 1; written only when
+            diagnostics.ledgers is on): one per SENSOR FRAME the receiver saw,
+            at input rate. Websocket / replay write it at two points of the
+            parser: in the tracking-state filter, BEFORE the frame is dropped
+            (tracking-limited frames are in the ledger with their state and,
+            when it parses, their pose; pose_error otherwise), and for frames
+            that pass the filter right after the depth decode -- before the
+            keyframe rule, the throttle and the queue admission, so throttled
+            and refused frames are in it too. The line carries what the
+            receiver knows there: the post-flip pose (the same the mailbox and
+            the FramePacket get), the header wall stamp + pose_clock, the
+            epoch, depth_valid_frac (pre-confidence-filter, the SAME value as
+            the receiver line) and conf_hist (counts of confidence 0/1/2 over
+            the RAW map, before it is resized to the depth). mailbox_write
+            says whether the receiver called its pose sink for the frame. It
+            does NOT repeat the admission outcome: join it to the receiver
+            line on (source, rx_seq) (websocket / replay) or on
+            (source, t_sensor_ns) (zeromq: one line per rtabmap.tracking_pose,
+            tracking_state "not_available", never for kf_pose). Ledger kinds
+            are excluded from the A/A comparator below by kind.
 
 A/A comparator contract: compare the receiver and dequeue streams PER (KIND,
 SOURCE) as ordered sequences of (frame_seq, t_sensor_ns, decision/outcome,
@@ -85,13 +106,13 @@ import time
 from dataclasses import asdict, dataclass, field, is_dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 import numpy as np
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 # Receiver decisions
 RX_ENQUEUED = "enqueued"
@@ -124,6 +145,17 @@ DQ_REASON_KEYFRAME = "keyframe"
 DQ_REASON_NO_POSE = "no_pose"
 DQ_REASON_GATE_ERROR = "gate_error"
 DQ_REASON_POSE_CONVERSION = "pose_conversion_failed"
+
+# ---- Ledgers (P2). Additive kinds with their own schema number in the meta
+# line's `ledgers` block (frozen at G2-C). Stage A = pose; obs / view follow.
+LEDGER_SCHEMA = 1
+LEDGER_FORMATS = ("jsonl", "parquet")
+KIND_POSE = "pose"
+LEDGER_KINDS = (KIND_POSE,)
+# tracking_state values as the receivers see them (ARKit header strings;
+# ZeroMQ has none and writes TS_NOT_AVAILABLE on every line).
+TS_NORMAL = "normal"
+TS_NOT_AVAILABLE = "not_available"
 
 
 @dataclass
@@ -176,6 +208,65 @@ class ReceiverEvent:
     kind: str = "receiver"
 
 
+@dataclass
+class PoseEvent:
+    """One line per sensor frame at the receiver (P2 pose ledger, schema 1)."""
+    timestamp: float                          # time.monotonic() at the write
+    source: str                               # websocket | replay | zeromq
+    rx_seq: Optional[int]                     # websocket/replay: join key to the receiver line; zeromq: None
+    frame_seq: Optional[int]                  # header frame_id (websocket/replay); None on zeromq
+    t_sensor_ns: Optional[int]                # header timestamp_ns (0 / missing -> None); zeromq: the pose stamp (join key)
+    t_wall_utc_s: float                       # header unix_timestamp, or this process's time.time()
+    pose_clock: str                           # sender | server: where t_wall_utc_s came from
+    epoch: int                                # frame_epoch at the write
+    tracking_state: str                       # header string verbatim; zeromq: not_available
+    mailbox_write: bool                       # the receiver called its pose sink for this frame
+    t_wc: Optional[List[float]] = None        # post-flip translation (m); None when the pose failed to parse
+    q_wc_xyzw: Optional[List[float]] = None   # post-flip unit quaternion; None with t_wc
+    pose_error: Optional[str] = None          # parse failure text (only on frames the tracking filter drops)
+    depth_valid_frac: Optional[float] = None  # pre-confidence-filter finite fraction; None when depth was not decoded
+    conf_hist: Optional[List[int]] = None     # counts of confidence 0 / 1 / 2 over the raw map; None without a map
+    kind: str = "pose"
+
+
+def _pyarrow_available() -> bool:
+    import importlib.util
+    return importlib.util.find_spec("pyarrow") is not None
+
+
+@dataclass(frozen=True)
+class LedgerConfig:
+    """The validated ``diagnostics:`` block as the runners read it (P2)."""
+    enabled: bool
+    ledgers: bool
+    ledger_format: str
+    event_log_path: Optional[str]
+
+
+def resolve_ledger_config(cfg: Any) -> LedgerConfig:
+    """Validate ``diagnostics.enabled`` / ``ledgers`` / ``ledger_format`` /
+    ``event_log_path``. Raises ValueError; the runners route it through
+    ``parser.error`` before any model loads. ``ledgers: true`` with
+    ``enabled: false`` is accepted (the writer logs that they are ignored);
+    ``parquet`` without pyarrow is refused only when it would take effect."""
+    diag = (cfg.get("diagnostics") or {}) if isinstance(cfg, dict) else {}
+    if not isinstance(diag, dict):
+        raise ValueError(f"diagnostics: must be a mapping of settings; got {diag!r}")
+    enabled = bool(diag.get("enabled", False))
+    ledgers = diag.get("ledgers", False)
+    if not isinstance(ledgers, bool):
+        raise ValueError(f"diagnostics.ledgers must be true or false; got {ledgers!r}")
+    fmt = diag.get("ledger_format", "jsonl")
+    if not isinstance(fmt, str) or fmt.strip().lower() not in LEDGER_FORMATS:
+        raise ValueError(f"diagnostics.ledger_format must be one of {', '.join(LEDGER_FORMATS)}; got {fmt!r}")
+    fmt = fmt.strip().lower()
+    if fmt == "parquet" and enabled and ledgers and not _pyarrow_available():
+        raise ValueError("diagnostics.ledger_format=parquet needs pyarrow: pip install \"rtsm[eval]\"")
+    path = diag.get("event_log_path")
+    return LedgerConfig(enabled=enabled, ledgers=ledgers, ledger_format=fmt,
+                        event_log_path=(str(path) if path not in (None, "") else None))
+
+
 def _json_default(o: Any) -> Any:
     """JSON encoder fallback for numpy scalars / arrays."""
     if isinstance(o, np.floating):
@@ -213,12 +304,19 @@ class EventLogWriter:
     """
 
     def __init__(self, enabled: bool, configured_path: Optional[str], repo_root: Optional[Path] = None,
-                 extra_meta: Optional[Dict[str, Any]] = None):
+                 extra_meta: Optional[Dict[str, Any]] = None, *, ledgers: bool = False,
+                 ledger_format: str = "jsonl"):
         self._enabled = bool(enabled)
+        # P2 ledgers ride in the same file behind a second switch: off => the
+        # ledger sink is None and no producer builds a ledger line.
+        self._ledgers = bool(self._enabled and ledgers)
+        self._ledger_format = str(ledger_format or "jsonl").strip().lower()
         self._fh = None
         self._path: Optional[Path] = None
         self._lock = threading.Lock()
         if not self._enabled:
+            if ledgers:
+                logger.info("event_log: diagnostics.ledgers ignored (diagnostics.enabled is false)")
             return
 
         root = repo_root if repo_root is not None else Path.cwd()
@@ -237,6 +335,8 @@ class EventLogWriter:
             "created_wall_utc_s": time.time(),
             "created_mono_s": time.monotonic(),
             "pid": os.getpid(),
+            "ledgers": ({"enabled": True, "schema": LEDGER_SCHEMA, "format": self._ledger_format}
+                        if self._ledgers else {"enabled": False}),
         }
         if extra_meta:
             meta.update({k: v for k, v in extra_meta.items() if k != "kind"})
@@ -250,6 +350,14 @@ class EventLogWriter:
     @property
     def path(self) -> Optional[Path]:
         return self._path
+
+    @property
+    def ledgers_enabled(self) -> bool:
+        return self._ledgers
+
+    @property
+    def ledger_format(self) -> str:
+        return self._ledger_format
 
     def write(self, event: Any) -> None:
         """Write one event (a dataclass or a plain dict). No-op when disabled."""
@@ -266,6 +374,11 @@ class EventLogWriter:
         """The callable receivers get as `event_sink`: None when disabled."""
         return self.write if self._enabled else None
 
+    def ledger_sink(self) -> Optional[Callable[[Any], None]]:
+        """The callable producers get as `ledger_sink` (P2): None unless
+        diagnostics.enabled AND diagnostics.ledgers are both true."""
+        return self.write if self._ledgers else None
+
     def close(self) -> None:
         with self._lock:
             fh, self._fh = self._fh, None
@@ -274,6 +387,16 @@ class EventLogWriter:
                 fh.close()
             except Exception:  # noqa: BLE001 — closing a log must never raise
                 logger.debug("event_log: close failed", exc_info=True)
+            # Parquet is an offline conversion of the finished JSONL (which
+            # stays the source of truth); a failure here is logged, never raised.
+            if self._ledgers and self._ledger_format == "parquet" and self._path is not None:
+                try:
+                    from rtsm.evaluation.ledger import to_parquet
+                    written = to_parquet(self._path)
+                    logger.info("event_log: ledgers converted to parquet: %s",
+                                ", ".join(str(v) for v in written.values()) or "(nothing)")
+                except Exception:  # noqa: BLE001
+                    logger.warning("event_log: parquet conversion failed (the JSONL is intact)", exc_info=True)
 
     def __enter__(self) -> "EventLogWriter":
         return self

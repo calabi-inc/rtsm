@@ -262,3 +262,39 @@ run). **G1-C is closed as PASS on the packaged configuration.** The dashboard wi
 map stays opt-in with its measured residual, and the worker/child-process designs in
 `plans/permanent-plan/tsdf-viz-fix-2026-09.md` are deferred until a long dashboard-on session is actually needed.
 The 2026-09-18 FAIL record above is unchanged.
+
+## P2 stage A reproduction (pose ledger, 2026-09-21) — `p2-ledgers/stage-a/` — **G2-A HARD GATE PASS**
+
+Branch `feature/p2-pose-ledger` (main `fa30945` + the pose ledger): `PoseEvent` kind `pose` in the diagnostic event log
+(`schema_version` 3, ledger schema 1, behind `diagnostics.ledgers`), written by the websocket / replay parser BEFORE the
+tracking-state filter drops a frame and, for frames that pass it, right after the depth decode (before the keyframe rule,
+the throttle and the admission), and once per `rtabmap.tracking_pose` on ZeroMQ; `rtsm/evaluation/ledger.py` reader with
+`pose_health` and the `python -m rtsm.evaluation.ledger summarize` CLI; `diagnostics.ledgers` / `ledger_format` validated
+before the GPU check in both runners; `[eval]` extra (pyarrow) for `ledger_format: parquet`. `p2a_gate.sh` = two headless
+dual replays of session1 on the packaged replay defaults (lossless + sensor clock), diagnostics on, ledgers ON (A_on) /
+OFF (A_off); `gate.out` is the verbatim script output.
+
+| run | multiset | dequeue / receiver vs B1 | `pose` lines | predicates |
+|---|---|---|---|---|
+| A_on | 124/65 @53 `ad6f71a5b89c8506` | identical (86) / identical (240) | 240 | 1, 3–7 PASS |
+| A_off | 124/65 @53 `ad6f71a5b89c8506` | identical (86) / identical (240) | none (`ledgers.enabled false`) | 1–2 PASS |
+
+Logic predicates on A_on: (4) `depth_valid_frac` equal on all 240 pose/receiver pairs, none null (the pre-filter
+statistic, taken at the same point); (5) the LAST pose line equals the mailbox (`/stats.robot_pose`: xyz and quaternion
+to 0.0, stamp 683373591451416, epoch 0); (6) the pose lines' `t_sensor_ns` sequence equals the receiver lines' and every
+`conf_hist` sums to 49 152 (the raw 256×192 confidence map, taken before the resize); (3) 240 pose lines == 240 receiver
+lines == `writes_accepted` 240, `rx_seq` join 240/240, all `tracking_state normal`, all `mailbox_write`, 0 regressions.
+
+**Session1 pose-health reference (`pose_health`, group `replay/0`):** 240 frames, stream span 40.52 s → `sensor_hz`
+5.90; intervals 165 × 200 ms + 73 × 100 ms + 1 × 217 ms (p50 200.0 / p95 200.0 / max 216.7 ms; jitter 0.002 ms);
+0 gaps (> 2 × median), 0 tracking-limited episodes, 0 discontinuities (0.5 m + 1 m/s · dt), `depth_valid_frac` 1.0,
+`conf2_frac` mean 0.747 / p10 0.657, 0 pose errors, `writes_expected` 240. The header wall stamps (`pose_clock`
+sender) span 40.51 s and agree with the sensor stamps to 0.04 s; the recording's receive cadence spans 44.1 s
+(p50 186 ms). The "75.8 s" quoted for session1 in `scripts/benchmark_datasheet.py`'s repro block is the harness's
+wall time, not the stream's span.
+
+Informational: `t_total` mean 312.9 ms (on) vs 360.1 ms (off) — run-to-run GPU variance on identical processing (the
+≤ 5 % overhead predicate is G2-C's, over 3 × 3 runs); `events.jsonl` 245 012 B (on) vs 125 754 B (off) → 497 B per
+pose line. CPU suite: 804 passed, 1 failed — `examples/rc_car_agent/tests/test_server.py::
+test_baseline_no_match_resumes_search_e2e`, a wall-clock e2e of the fake car that fails 3/3 on the untouched main tree
+on this box today as well (pre-existing, unrelated; the agent imports nothing this change touches).

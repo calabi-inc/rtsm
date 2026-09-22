@@ -58,6 +58,11 @@ mcp = [
     "mcp[cli]>=1.0.0",
     "httpx>=0.27.0",
 ]
+# Evaluation extras (P2: Parquet ledgers via diagnostics.ledger_format=parquet;
+# the `rtsm eval` bag readers join here in P3). Pure-Python / cp312 wheels only.
+eval = [
+    "pyarrow>=15",
+]
 # Test-only dependencies for the canonical command
 #   python -m pytest tests examples/rc_car_agent/tests -q -m "not gpu and not hardware and not models"
 # (pytest-asyncio: 16 async tests fail, not skip, on pytest>=8.4 without it;

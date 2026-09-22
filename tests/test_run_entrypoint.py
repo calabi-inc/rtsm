@@ -35,13 +35,15 @@ def no_models(monkeypatch):
     "ingest.keyframe_every_n=0",
     "ingest.pair_window_fps=0",
     "robot_pose.stale_after_s=0",
+    "diagnostics.ledgers=1",              # P2: must be a bool
+    "diagnostics.ledger_format=csv",      # P2: jsonl | parquet
 ])
 def test_bad_ingest_or_pose_config_exits_before_the_gpu_check(no_models, bad, tmp_path, capsys):
     with pytest.raises(SystemExit) as ex:
         run.main(["--replay", str(tmp_path), "--set", bad])
     assert ex.value.code == 2                                    # argparse parser.error
     captured = capsys.readouterr()                               # read ONCE (the buffers drain)
-    assert "ingest" in captured.err or "robot_pose" in captured.err
+    assert "ingest" in captured.err or "robot_pose" in captured.err or "diagnostics" in captured.err
     assert "GPU dependencies" not in captured.out
 
 

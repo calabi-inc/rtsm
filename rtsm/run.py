@@ -35,7 +35,7 @@ from rtsm.api.server import create_app, start_server, ResetComponents
 from rtsm.cfg import ConfigError, cfg_path, config_fingerprint
 from rtsm.cfg.cli import add_config_arguments, config_from_args
 from rtsm.cfg.tuning import validate_tuning
-from rtsm.evaluation.event_log import EventLogWriter
+from rtsm.evaluation.event_log import EventLogWriter, resolve_ledger_config
 from rtsm.core.clock import make_clock, resolve_clock_mode
 
 import argparse
@@ -124,6 +124,7 @@ def main(argv: "list[str] | None" = None):
     try:
         lane_cfg = LaneConfig.from_cfg(cfg, replay=bool(args.replay))
         resolve_pose_stale_after_s(cfg)     # robot_pose.stale_after_s: finite, > 0
+        ledger_cfg = resolve_ledger_config(cfg)      # diagnostics.ledgers / ledger_format (P2)
     except ValueError as exc:
         parser.error(str(exc))
     logger.info("Ingest policy: %s (ingest.policy=%s)", lane_cfg.policy, lane_cfg.configured_policy)
@@ -298,13 +299,16 @@ def main(argv: "list[str] | None" = None):
     # Frame-flow trace (diagnostics.*): one JSONL writer shared by the receiver
     # thread and the pipeline thread. Disabled (the default) => every hook is a
     # no-op and event_sink is None, so receivers skip building events entirely.
-    diag_cfg = cfg.get("diagnostics", {}) or {}
     event_log = EventLogWriter(
-        enabled=bool(diag_cfg.get("enabled", False)),
-        configured_path=diag_cfg.get("event_log_path"),
+        enabled=ledger_cfg.enabled,
+        configured_path=ledger_cfg.event_log_path,
         extra_meta={"ingest_clock": clock_mode, "ingest_policy": lane_cfg.policy},
+        # P2 ledgers (diagnostics.ledgers): the pose ledger rides in the same file.
+        ledgers=ledger_cfg.ledgers,
+        ledger_format=ledger_cfg.ledger_format,
     )
     event_sink = event_log.sink()
+    ledger_sink = event_log.ledger_sink()      # None unless diagnostics.ledgers is on
     # Lane-side drops (superseded / kf_dropped / age under policy latest) ->
     # trace lines with source "lanes" + the analytics counters.
     ingest_q.set_on_drop(lane_drop_handler(event_sink, latency_analytics, ingest_q))
@@ -333,6 +337,7 @@ def main(argv: "list[str] | None" = None):
             # frame), so replay-based pose-freshness checks mean something.
             pose_sink=wm.update_robot_pose,
             event_sink=event_sink,
+            ledger_sink=ledger_sink,
             throttle_clock=clock_mode,
         )
         replay_receiver.start()
@@ -369,6 +374,7 @@ def main(argv: "list[str] | None" = None):
             # the receiver skip the depth statistic entirely.
             clearance_sink=wm.set_forward_clearance if clearance_enabled else None,
             event_sink=event_sink,
+            ledger_sink=ledger_sink,
             throttle_clock=clock_mode,
             latency_analytics=latency_analytics,
         )
@@ -392,6 +398,7 @@ def main(argv: "list[str] | None" = None):
             # dequeue-time write alone left /stats.robot_pose at ~1 Hz on ZMQ.
             pose_sink=wm.update_robot_pose,
             event_sink=event_sink,
+            ledger_sink=ledger_sink,
             throttle_clock=clock_mode,
             nonkf_min_interval_s=lane_cfg.nonkf_min_interval_s,      # ingest.* (P1 task 6; was hardcoded 0.5)
             frame_window_ttl_s=lane_cfg.pair_window_s,

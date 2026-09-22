@@ -31,7 +31,7 @@ from rtsm.io.ingest_queue import IngestQueue
 from rtsm.utils.transforms import euler_to_quat_xyzw
 from rtsm.evaluation.event_log import (
     RX_DROPPED, RX_DUPLICATE_TS, RX_ENQUEUED, RX_MALFORMED, RX_NO_CAMERA_FRAME, RX_PARSE_ERROR, RX_QUEUE_FULL,
-    RX_THROTTLE, ReceiverEvent,
+    RX_THROTTLE, TS_NOT_AVAILABLE, PoseEvent, ReceiverEvent,
 )
 
 
@@ -67,6 +67,8 @@ class ZeroMQSubscriber:
         # receiver-minted: 0, +1 whenever the tracking stamp goes backwards by
         # more than POSE_EPOCH_REBASE_S (a bag loop, a bridge restart).
         pose_sink: Optional[Callable[..., Any]] = None,
+        # P2 pose ledger sink: a PoseEvent per rtabmap.tracking_pose; None = off.
+        ledger_sink: Optional[Callable[[Any], None]] = None,
         # FrameWindow now holds ENCODED frames (JPEG / PNG bytes, ~0.35 MB per
         # 640x480 frame). Its old defaults (30 s, 2000 items) held ~1.9 GB of
         # decoded frames. The window must cover the LATENCY OF A kf_pose
@@ -168,6 +170,7 @@ class ZeroMQSubscriber:
         # Frame-flow trace sink (ReceiverEvent per decision); None = off.
         self._event_sink = event_sink
         self._pose_sink = pose_sink
+        self._ledger_sink = ledger_sink
         self._kf_stamps_inherited: int = 0   # kf_pose messages that arrived without a stamp (counted in _handle_kf_pose)
         self._last_enq_cam_ts: Optional[int] = None   # camera stamp the last admitted frame was paired with
         # Receiver-minted session epoch (ZeroMQ has no hello/session_id): a
@@ -362,6 +365,7 @@ class ZeroMQSubscriber:
 
             # Receive-time robot pose (input rate, independent of admission)
             self._emit_pose(t_wc, q_xyzw, ts_ns)
+            self._trace_pose(t_wc, q_xyzw, ts_ns)      # P2 pose ledger (tracking poses only)
 
             # Try to assemble non-keyframe
             self._try_enqueue_frame(ts_ns, t_wc, q_xyzw, is_keyframe=False)
@@ -704,6 +708,34 @@ class ZeroMQSubscriber:
                             sensor_ts_ns=int(ts_ns), pose_clock="server")
         except Exception as e:
             logger.error(f"[zeromq] pose_sink callback error: {e}")
+
+    def _trace_pose(self, t_wc: np.ndarray, q_xyzw: np.ndarray, ts_ns: int) -> None:
+        """P2 pose ledger: one PoseEvent per rtabmap.tracking_pose (never for
+        kf_pose, which does not write the mailbox either). ZeroMQ has no
+        tracking state and no source seq: tracking_state is "not_available"
+        and (source, t_sensor_ns) is the join key to the receiver lines.
+        Never raises into the receive path."""
+        sink = self._ledger_sink
+        if sink is None:
+            return
+        try:
+            stamp = int(ts_ns) if (ts_ns is not None and int(ts_ns) > 0) else None
+            sink(PoseEvent(
+                timestamp=time.monotonic(),
+                source="zeromq",
+                rx_seq=None,
+                frame_seq=None,
+                t_sensor_ns=stamp,
+                t_wall_utc_s=time.time(),
+                pose_clock="server",
+                epoch=int(self._frame_epoch),
+                tracking_state=TS_NOT_AVAILABLE,
+                mailbox_write=(self._pose_sink is not None),
+                t_wc=[float(v) for v in t_wc],
+                q_wc_xyzw=[float(v) for v in q_xyzw],
+            ))
+        except Exception:
+            logger.debug("[zeromq] pose ledger write failed", exc_info=True)
 
     def _decode_rgbd(self, ts_ns: int, rgb_raw: Any, depth_raw: Any):
         """Decode a paired camera frame after admission; memoised per CAMERA

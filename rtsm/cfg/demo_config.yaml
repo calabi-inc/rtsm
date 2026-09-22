@@ -302,6 +302,16 @@ analytics:
   retention_s: 3600
   buffer_frames: 300
 
+# -------------------- Diagnostics (off) --------------------
+# Same block as rtsm.yaml so `rtsm demo --set diagnostics.enabled=true` is a
+# known key: frame-flow trace + P2 ledgers into eval_output/<ts>/events.jsonl.
+diagnostics:
+  enabled: false
+  track_drops: false
+  event_log_path: null
+  ledgers: false
+  ledger_format: jsonl
+
 logging:
   periodic_summary: true
   summary_interval_s: 10.0

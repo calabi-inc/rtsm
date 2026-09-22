@@ -1,0 +1,15 @@
+== A_on rc=0 ==
+== A_off rc=0 ==
+A_on: (124, 65) frames 53 sha ad6f71a5b89c8506 | meta policy=lossless clock=sensor schema 3 ledgers {'enabled': True, 'schema': 1, 'format': 'jsonl'}
+   vs B1: multiset IDENTICAL | dequeue identical (86) | receiver identical (240)
+A_off: (124, 65) frames 53 sha ad6f71a5b89c8506 | meta policy=lossless clock=sensor schema 3 ledgers {'enabled': False}
+   vs B1: multiset IDENTICAL | dequeue identical (86) | receiver identical (240)
+2. A_off kinds ['dequeue', 'frame', 'meta', 'receiver'] ledgers meta {'enabled': False} -> True
+3. #pose 240 #receiver(replay) 240 writes_accepted 240 | rx_seq join 240/240 unique 240 | states {'normal': 240} mailbox_write 240 | regressions 0 rejects 0 -> True
+4. depth_valid_frac pose == receiver on 240/240 pairs, nulls 0; first mismatches [] -> True
+5. last pose line t_wc [-1.1896884441375732, 0.6059783697128296, -0.8103014826774597] vs mailbox xyz [-1.1896884441375732, 0.6059783697128296, -0.8103014826774597] (max |d| 0.00e+00) | quat max |d| 0.00e+00 | stamp 683373591451416 == 683373591451416 | epoch 0 == 0 -> True
+6. t_sensor_ns sequence pose == receiver: True | conf_hist sums {49152: 240} (expect one value, 49152 on session1) -> True
+7. pose_health replay/1: n_frames 240 stream 240 span 40.5194 s sensor_hz 5.8984 | dt_ms p50 200.012 p95 200.016 max 216.679 jitter 0.002 ms | gaps 0 [] | limited episodes 0 | discontinuities 0 [] | depth_valid mean 1.0 p10 1.0 | conf2 mean 0.746727 p10 0.65685 | pose_errors 0 | writes_expected 240 groups 1 -> True
+info: t_total mean on 312.9 ms / off 360.1 ms (ratio 0.869; the <= 1.05 predicate is G2-C over 3x3 runs) | events.jsonl on 245012 B / off 125754 B -> 497 B per pose line
+HARD GATE: PASS | {'p1': True, 'p2': True, 'p3': True, 'p4': True, 'p5': True, 'p6': True, 'p7': True}
+P2A_GATE_DONE

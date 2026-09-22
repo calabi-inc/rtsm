@@ -33,7 +33,7 @@ from rtsm.io.ingest_queue import IngestQueue
 from rtsm.utils.transforms import rotmat_to_quat_xyzw
 from rtsm.evaluation.event_log import (
     RX_DROPPED, RX_ENQUEUED, RX_MALFORMED, RX_PARSE_ERROR, RX_QUEUE_FULL, RX_THROTTLE, RX_TRACKING,
-    ReceiverEvent,
+    TS_NORMAL, TS_NOT_AVAILABLE, PoseEvent, ReceiverEvent,
 )
 from rtsm.core.datamodel import IngestMeta
 from rtsm.io.ingest_lanes import KF_MINTED
@@ -268,6 +268,7 @@ class WebSocketReceiver:
         event_source: str = "websocket",
         admission_queue: Optional[IngestQueue] = None,
         throttle_clock: str = "wall",
+        ledger_sink: Optional[callable] = None,
     ) -> None:
         self.ingest_q = ingest_queue
         # Non-keyframe throttle clock (ingest.clock): "wall" compares process
@@ -282,6 +283,11 @@ class WebSocketReceiver:
         # a dummy ingest queue and passes the real one here.
         self._event_sink = event_sink
         self._event_source = str(event_source)
+        # P2 pose ledger: called with a PoseEvent for every sensor frame this
+        # receiver saw, tracking-limited ones included (see _trace_pose).
+        # None (the default) skips it; EventLogWriter.ledger_sink() sets it
+        # only when diagnostics.ledgers is on.
+        self._ledger_sink = ledger_sink
         self._admission_queue = admission_queue if admission_queue is not None else ingest_queue
         self._hdr_seq: Any = None     # header ids of the message being parsed (for parse_error lines)
         self._hdr_ts: Any = None
@@ -675,6 +681,66 @@ class WebSocketReceiver:
             logger.debug("[websocket] frame-flow trace failed", exc_info=True)
         return None
 
+    # ── Pose parse + P2 pose ledger ──
+
+    def _pose_from_header(self, header: dict) -> Tuple[np.ndarray, np.ndarray]:
+        """Header T_wc -> (t_wc, q_wc_xyzw) in the convention every consumer
+        sees: parse, then (when apply_camera_flip) the ARKit (Y-up, Z-back) ->
+        OpenCV (Y-down, Z-forward) camera flip, applied once at ingestion for
+        the FramePacket, the pose sink and the pose ledger alike."""
+        t_wc, q_xyzw = parse_arkit_pose(
+            T_wc_data=header["T_wc"],
+            pose_format=header.get("pose_format", "matrix4x4_col_major"),
+        )
+        if self._apply_camera_flip:
+            T_wc_mat = PoseStamped(
+                stamp_ns=0, frame_id="", t_wc=t_wc, q_wc_xyzw=q_xyzw
+            ).T_wc() @ _ARKIT_TO_OPENCV
+            t_wc = T_wc_mat[:3, 3].astype(np.float32)
+            q_xyzw = rotmat_to_quat_xyzw(T_wc_mat[:3, :3].astype(np.float32))
+        return t_wc, q_xyzw
+
+    @staticmethod
+    def _wall_and_clock(header: dict) -> Tuple[float, str]:
+        """(wall stamp, pose_clock): the header's unix_timestamp tagged
+        "sender", or this process's time.time() tagged "server" when it is
+        missing / zero. The mailbox ORDERS on the sensor stamp, not on this."""
+        raw = header.get("unix_timestamp")
+        return (float(raw), "sender") if raw else (time.time(), "server")
+
+    def _trace_pose(self, *, tracking_state: str, t_wc: Optional[np.ndarray], q_xyzw: Optional[np.ndarray],
+                    unix_ts: float, pose_clock: str, mailbox_write: bool,
+                    depth_valid_frac: Optional[float] = None, conf_hist: Optional[list] = None,
+                    pose_error: Optional[str] = None) -> None:
+        """P2 pose ledger: one PoseEvent to the ledger sink (no-op when unset).
+        The ids are the header ids of the message being parsed; rx_seq is the
+        join key to this message's receiver line. Never raises into the
+        receive path."""
+        sink = self._ledger_sink
+        if sink is None:
+            return
+        try:
+            seq, ts = self._hdr_seq, self._hdr_ts
+            sink(PoseEvent(
+                timestamp=time.monotonic(),
+                source=self._event_source,
+                rx_seq=self._cur_rx_seq,
+                frame_seq=(int(seq) if seq is not None else None),
+                t_sensor_ns=(int(ts) if ts else None),          # 0 / missing = no stamp (as for the pose sink)
+                t_wall_utc_s=float(unix_ts),
+                pose_clock=str(pose_clock),
+                epoch=int(self._frame_epoch),
+                tracking_state=str(tracking_state),
+                mailbox_write=bool(mailbox_write),
+                t_wc=([float(v) for v in t_wc] if t_wc is not None else None),
+                q_wc_xyzw=([float(v) for v in q_xyzw] if q_xyzw is not None else None),
+                pose_error=pose_error,
+                depth_valid_frac=depth_valid_frac,
+                conf_hist=conf_hist,
+            ))
+        except Exception:
+            logger.debug("[websocket] pose ledger write failed", exc_info=True)
+
     # ── Binary message parsing ──
 
     def _parse_binary_message(self, data: bytes) -> Optional[FramePacket]:
@@ -764,8 +830,24 @@ class WebSocketReceiver:
                     ).reshape(conf_h, conf_w)
 
         # 5. Tracking state filter
-        tracking_state = header.get("tracking_state", "not_available")
-        if self._require_tracking_normal and tracking_state != "normal":
+        tracking_state = header.get("tracking_state", TS_NOT_AVAILABLE)
+        if self._require_tracking_normal and tracking_state != TS_NORMAL:
+            if self._ledger_sink is not None:
+                # P2 pose ledger: a limited / unavailable episode is a health
+                # signal, so the dropped frame gets its line too. The pose is
+                # parsed here for the ledger only: a bad T_wc on a frame that
+                # is being dropped anyway is recorded, never raised. The
+                # receiver's own drop line below is unchanged.
+                lt_wc = lq_xyzw = None
+                pose_error = None
+                try:
+                    lt_wc, lq_xyzw = self._pose_from_header(header)
+                except Exception as e:  # noqa: BLE001 -- ledger only
+                    pose_error = f"{type(e).__name__}: {e}"
+                l_ts, l_clock = self._wall_and_clock(header)
+                self._trace_pose(tracking_state=tracking_state, t_wc=lt_wc, q_xyzw=lq_xyzw,
+                                 unix_ts=l_ts, pose_clock=l_clock, mailbox_write=False,
+                                 pose_error=pose_error)
             self.tracking_drops += 1
             if self._latency_analytics:
                 self._latency_analytics.record_tracking_drop()
@@ -779,28 +861,18 @@ class WebSocketReceiver:
         # Note: a malformed T_wc now raises here — before frame_count
         # increments — instead of after image decode; the caller catches and
         # logs it per frame.
-        t_wc, q_xyzw = parse_arkit_pose(
-            T_wc_data=header["T_wc"],
-            pose_format=header.get("pose_format", "matrix4x4_col_major"),
-        )
-
-        # Camera convention flip: ARKit (Y-up, Z-back) → OpenCV (Y-down, Z-forward)
-        # Applied once at ingestion so ALL downstream consumers (pipeline, TSDF,
-        # visualization, sweep cache, pose sink) see poses in OpenCV camera
-        # convention.
-        if self._apply_camera_flip:
-            T_wc_mat = PoseStamped(
-                stamp_ns=0, frame_id="", t_wc=t_wc, q_wc_xyzw=q_xyzw
-            ).T_wc() @ _ARKIT_TO_OPENCV
-            t_wc = T_wc_mat[:3, 3].astype(np.float32)
-            q_xyzw = rotmat_to_quat_xyzw(T_wc_mat[:3, :3].astype(np.float32))
+        # Parse + the ARKit -> OpenCV camera-convention flip live in
+        # _pose_from_header (one code path for the FramePacket, the pose sink
+        # and the pose ledger); the flip is applied once at ingestion so ALL
+        # downstream consumers (pipeline, TSDF, visualization, sweep cache,
+        # pose sink) see poses in OpenCV camera convention.
+        t_wc, q_xyzw = self._pose_from_header(header)
 
         # Treat a missing/zero unix_timestamp as absent and substitute server
         # wall time; the same value flows into TimeBundle.t_wall_utc_s. The
         # mailbox ORDERS writes on the header's sensor stamp (timestamp_ns),
         # not on this wall value; pose_clock records which clock it is.
-        unix_ts = float(header.get("unix_timestamp") or time.time())
-        pose_clock = "sender" if header.get("unix_timestamp") else "server"
+        unix_ts, pose_clock = self._wall_and_clock(header)
 
         # 5c. Pose sink: latest-pose passthrough for every tracking-normal
         # frame, even ones the throttle below skips. Same (post-flip) pose the
@@ -830,7 +902,21 @@ class WebSocketReceiver:
             depth_bytes, fmt=depth_fmt, width=depth_w, height=depth_h,
             depth_scale=depth_scale,
         )
-        dvf = depth_valid_fraction(depth_m) if self._event_sink is not None else None
+        dvf = (depth_valid_fraction(depth_m)
+               if (self._event_sink is not None or self._ledger_sink is not None) else None)
+
+        # 5e. P2 pose ledger: one line per frame that passed the tracking
+        # filter, BEFORE the keyframe rule / throttle / admission below, so
+        # throttled and refused frames are in it too. conf_hist is taken from
+        # the RAW confidence map sliced in step 4 (step 13 resizes it and
+        # NaN-masks depth_m -- never compute either statistic after that).
+        if self._ledger_sink is not None:
+            conf_hist = (np.bincount(confidence_m.ravel(), minlength=3)[:3].tolist()
+                         if confidence_m is not None else None)
+            self._trace_pose(tracking_state=tracking_state, t_wc=t_wc, q_xyzw=q_xyzw,
+                             unix_ts=unix_ts, pose_clock=pose_clock,
+                             mailbox_write=(self._pose_sink is not None),
+                             depth_valid_frac=dvf, conf_hist=conf_hist)
 
         self._frame_count += 1
 
