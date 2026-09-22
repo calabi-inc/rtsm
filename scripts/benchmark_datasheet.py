@@ -120,7 +120,8 @@ def _repro_block() -> str:
         f"- **Commit:** `{commit}`  ·  **Replay:** "
         f"`python scripts/benchmark_datasheet.py <backend>` (same deterministic input per backend)\n"
         f"- **Session:** `recordings/session1` — iPhone ARKit (Calabi Lens) RGB-D + pose, "
-        f"240 frames, 75.8 s, real-time cadence. Source depth ~256×192 (LiDAR), RGB resized to imgsz for inference.\n"
+        f"240 frames over a 40.5 s sensor span (5.9 Hz capture; delivered live over 44.1 s, replayed over ~46 s; "
+        f"the harness run is ~76 s with startup and the 25 s drain). Source depth ~256×192 (LiDAR), RGB resized to imgsz for inference.\n"
         f"{cfg_lines}\n"
     )
 

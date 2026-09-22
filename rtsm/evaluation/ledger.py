@@ -29,7 +29,11 @@ RTAB-Map publishes none, so no episode is ever counted there. The
 discontinuity rule is the RC-car agent's (``examples/rc_car_agent/monitor.py``)
 applied to the full 3-D translation, source-agnostic: a step larger than
 ``disc_base_m + disc_rate_mps * dt`` between consecutive stream poses. It is
-a DETECTOR: nothing acts on it.
+a DETECTOR: nothing acts on it. ``delivery_lag`` is arrival time (the line's
+monotonic stamp) minus sensor time, both relative to the first stream line:
+its growth is the transport delivering frames slower than the sensor stamps
+them (session1: +3.5 s over 40.5 s live; under replay the replayer's own
+pacing drift adds ~9 ms per frame on top).
 """
 from __future__ import annotations
 
@@ -200,6 +204,27 @@ def _group_health(g: List[dict], source: str, disc_base_m: float, disc_rate_mps:
             episodes.append(_close_episode(cur))
     limited_frames = sum(e["n_frames"] for e in episodes)
 
+    # Delivery lag: arrival (the write's monotonic stamp) minus sensor time,
+    # both relative to the first stream line, in FILE order. Growth means the
+    # transport delivers frames slower than the sensor stamps them (a queue
+    # building on the sender or in the socket); a negative step is a catch-up
+    # burst. Under replay this includes the replayer's own pacing drift
+    # (~9 ms per frame on session1), so the live value is the meaningful one.
+    delivery = {"end_s": None, "max_s": None, "slope_s_per_min": None, "n_catchups": 0}
+    stream_file_order = [r for r in g if r.get("t_wc") is not None and _stamp(r) is not None
+                         and isinstance(r.get("timestamp"), (int, float))]
+    if len(stream_file_order) > 1:
+        arr = np.asarray([float(r["timestamp"]) for r in stream_file_order]); arr -= arr[0]
+        sen = np.asarray([int(r["t_sensor_ns"]) for r in stream_file_order], dtype=np.int64) / 1e9; sen -= sen[0]
+        lag = arr - sen
+        span_min = float(sen[-1]) / 60.0
+        delivery = {
+            "end_s": round(float(lag[-1]), 3),
+            "max_s": round(float(lag.max()), 3),
+            "slope_s_per_min": (round(float(lag[-1] / span_min), 4) if span_min > 0 else None),
+            "n_catchups": int((np.diff(lag) < -0.05).sum()),
+        }
+
     conf2 = []
     for r in g:
         h = r.get("conf_hist")
@@ -224,6 +249,7 @@ def _group_health(g: List[dict], source: str, disc_base_m: float, disc_rate_mps:
         "limited_frames_frac": (round(limited_frames / n, 6) if n else None),
         "n_discontinuities": len(discontinuities),
         "discontinuities": discontinuities,
+        "delivery_lag": delivery,
         "depth_valid_frac": _stats(r.get("depth_valid_frac") for r in g),
         "conf2_frac": _stats(conf2),
         "pose_errors": sum(1 for r in g if r.get("pose_error")),

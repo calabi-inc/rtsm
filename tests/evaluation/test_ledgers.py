@@ -387,6 +387,19 @@ class TestReader:
         assert h["total"] == {"n_frames": 300, "writes_expected": 295, "n_gaps": 1, "n_limited_episodes": 1,
                               "n_discontinuities": 1, "pose_errors": 0, "n_groups": 1}
 
+    def test_delivery_lag_measures_arrival_minus_sensor_time(self):
+        rows = synth_ledger.pose_rows(300, hz=30)                       # arrival == sensor cadence -> lag 0
+        g = ledger.pose_health(rows)["groups"]["replay/1"]
+        assert g["delivery_lag"]["end_s"] == pytest.approx(0.0, abs=1e-6) and g["delivery_lag"]["n_catchups"] == 0
+        for i, r in enumerate(rows):
+            r["timestamp"] += i * 0.01                                   # frames delivered 10 ms later each
+        rows[200]["timestamp"] -= 0.5                                    # one catch-up burst
+        g = ledger.pose_health(rows)["groups"]["replay/1"]
+        assert g["delivery_lag"]["end_s"] == pytest.approx(2.99, abs=1e-6)
+        assert g["delivery_lag"]["max_s"] == pytest.approx(2.99, abs=1e-6)
+        assert g["delivery_lag"]["slope_s_per_min"] == pytest.approx(2.99 / (299 / 30 / 60), rel=1e-3)
+        assert g["delivery_lag"]["n_catchups"] == 1
+
     def test_pose_health_never_counts_across_epochs_or_sources(self):
         a = synth_ledger.pose_rows(50, epoch=1, t0_ns=10_000_000_000)
         b = synth_ledger.pose_rows(50, epoch=2, t0_ns=1_000_000_000, rx_seq0=51)      # restarted clock, smaller stamps

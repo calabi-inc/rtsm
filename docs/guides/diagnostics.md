@@ -83,6 +83,7 @@ What it does not carry: the admission outcome (keyframe flag, lane, drop reason)
 - `gaps`: intervals longer than `gap_factor` (2.0) × the median interval;
 - `limited_episodes`: maximal runs of lines whose `tracking_state` is not `normal`, in file order, with duration and a state histogram (never counted on zeromq, which has no tracking state);
 - `discontinuities`: a translation step larger than `disc_base_m + disc_rate_mps × dt` (0.5 m + 1.0 m/s × dt) between consecutive stream poses — the RC-car agent's rule on the full 3-D translation. A **detector**: nothing acts on it;
+- `delivery_lag`: arrival time minus sensor time, relative to the first frame — growth means the transport delivers frames slower than the sensor stamps them (a queue building on the sender or in the socket); `n_catchups` counts bursts where the lag drops by more than 50 ms. Under replay the replayer's own pacing drift (about 9 ms per frame) is included, so read it on live runs;
 - `depth_valid_frac` and `conf2_frac` (share of confidence-2 pixels) statistics;
 - `writes_expected`: lines with `mailbox_write` — on a replay this equals `/stats.robot_pose.writes_accepted`.
 

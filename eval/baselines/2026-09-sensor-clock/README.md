@@ -288,10 +288,21 @@ lines == `writes_accepted` 240, `rx_seq` join 240/240, all `tracking_state norma
 **Session1 pose-health reference (`pose_health`, group `replay/0`):** 240 frames, stream span 40.52 s → `sensor_hz`
 5.90; intervals 165 × 200 ms + 73 × 100 ms + 1 × 217 ms (p50 200.0 / p95 200.0 / max 216.7 ms; jitter 0.002 ms);
 0 gaps (> 2 × median), 0 tracking-limited episodes, 0 discontinuities (0.5 m + 1 m/s · dt), `depth_valid_frac` 1.0,
-`conf2_frac` mean 0.747 / p10 0.657, 0 pose errors, `writes_expected` 240. The header wall stamps (`pose_clock`
-sender) span 40.51 s and agree with the sensor stamps to 0.04 s; the recording's receive cadence spans 44.1 s
-(p50 186 ms). The "75.8 s" quoted for session1 in `scripts/benchmark_datasheet.py`'s repro block is the harness's
-wall time, not the stream's span.
+`conf2_frac` mean 0.747 / p10 0.657, 0 pose errors, `writes_expected` 240.
+
+**The four session1 time spans, reconciled (founder question 2026-09-21):** sensor stamps 40.52 s == sender wall
+stamps 40.51 s (the phone's two clocks agree to 0.04 s) → the CAPTURE cadence is 5.9 Hz, and the 73 intervals of
+100 ms sit at the start of the session (positions 0–9 consecutive, then sparser): the phone captures at 10 Hz and
+settles to 5 Hz as the pipe fills. Recorded ARRIVAL span 44.06 s (p50 186 ms, i.e. 5.4 Hz delivered whatever the
+stamp cadence): arrival-minus-sensor lag ramps steadily from 0 to +3.54 s (+1.0 s in the first 30 frames, then
+≈ +0.25 s per 30 frames) with 14 catch-up bursts summing to −3.17 s — the transport delivers slower than the phone
+stamps, so a queue builds sender-side; that is what the analytics' `input_hz` 5.0 measured in P1 task 5 and what
+the new `pose_health.delivery_lag` reports (live runs; see below). Replay ARRIVAL span 46.14 s = the recording's
+44.06 s + 2.08 s of replayer pacing drift (8.7 ms per frame: the replayer schedules each sleep after the previous
+frame's parse, uncompensated — harmless for the sensor-clock anchor, which is speed-independent by G1-B, but "real
+time" replay is 4.7 % slow; parked, master plan §8b). Harness wall ≈ 46.1 s + 25 s `DRAIN_WAIT` + startup ≈ 75.8 s,
+which is the "240 frames, 75.8 s" `scripts/benchmark_datasheet.py`'s repro blurb has carried since b016660 — the
+blurb now states the spans. Under replay `delivery_lag.end_s` reads 5.62 s (3.54 live + 2.08 replay drift).
 
 Informational: `t_total` mean 312.9 ms (on) vs 360.1 ms (off) — run-to-run GPU variance on identical processing (the
 ≤ 5 % overhead predicate is G2-C's, over 3 × 3 runs); `events.jsonl` 245 012 B (on) vs 125 754 B (off) → 497 B per
