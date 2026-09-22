@@ -27,7 +27,7 @@ from rtsm.core.clock import Clock, WallClock
 from rtsm.evaluation.event_log import (
     DQ_DROPPED, DQ_FRAME_REJECTED, DQ_GATE_REJECTED, DQ_PROCESSED,
     DQ_REASON_GATE_ERROR, DQ_REASON_KEYFRAME, DQ_REASON_NO_POSE, DQ_REASON_POSE_CONVERSION,
-    DequeueEvent, EventLogWriter, FrameEvent, summarize_sources,
+    DequeueEvent, EventLogWriter, FrameEvent, ObservationEvent, summarize_sources,
 )
 
 logger = logging.getLogger(__name__)
@@ -90,6 +90,37 @@ def cut_judgment_crop(rgb: np.ndarray, x0: int, y0: int, x1: int, y1: int,
              max(1, int(hires.shape[0] * scale))),
             interpolation=cv2.INTER_AREA)
     return hires
+
+
+def _mask_stats_dict(st: Any) -> Optional[Dict[str, Any]]:
+    """The MaskStats numbers for an `obs` line (no arrays: plane_normal_cam is
+    left out; bbox / centroid_px become lists). None without stats."""
+    if st is None:
+        return None
+
+    def f(name: str) -> Any:
+        v = getattr(st, name, None)
+        if v is None:
+            return None
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return None
+
+    bbox = getattr(st, "bbox", None)
+    cpx = getattr(st, "centroid_px", None)
+    return {
+        "area_px": (int(getattr(st, "area_px", 0) or 0)),
+        "bbox": ([int(v) for v in bbox] if bbox is not None else None),
+        "coverage": f("coverage"),
+        "border_fraction": f("border_fraction"),
+        "depth_valid": f("depth_valid"),
+        "depth_p50": f("depth_p50"),
+        "depth_spread": f("depth_spread"),
+        "planar_inlier_pct": f("planar_inlier_pct"),
+        "planar_rms_m": f("planar_rms_m"),
+        "centroid_px": ([float(cpx[0]), float(cpx[1])] if cpx is not None else None),
+    }
 
 
 @dataclass
@@ -450,8 +481,13 @@ class Pipeline:
         frame_id = None
         if pkt is not None and pkt.time.seq is not None:
             frame_id = f"ws_{pkt.time.seq}"
+        # P2 observation ledger: the associator reports every candidate's exit
+        # through on_observation; the records are written as `obs` lines after
+        # association (same thread), with this packet's frame context.
+        obs_records: List[Dict[str, Any]] = []
+        on_obs = obs_records.append if self._event_log.ledgers_enabled else None
         if self.associator is not None and self.working_mem is not None and self.proximity_index is not None:
-            stats_assoc = self.associator.update_with_candidates(cands, snap, self.working_mem, self.proximity_index, is_keyframe=is_kf, frame_id=frame_id)
+            stats_assoc = self.associator.update_with_candidates(cands, snap, self.working_mem, self.proximity_index, is_keyframe=is_kf, frame_id=frame_id, on_observation=on_obs)
             try:
                 if isinstance(stats_assoc, dict):
                     m = int(stats_assoc.get("matched", 0))
@@ -461,6 +497,11 @@ class Pipeline:
                 logger.debug("Failed to summarize association statistics", exc_info=True)
 
         t_assoc_end = time.perf_counter()
+
+        t_ledger_start = time.perf_counter()
+        if obs_records:
+            self._write_obs_lines(pkt, obs_records)
+        t_ledger_end = time.perf_counter()
 
         # ---- Analytics collection (never kills pipeline) ----
         try:
@@ -622,6 +663,7 @@ class Pipeline:
                         "scoring": (t_score_end - t_score_start) * 1000.0,
                         "clip": (t_clip_end - t_clip_start) * 1000.0,
                         "association": (t_assoc_end - t_assoc_start) * 1000.0,
+                        "ledger": (t_ledger_end - t_ledger_start) * 1000.0,
                         "total": (t_assoc_end - t_step_start) * 1000.0,
                     },
                 ))
@@ -630,6 +672,67 @@ class Pipeline:
                 logger.debug("event log write failed", exc_info=True)
 
     # -------- internals --------
+    def _write_obs_lines(self, pkt: Optional[FramePacket], records: List[Dict[str, Any]]) -> None:
+        """P2 observation ledger: one `obs` line per associator record, with the
+        frame context from the packet (ids, epoch, lane, keyframe origin, the
+        post-flip camera pose). No-op when the ledgers are off. Never raises
+        into the processing path; a bad record loses its own line only."""
+        if not self._event_log.ledgers_enabled or pkt is None or not records:
+            return
+        try:
+            meta = getattr(pkt, "ingest", None)
+            pose = pkt.pose
+            ctx: Dict[str, Any] = dict(
+                timestamp=time.monotonic(),
+                frame_seq=(int(pkt.time.seq) if pkt.time.seq is not None else None),
+                t_sensor_ns=(int(pkt.time.t_sensor_ns) if pkt.time.t_sensor_ns is not None else None),
+                epoch=(int(pkt.frame_epoch) if getattr(pkt, "frame_epoch", None) is not None else None),
+                is_keyframe=bool(pkt.is_keyframe),
+                lane=getattr(meta, "lane", None),
+                keyframe_origin=getattr(meta, "keyframe_origin", None),
+                rx_seq=getattr(meta, "rx_seq", None),
+                cam_t_wc=([float(v) for v in pose.t_wc] if pose is not None else None),
+                cam_q_wc_xyzw=([float(v) for v in pose.q_wc_xyzw] if pose is not None else None),
+            )
+        except Exception:
+            logger.debug("observation ledger: frame context failed", exc_info=True)
+            return
+        wm = self.working_mem
+        bin_of = getattr(wm, "view_bin_id", None) if wm is not None else None
+        for rec in records:
+            try:
+                c = rec.get("cand")
+                st = getattr(c, "stats", None)
+                p_cam = rec.get("p_cam")
+                p_world = rec.get("p_world")
+                range_m = float(np.linalg.norm(np.asarray(p_cam, dtype=np.float32))) if p_cam is not None else None
+                view_bin = None
+                if bin_of is not None and p_cam is not None and range_m:
+                    view_bin = bin_of(np.asarray(p_cam, dtype=np.float32) / range_m)
+                topk = getattr(c, "label_topk", None) or []
+                self._event_log.write(ObservationEvent(
+                    **ctx,
+                    cand_idx=int(getattr(st, "idx", -1)),
+                    outcome=str(rec.get("outcome")),
+                    object_id=rec.get("object_id"),
+                    p_world=([float(v) for v in p_world] if p_world is not None else None),
+                    p_cam=([float(v) for v in p_cam] if p_cam is not None else None),
+                    range_m=range_m,
+                    view_bin=(int(view_bin) if view_bin is not None else None),
+                    cos_sim=(float(rec["cos_sim"]) if rec.get("cos_sim") is not None else None),
+                    dist_m=(float(rec["dist_m"]) if rec.get("dist_m") is not None else None),
+                    px_err=(float(rec["px_err"]) if rec.get("px_err") is not None else None),
+                    n_nearby=int(rec.get("n_nearby", 0) or 0),
+                    n_gate_survivors=int(rec.get("n_gate_survivors", 0) or 0),
+                    max_cos=(float(rec["max_cos"]) if rec.get("max_cos") is not None else None),
+                    matched_without_scoring=bool(rec.get("matched_without_scoring", False)),
+                    label_topk=[[str(l), float(sc)] for l, sc in topk],
+                    priority=float(getattr(c, "priority", 0.0) or 0.0),
+                    mask=_mask_stats_dict(st),
+                ))
+            except Exception:
+                logger.debug("observation ledger: line skipped", exc_info=True)
+
     def _trace_dequeue(self, pkt: Optional[FramePacket], t_deq: float, outcome: str, reason: str) -> None:
         """Frame-flow trace: one 'dequeue' line per dequeued frame (no-op when
         diagnostics are off). Never raises into the processing path."""

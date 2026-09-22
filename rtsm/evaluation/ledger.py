@@ -13,6 +13,9 @@ NumPy only; pyarrow is imported lazily by ``to_parquet``.
                                                    episodes / discontinuities /
                                                    depth + confidence statistics,
                                                    per (source, epoch) and in total
+  observation_summary(rows)      -> dict           outcomes, per-frame and per-object
+                                                   counts, match residuals, ranges,
+                                                   view-bin coverage (P3 metric inputs)
   to_parquet(path, out_dir=None) -> {kind: Path}   one Parquet table per kind
 
 CLI:
@@ -46,7 +49,7 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence
 
 import numpy as np
 
-from rtsm.evaluation.event_log import KIND_POSE, LEDGER_KINDS, TS_NORMAL
+from rtsm.evaluation.event_log import KIND_OBS, KIND_POSE, LEDGER_KINDS, OBS_CREATED, OBS_MATCHED, TS_NORMAL
 
 logger = logging.getLogger(__name__)
 
@@ -282,6 +285,41 @@ def pose_health(rows: Iterable[dict], *, disc_base_m: float = 0.5, disc_rate_mps
     }
 
 
+# ───────────────────────────── observation summary ─────────────────────────────
+
+def observation_summary(rows: Iterable[dict]) -> dict:
+    """Inputs for the P3 metrics from the ``obs`` ledger lines: outcome counts,
+    lines per frame, matched observations per object, the winning match's
+    residuals, ranges, the view-bin coverage of matched + created
+    observations, and the gate audit counters. No physical-object clustering
+    here (that is P3)."""
+    obs = [r for r in rows if r.get("kind") == KIND_OBS]
+    outcomes = Counter(str(r.get("outcome")) for r in obs)
+    matched = [r for r in obs if r.get("outcome") == OBS_MATCHED]
+    created = [r for r in obs if r.get("outcome") == OBS_CREATED]
+    per_object = Counter(r["object_id"] for r in matched if r.get("object_id"))
+    objects_seen = set(per_object) | {r["object_id"] for r in created if r.get("object_id")}
+    per_frame = Counter(r.get("t_sensor_ns") for r in obs)
+    bins = Counter(r.get("view_bin") for r in matched + created if r.get("view_bin") is not None)
+    return {
+        "n_obs": len(obs),
+        "outcomes": dict(outcomes),
+        "n_matched_without_scoring": sum(1 for r in matched if r.get("matched_without_scoring")),
+        "n_frames_with_obs": len(per_frame),
+        "obs_per_frame": _stats(per_frame.values()),
+        "n_objects_seen": len(objects_seen),
+        "n_objects_created": len({r["object_id"] for r in created if r.get("object_id")}),
+        "matched_per_object": _stats(per_object.values()),
+        "cos_sim": _stats(r.get("cos_sim") for r in matched if not r.get("matched_without_scoring")),
+        "dist_m": _stats(r.get("dist_m") for r in matched if not r.get("matched_without_scoring")),
+        "px_err": _stats(r.get("px_err") for r in matched if not r.get("matched_without_scoring")),
+        "range_m": _stats(r.get("range_m") for r in obs),
+        "n_nearby": _stats(r.get("n_nearby") for r in obs),
+        "n_gate_survivors": _stats(r.get("n_gate_survivors") for r in obs),
+        "view_bins": {str(k): int(v) for k, v in sorted(bins.items())},
+    }
+
+
 # ───────────────────────────── parquet ─────────────────────────────
 
 def to_parquet(events_path: Any, out_dir: Any = None, kinds: Optional[Sequence[str]] = None) -> Dict[str, Path]:
@@ -324,6 +362,7 @@ def summarize(rows: Sequence[dict]) -> dict:
         "meta": rows[0] if rows else None,
         "counts": {k: len(v) for k, v in sorted(kinds.items())},
         "pose_health": pose_health(rows),
+        "observation_summary": observation_summary(rows),
     }
 
 

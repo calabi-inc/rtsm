@@ -309,3 +309,44 @@ Informational: `t_total` mean 312.9 ms (on) vs 360.1 ms (off) — run-to-run GPU
 pose line. CPU suite: 804 passed, 1 failed — `examples/rc_car_agent/tests/test_server.py::
 test_baseline_no_match_resumes_search_e2e`, a wall-clock e2e of the fake car that fails 3/3 on the untouched main tree
 on this box today as well (pre-existing, unrelated; the agent imports nothing this change touches).
+
+## P2 stage B reproduction (observation ledger, 2026-09-22) — `p2-ledgers/stage-b/` — **G2-B HARD GATE PASS**
+
+Branch `feature/p2-observation-ledger` (main `a0962c7` + the observation ledger): `ObservationEvent` kind `obs` (ledger
+schema 1), one line per candidate the associator looked at, written on the pipeline thread right after association;
+`Associator.update_with_candidates(on_observation=...)` reports every candidate's exit (matched / created /
+spawn_capped / no_p_cam / no_embedding / create_failed) with the raw world point, the camera-frame centroid, the winning
+match's residuals and the gate audit counters; `WorkingMemory.view_bin_id`; `ledger.observation_summary`; docs.
+`p2b_gate.sh` = two headless dual replays of session1 on the packaged replay defaults, diagnostics on, ledgers ON (B_on) /
+OFF (B_off); `gate.out` is the verbatim output of the PASSING run.
+
+| run | multiset | dequeue / receiver vs B1 | `obs` lines | predicates |
+|---|---|---|---|---|
+| B_on | 124/65 @53 `ad6f71a5b89c8506` | identical (86) / identical (240) | 695 (+ 240 `pose`) | 1–6 PASS |
+| B_off | 124/65 @53 `ad6f71a5b89c8506` | identical (86) / identical (240) | none | 1–2 PASS |
+
+Counts (3): 408 matched == Σ frame.n_matched, 279 created == Σ frame.n_created, 8 no_p_cam; on every one of the 53
+processed frames #obs == `scoring.n_selected`. Logic (4): all 403 scored matches satisfy cos ≥ 0.90, dist ≤ 0.50 m,
+px_err ≤ 60; all 93 spawns that had gate survivors have max_cos < 0.90. Logic (5): 0 pose-correction messages in the
+replay; for all 124 final objects `xyz_world` lies inside the bbox of the object's own raw `created` + `matched`
+`p_world` (the EMA is a convex combination), and every hits == 1 object equals its create point to 1e-5. Logic (6):
+for all 124 objects the number of distinct `view_bin` values over its observations equals the WM's `view_bins` count
+(the harness's `/objects` list carries the count; the key set is available via `include_vectors=true`).
+
+**Finding — the associator's fallback matches without scoring (5 of 408 matches on session1).** The first gate run
+FAILED predicate 1 with 123/65 (`c2589c7d71f8f2a5`) on BOTH B_on and B_off: my first version of the hook had turned
+the `else:` after the `fallback_all_when_empty` block into `if cand_ids:`, which made the fallback ids go through the
+gates + scoring. In the shipped code they never do: when the index returns nothing and the WM has < 20 objects the
+fallback fills `cand_ids` and the branch ends, so `best_id` keeps the PREVIOUS candidate's value — the candidate is
+"matched" to that object (with the previous candidate's residuals fed to the WM) or spawned, with no check either
+way. Scoring them is arguably the intended behaviour, but it changes the anchor (124 → 123 objects), so stage B
+restores the original flow exactly (second run: anchor identical, 6/6) and the ledger marks such lines
+`matched_without_scoring: true` with no residuals: 5 of 408 on session1. Pinned by
+`test_fallback_path_matches_without_scoring_and_the_ledger_says_so`; parked in master plan §8b — fix with a new anchor.
+
+Recorded: `|p_cam.z − mask.depth_p50| < 0.5 m` for 100 % of 687 lines; residuals of the scored matches cos p50 0.946 /
+p95 0.980, dist p50 0.036 / p95 0.138 m, px_err p50 11.3 px; range p50 2.60 / p95 3.59 m; matched per object p50 2 /
+max 15; view bins used {11: 491, 12: 196} — 2 of the 24 bins (a forward-looking walk); 279 objects created, 124 alive
+at the end (155 protos expired — a P3 "duplicate spawn" input); `timing_ms.ledger` p50 1.02 / p95 1.30 ms per processed
+frame; `t_total` mean 217.7 ms (on) vs 217.0 ms (off), +0.3 %; 1 339 B per obs line, events.jsonl 1.18 MB (on) vs
+127 KB (off) for the 46 s replay.

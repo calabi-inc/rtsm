@@ -25,7 +25,9 @@ import pytest
 
 from rtsm.evaluation import ledger
 from rtsm.evaluation.event_log import (
-    LEDGER_SCHEMA, RX_ENQUEUED, SCHEMA_VERSION, EventLogWriter, PoseEvent, resolve_ledger_config,
+    LEDGER_SCHEMA, OBS_CREATE_FAILED, OBS_CREATED, OBS_MATCHED, OBS_NO_EMBEDDING, OBS_NO_P_CAM,
+    OBS_SPAWN_CAPPED, RX_ENQUEUED, SCHEMA_VERSION, EventLogWriter, ObservationEvent, PoseEvent,
+    resolve_ledger_config,
 )
 from rtsm.io.ingest_queue import IngestQueue
 from rtsm.io.websocket import WebSocketReceiver
@@ -466,3 +468,268 @@ class TestReader:
         w = _writer(tmp_path); w.close()
         with pytest.raises(RuntimeError, match="rtsm\\[eval\\]"):
             ledger.to_parquet(w.path)
+
+
+# ───────────────────────────── stage B: observation ledger ─────────────────────────────
+
+class _Stats:
+    def __init__(self, idx, centroid_cam, centroid_px=(8.0, 8.0), depth_valid=0.9):
+        self.idx = idx; self.centroid_cam = centroid_cam; self.centroid_px = centroid_px
+        self.depth_valid = depth_valid; self.coverage = 0.5; self.area_px = 100; self.bbox = (1, 2, 3, 4)
+        self.border_fraction = 0.0; self.depth_p50 = 2.0; self.depth_spread = 0.1
+        self.planar_inlier_pct = None; self.planar_rms_m = None; self.plane_normal_cam = np.zeros(3)
+
+
+class _Cand:
+    def __init__(self, idx, p_cam, emb, priority=0.5, label_topk=None):
+        self.idx = idx; self.stats = _Stats(idx, None if p_cam is None else np.asarray(p_cam, dtype=np.float32))
+        self.emb_vis = None if emb is None else np.asarray(emb, dtype=np.float32)
+        self.priority = priority; self.label_topk = label_topk or [("mug", 0.8)]; self.crop = None; self.crop_hires = None
+
+
+class _Obj:
+    def __init__(self, oid, xyz, emb):
+        self.id = oid; self.xyz_world = np.asarray(xyz, dtype=np.float32); self.emb_mean = np.asarray(emb, dtype=np.float32)
+        self.view_bins = {}
+
+
+class _Grid:
+    def cell(self, p):
+        return tuple(int(np.floor(float(v) / 0.25)) for v in p)
+
+
+class _Index:
+    """Returns every stored object within 1 m of the query (rings ignored)."""
+    def __init__(self, wm):
+        self.grid = _Grid(); self._wm = wm
+
+    def nearby_ids(self, pw, rings=1, prune_with=None):
+        return [o.id for o in self._wm.objects.values() if np.linalg.norm(o.xyz_world - pw) < 1.0]
+
+
+class _WM:
+    def __init__(self, objects=(), fail_create_if_x_above=None):
+        self.objects = {o.id: o for o in objects}; self.updates = []; self.created = []; self.promoted = []
+        self.fail_x = fail_create_if_x_above; self.az_bins = 8; self.el_bins = 3
+
+    def exists(self, oid): return oid in self.objects
+    def get(self, oid): return self.objects.get(oid)
+    def iter_objects(self): return list(self.objects.values())
+    def update_object(self, oid, obs, **kw): self.updates.append((oid, obs))
+    def maybe_promote(self, oid): self.promoted.append(oid)
+
+    def create_object(self, p_world, emb_vis, **kw):
+        if self.fail_x is not None and float(p_world[0]) > self.fail_x:
+            return None
+        oid = f"new{len(self.created)}"; self.created.append((oid, np.asarray(p_world, dtype=np.float32)))
+        self.objects[oid] = _Obj(oid, p_world, emb_vis); return oid
+
+    def view_bin_id(self, vdir):
+        from rtsm.stores.working_memory import _view_bin_id
+        return _view_bin_id(vdir, self.az_bins, self.el_bins)
+
+
+class _Snap:
+    def __init__(self):
+        # camera at (0,0,0) looking down +z, world == camera (identity)
+        self.pose_cam_T_world = np.eye(4, dtype=np.float32)
+        self.intrinsics = {"fx": 10.0, "fy": 10.0, "cx": 8.0, "cy": 8.0}
+
+
+def _assoc_cfg(**over):
+    cfg = {"assoc": {"rings": 1, "gate_dist_base_m": 0.5, "gate_reproj_px": 1e9, "use_embeddings": True,
+                     "cos_min": 0.9, "nearest_m_for_cos": 8, "spawn_max_per_cell_per_trigger": 2}}
+    cfg["assoc"].update(over); return cfg
+
+
+class TestAssociatorHook:
+    def _world(self):
+        e1 = [1.0, 0.0, 0.0, 0.0]
+        wm = _WM([_Obj("A", [0.0, 0.0, 2.0], e1)], fail_create_if_x_above=50.0)
+        return wm, _Index(wm), e1
+
+    def test_reports_every_exit(self):
+        from rtsm.core.association import Associator
+        wm, index, e1 = self._world()
+        cands = [
+            _Cand(0, [0.05, 0.0, 2.0], e1),                     # matched to A (dist 0.05, cos 1.0)
+            _Cand(1, [5.0, 0.0, 2.0], e1),                      # nothing nearby -> created
+            _Cand(2, None, e1),                                  # no camera-frame centroid
+            _Cand(3, [0.05, 0.0, 2.0], None),                    # no embedding
+            _Cand(4, [9.0, 0.0, 2.0], e1),                       # spawn cap hit (counter pre-filled)
+            _Cand(5, [99.0, 0.0, 2.0], e1),                      # create_object returns None
+            _Cand(6, [0.05, 0.0, 2.0], [0.0, 1.0, 0.0, 0.0]),    # nearby, gates pass, cosine 0 < cos_min -> created
+        ]
+        counter = {index.grid.cell(np.array([9.0, 0.0, 2.0], dtype=np.float32)): 2}
+        recs = []
+        out = Associator(_assoc_cfg()).update_with_candidates(cands, _Snap(), wm, index, per_cell_spawn_counter=counter,
+                                                              on_observation=recs.append)
+        assert out == {"matched": 1, "created": 2}
+        by = {r["cand"].idx: r for r in recs}
+        assert [r["cand"].idx for r in recs] == [0, 1, 2, 3, 4, 5, 6]                     # one record per candidate, in order
+        assert by[0]["outcome"] == OBS_MATCHED and by[0]["object_id"] == "A"
+        assert by[0]["cos_sim"] == pytest.approx(1.0) and by[0]["dist_m"] == pytest.approx(0.05)
+        assert by[0]["n_nearby"] == 1 and by[0]["n_gate_survivors"] == 1 and by[0]["max_cos"] == pytest.approx(1.0)
+        assert np.allclose(by[0]["p_world"], [0.05, 0.0, 2.0]) and np.allclose(by[0]["p_cam"], [0.05, 0.0, 2.0])
+        assert by[1]["outcome"] == OBS_CREATED and by[1]["object_id"] == "new0" and by[1]["n_nearby"] == 0
+        assert by[2]["outcome"] == OBS_NO_P_CAM and "p_world" not in by[2]
+        assert by[3]["outcome"] == OBS_NO_EMBEDDING and by[3]["p_cam"] is not None
+        assert by[4]["outcome"] == OBS_SPAWN_CAPPED and by[4]["object_id"] is None if "object_id" in by[4] else True
+        assert by[5]["outcome"] == OBS_CREATE_FAILED
+        assert by[6]["outcome"] == OBS_CREATED and by[6]["n_gate_survivors"] == 1 and by[6]["max_cos"] == pytest.approx(0.0)
+        assert wm.created[0][0] == "new0" and np.allclose(wm.created[0][1], [5.0, 0.0, 2.0])   # raw point == create point
+
+    def test_hook_errors_never_break_association(self):
+        from rtsm.core.association import Associator
+        wm, index, e1 = self._world()
+        cands = [_Cand(0, [0.05, 0.0, 2.0], e1), _Cand(1, [5.0, 0.0, 2.0], e1)]
+
+        def boom(rec):
+            raise RuntimeError("hook down")
+        out = Associator(_assoc_cfg()).update_with_candidates(cands, _Snap(), wm, index, on_observation=boom)
+        assert out == {"matched": 1, "created": 1} and len(wm.updates) == 1 and len(wm.created) == 1
+
+    def test_without_hook_is_unchanged(self):
+        from rtsm.core.association import Associator
+        results = []
+        for hook in (None, lambda r: None):
+            wm, index, e1 = self._world()
+            cands = [_Cand(0, [0.05, 0.0, 2.0], e1), _Cand(1, [5.0, 0.0, 2.0], e1), _Cand(2, None, e1)]
+            out = Associator(_assoc_cfg()).update_with_candidates(cands, _Snap(), wm, index, on_observation=hook)
+            results.append((out, [u[0] for u in wm.updates], [c[0] for c in wm.created], wm.promoted))
+        assert results[0] == results[1] == ({"matched": 1, "created": 1}, ["A"], ["new0"], ["A"])
+
+    def test_fallback_path_matches_without_scoring_and_the_ledger_says_so(self):
+        """Pins the associator's CURRENT fallback behaviour (assoc.fallback_all_when_empty
+        with < 20 objects): a candidate whose neighbour query is empty gets the
+        fallback ids but is neither gated nor scored, so it is 'matched' to the
+        PREVIOUS candidate's object. The ledger records that line with
+        matched_without_scoring=True and no residuals. Changing this flow changes
+        the session1 anchor (124 -> 123 objects, measured 2026-09-22) -- do it with
+        a new anchor, and update this test then."""
+        from rtsm.core.association import Associator
+
+        class _EmptyIndex(_Index):
+            def nearby_ids(self, pw, rings=1, prune_with=None):
+                return [o.id for o in self._wm.objects.values() if np.linalg.norm(o.xyz_world - pw) < 0.2]
+        wm, _, e1 = self._world()
+        index = _EmptyIndex(wm)
+        recs = []
+        cands = [_Cand(0, [0.05, 0.0, 2.0], e1),          # nearby -> scored, matched to A
+                 _Cand(1, [3.0, 0.0, 2.0], e1)]           # nothing within 0.2 m -> fallback ids, NOT scored
+        out = Associator(_assoc_cfg(fallback_all_when_empty=True)).update_with_candidates(
+            cands, _Snap(), wm, index, on_observation=recs.append)
+        assert out == {"matched": 2, "created": 0}                                   # the flaw: 2nd candidate "matches" A
+        assert [r["outcome"] for r in recs] == [OBS_MATCHED, OBS_MATCHED]
+        assert recs[0].get("matched_without_scoring", False) is False and recs[0]["cos_sim"] == pytest.approx(1.0)
+        assert recs[1]["matched_without_scoring"] is True and recs[1]["object_id"] == "A"
+        assert "cos_sim" not in recs[1] and recs[1]["n_gate_survivors"] == 0 and recs[1]["n_nearby"] == 1
+
+    def test_embeddings_off_path_reports_cos_one(self):
+        """assoc.use_embeddings=false: the cosine is the neutral 1.0 and no max_cos
+        is recorded. (The candidate still carries an embedding: the match commit
+        stores one unconditionally -- a pre-existing edge the pipeline never hits
+        because CLIP runs for every candidate.)"""
+        from rtsm.core.association import Associator
+        wm, index, e1 = self._world()
+        recs = []
+        Associator(_assoc_cfg(use_embeddings=False)).update_with_candidates(
+            [_Cand(0, [0.05, 0.0, 2.0], [0.0, 1.0, 0.0, 0.0])], _Snap(), wm, index, on_observation=recs.append)
+        assert recs[0]["outcome"] == OBS_MATCHED and recs[0]["cos_sim"] == 1.0 and recs[0]["max_cos"] is None
+
+
+class TestObservationLines:
+    def _pipe(self, tmp_path, wm):
+        from rtsm.core.pipeline import Pipeline
+        w = _writer(tmp_path)
+        pipe = Pipeline(cfg={}, segmenter=None, clip=None, working_mem=wm, proximity_index=None, associator=None,
+                        ingest_gate=None, ingest_q=IngestQueue(), sweep_cache=None, event_log=w)
+        return pipe, w
+
+    @staticmethod
+    def _packet(seq=7, ts_ns=123_000):
+        from rtsm.core.datamodel import FramePacket, IngestMeta, PoseStamped, TimeBundle
+        return FramePacket(rgb=np.zeros((8, 8, 3), dtype=np.uint8), depth_m=np.ones((8, 8), dtype=np.float32),
+                           pose=PoseStamped(stamp_ns=ts_ns, frame_id="arkit", t_wc=np.array([1.0, 2.0, 3.0], dtype=np.float32),
+                                            q_wc_xyzw=np.array([0.0, 0.0, 0.0, 1.0], dtype=np.float32)),
+                           intr=None, is_keyframe=True, frame_epoch=4,
+                           time=TimeBundle(t_mono_s=0.0, t_wall_utc_s=0.0, t_sensor_ns=ts_ns, seq=seq),
+                           ingest=IngestMeta(lane="keyframe", keyframe_origin="minted", rx_seq=9))
+
+    def test_obs_lines_carry_frame_context_and_raw_p_world(self, tmp_path):
+        wm = _WM()
+        pipe, w = self._pipe(tmp_path, wm)
+        c = _Cand(3, [0.3, 0.0, 4.0], [1.0, 0.0, 0.0, 0.0], priority=0.7, label_topk=[("tissue box", 0.9), ("card box", 0.2)])
+        recs = [dict(cand=c, outcome=OBS_MATCHED, object_id="A", p_world=np.array([1.3, 2.0, 7.0], dtype=np.float32),
+                     p_cam=c.stats.centroid_cam, cos_sim=np.float32(0.97), dist_m=0.12, px_err=3.5,
+                     n_nearby=2, n_gate_survivors=1, max_cos=0.97),
+                dict(cand=_Cand(5, None, None), outcome=OBS_NO_P_CAM)]
+        pipe._write_obs_lines(self._packet(), recs)
+        w.close()
+        obs = [r for r in _lines(w.path) if r["kind"] == "obs"]
+        assert len(obs) == 2
+        a, b = obs
+        assert (a["frame_seq"], a["t_sensor_ns"], a["epoch"], a["is_keyframe"], a["lane"], a["keyframe_origin"], a["rx_seq"]) == \
+            (7, 123_000, 4, True, "keyframe", "minted", 9)
+        assert a["cam_t_wc"] == [1.0, 2.0, 3.0] and a["cam_q_wc_xyzw"] == [0.0, 0.0, 0.0, 1.0]
+        assert a["cand_idx"] == 3 and a["outcome"] == "matched" and a["object_id"] == "A"
+        assert np.allclose(a["p_world"], [1.3, 2.0, 7.0]) and np.allclose(a["p_cam"], [0.3, 0.0, 4.0])
+        assert a["range_m"] == pytest.approx(float(np.linalg.norm([0.3, 0.0, 4.0])))
+        assert a["view_bin"] == wm.view_bin_id(np.array([0.3, 0.0, 4.0], dtype=np.float32) / np.linalg.norm([0.3, 0.0, 4.0]))
+        assert a["cos_sim"] == pytest.approx(0.97) and a["dist_m"] == 0.12 and a["px_err"] == 3.5
+        assert (a["n_nearby"], a["n_gate_survivors"], a["max_cos"]) == (2, 1, 0.97) and a["matched_without_scoring"] is False
+        assert a["label_topk"] == [["tissue box", 0.9], ["card box", 0.2]] and a["priority"] == 0.7
+        assert a["mask"]["bbox"] == [1, 2, 3, 4] and a["mask"]["centroid_px"] == [8.0, 8.0] and a["mask"]["depth_p50"] == 2.0
+        assert "plane_normal_cam" not in a["mask"]
+        assert b["outcome"] == "no_p_cam" and b["p_world"] is None and b["range_m"] is None and b["view_bin"] is None
+
+    def test_ledgers_off_writes_no_obs_lines(self, tmp_path):
+        from rtsm.core.pipeline import Pipeline
+        w = EventLogWriter(enabled=True, configured_path=str(tmp_path / "e.jsonl"), ledgers=False)
+        pipe = Pipeline(cfg={}, segmenter=None, clip=None, working_mem=_WM(), proximity_index=None, associator=None,
+                        ingest_gate=None, ingest_q=IngestQueue(), sweep_cache=None, event_log=w)
+        pipe._write_obs_lines(self._packet(), [dict(cand=_Cand(0, [0, 0, 1], [1, 0, 0, 0]), outcome=OBS_MATCHED)])
+        w.close()
+        assert [r["kind"] for r in _lines(w.path)] == ["meta"]
+
+    def test_bad_record_loses_only_its_own_line(self, tmp_path):
+        pipe, w = self._pipe(tmp_path, _WM())
+        good = dict(cand=_Cand(0, [0, 0, 1], [1, 0, 0, 0]), outcome=OBS_CREATED, object_id="n", p_world=[0, 0, 1], p_cam=[0, 0, 1])
+        bad = dict(cand=None, outcome=OBS_MATCHED, p_cam="not a vector")
+        pipe._write_obs_lines(self._packet(), [bad, good])
+        w.close()
+        assert [r["outcome"] for r in _lines(w.path) if r["kind"] == "obs"] == ["created"]
+
+
+class TestObservationSummary:
+    def test_summary_on_synthetic_rows(self):
+        rows = synth_ledger.meta_row() + synth_ledger.obs_rows(10, per_frame=3, n_objects=4)
+        s = ledger.observation_summary(rows)
+        assert s["n_obs"] == 30 and s["n_frames_with_obs"] == 10 and s["obs_per_frame"]["max"] == 3
+        assert s["outcomes"]["no_p_cam"] == 10 and s["outcomes"]["created"] == 4 and s["outcomes"]["matched"] == 16
+        assert s["n_objects_seen"] == 4 and s["n_objects_created"] == 4
+        assert s["cos_sim"]["n"] == 16 and s["cos_sim"]["mean"] == pytest.approx(0.95)
+        assert s["range_m"]["n"] == 20 and set(s["view_bins"]) == {"0", "1"}
+        assert s["n_gate_survivors"]["max"] == 1
+
+    def test_summary_is_empty_safe(self):
+        s = ledger.observation_summary([])
+        assert s["n_obs"] == 0 and s["outcomes"] == {} and s["cos_sim"]["n"] == 0 and s["view_bins"] == {}
+
+    def test_summarize_cli_includes_observations(self, tmp_path, capsys):
+        w = _writer(tmp_path)
+        for r in synth_ledger.obs_rows(2, per_frame=2):
+            w.write(r)
+        w.close()
+        assert ledger.main(["summarize", str(w.path)]) == 0
+        out = json.loads(capsys.readouterr().out)
+        assert out["counts"]["obs"] == 4 and out["observation_summary"]["n_frames_with_obs"] == 2
+
+    def test_obs_event_roundtrips_through_the_writer(self, tmp_path):
+        w = _writer(tmp_path)
+        w.write(ObservationEvent(timestamp=0.0, frame_seq=1, t_sensor_ns=5, epoch=0, is_keyframe=False, lane=None,
+                                 keyframe_origin=None, rx_seq=None, cam_t_wc=None, cam_q_wc_xyzw=None, cand_idx=0,
+                                 outcome=OBS_NO_EMBEDDING, p_cam=[0.0, 0.0, 1.0]))
+        w.close()
+        (r,) = [r for r in _lines(w.path) if r["kind"] == "obs"]
+        assert r["outcome"] == "no_embedding" and r["p_world"] is None and r["mask"] is None

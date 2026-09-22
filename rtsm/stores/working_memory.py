@@ -310,6 +310,12 @@ class WorkingMemory:
         with self._lock:
             return list(self._map.values())
 
+    def view_bin_id(self, view_dir_cam: Optional[np.ndarray]) -> Optional[int]:
+        """The view bin this WM assigns to a camera-frame direction (the same
+        function create/update use), so the P2 observation ledger records the
+        bin the memory actually used. None for a missing / zero direction."""
+        return _view_bin_id(view_dir_cam, self.az_bins, self.el_bins)
+
     # ---------- create / spawn ----------
 
     def create_object(self, p_world: Vec3, emb_vis: Emb, *, t_mono: Optional[float] = None,

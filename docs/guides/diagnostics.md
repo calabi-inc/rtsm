@@ -3,7 +3,7 @@
 RTSM can write one append-only JSONL file per run describing what happened to every frame. It is off by default and costs nothing when off. Two things live in that file:
 
 - the **frame-flow trace** (`receiver`, `dequeue`, `frame` lines): where each frame went and why — the record the determinism gates compare between runs;
-- the **ledgers** (`pose` today; `obs` and `view` follow): the raw per-frame and per-object facts `rtsm eval` reads, kept before the working memory smooths them away.
+- the **ledgers** (`pose` and `obs` today; `view` follows): the raw per-frame and per-object facts `rtsm eval` reads, kept before the working memory smooths them away.
 
 ```yaml
 diagnostics:
@@ -86,6 +86,32 @@ What it does not carry: the admission outcome (keyframe flag, lane, drop reason)
 - `delivery_lag`: arrival time minus sensor time, relative to the first frame — growth means the transport delivers frames slower than the sensor stamps them (a queue building on the sender or in the socket); `n_catchups` counts bursts where the lag drops by more than 50 ms. Under replay the replayer's own pacing drift (about 9 ms per frame) is included, so read it on live runs;
 - `depth_valid_frac` and `conf2_frac` (share of confidence-2 pixels) statistics;
 - `writes_expected`: lines with `mailbox_write` — on a replay this equals `/stats.robot_pose.writes_accepted`.
+
+## Ledger schema 1 — `obs`
+
+One line per **candidate the associator looked at**, on every processed frame, written on the pipeline thread right after association. So on each frame the number of `obs` lines equals the `frame` line's `scoring.n_selected`. The line keeps the raw measurement the working memory then smooths away, and the outcome with enough context to audit it against the association gates.
+
+| field | type | meaning |
+|---|---|---|
+| `frame_seq`, `t_sensor_ns`, `epoch`, `is_keyframe` | | the frame; `t_sensor_ns` joins the `frame` and `dequeue` lines |
+| `lane`, `keyframe_origin`, `rx_seq` | | the packet's ingest bookkeeping (`null` under the legacy queue) |
+| `cam_t_wc` [3], `cam_q_wc_xyzw` [4] | | the packet's camera pose, same convention as the `pose` ledger |
+| `cand_idx` | int | mask index in the segmentation output (joins the scoring trace's `mask_idx`) |
+| `outcome` | str | `matched`, `created`, `spawn_capped`, `no_p_cam`, `no_embedding`, `create_failed` |
+| `object_id` | str? | the matched or created object |
+| `p_world` [3]? | | **raw** world point, `T_wc @ p_cam` as the associator computed it, before any EMA |
+| `p_cam` [3]?, `range_m` | | camera-frame centroid of the mask and its distance |
+| `view_bin` | int? | the working memory's own bin for that direction |
+| `cos_sim`, `dist_m`, `px_err` | float? | the winning match's residuals (`matched` only; `px_err` is 0 without intrinsics) |
+| `n_nearby`, `n_gate_survivors`, `max_cos` | | audit counters: objects the index returned, how many passed the distance / z / reprojection gates, the best cosine seen among them (passed or not) |
+| `matched_without_scoring` | bool | the associator's "scan all objects when the index returns nothing" fallback matched this candidate to the previous candidate's object without gating or scoring it — a known flaw the ledger exposes (no residuals on such lines) |
+| `label_topk` | [[str, float]] | detection label first, then the vocabulary classifier's |
+| `priority` | float | the scoring priority that selected this candidate |
+| `mask` | dict | `area_px`, `bbox`, `coverage`, `border_fraction`, `depth_valid`, `depth_p50`, `depth_spread`, `planar_inlier_pct`, `planar_rms_m`, `centroid_px` (RGB pixel space) |
+
+Invariants a reader can check: every `matched` line without `matched_without_scoring` has `cos_sim ≥ assoc.cos_min` and `dist_m ≤ assoc.gate_dist_base_m`; a `created` line with `n_gate_survivors > 0` has `max_cos < assoc.cos_min`; the working memory's position of any object is a convex combination of its `created` and `matched` `p_world` values, so it lies inside their bounding box (absent pose corrections).
+
+`rtsm.evaluation.ledger.observation_summary(rows)` returns outcome counts, lines per frame, matched observations per object, residual and range statistics, and the view-bin coverage — the inputs to the `rtsm eval` metrics.
 
 ## Parquet
 

@@ -11,7 +11,9 @@ Current scope:
   (cfg.diagnostics.enabled); the record P1's determinism gate and the P2
   ledgers build on. P2 adds ledger kinds behind cfg.diagnostics.ledgers
   (schema_version 3, ledger schema 1): `pose` (stage A) -- one line per
-  sensor frame at the receiver, tracking-limited frames included.
+  sensor frame at the receiver, tracking-limited frames included; `obs`
+  (stage B) -- one line per candidate the associator looked at, with the
+  raw measurement and the association outcome.
 - ledger: reader + rollups over that file (read_events, by_kind,
   pose_health, to_parquet) and the `python -m rtsm.evaluation.ledger` CLI.
 """

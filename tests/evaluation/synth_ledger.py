@@ -81,3 +81,43 @@ def receiver_rows_for(pose: Iterable[dict], *, keyframe_every_n: int = 30, throt
             "lane": (None if throttled else ("keyframe" if is_kf else "fifo")), "rx_seq": p["rx_seq"],
         })
     return out
+
+
+def obs_rows(n_frames: int, *, per_frame: int = 3, n_objects: int = 4, t0_ns: int = 1_000_000_000,
+             frame_dt_s: float = 1.0, cos: float = 0.95, dist: float = 0.1) -> List[dict]:
+    """``per_frame`` obs lines on each of ``n_frames`` processed frames over
+    ``n_objects`` objects: an object is `created` the first time it is seen
+    and `matched` afterwards; candidate ``per_frame - 1`` of every frame is a
+    `no_p_cam` line when per_frame > 2 (so outcome mixes are realistic)."""
+    rows: List[dict] = []
+    seen: set = set()
+    for f in range(n_frames):
+        ts = t0_ns + int(round(f * frame_dt_s * 1e9))
+        for k in range(per_frame):
+            oid = f"obj{(f + k) % n_objects}"
+            if per_frame > 2 and k == per_frame - 1:
+                outcome, obj, pw, pc = "no_p_cam", None, None, None
+            elif oid in seen:
+                outcome, obj = "matched", oid
+                pw, pc = [float((f + k) % n_objects), 0.5, 1.0], [0.1 * k, 0.0, 2.0 + 0.1 * f]
+            else:
+                outcome, obj = "created", oid
+                pw, pc = [float((f + k) % n_objects), 0.5, 1.0], [0.1 * k, 0.0, 2.0 + 0.1 * f]
+                seen.add(oid)
+            rng = (sum(v * v for v in pc) ** 0.5) if pc else None
+            rows.append({
+                "kind": "obs", "timestamp": 200.0 + f, "frame_seq": f + 1, "t_sensor_ns": ts, "epoch": 1,
+                "is_keyframe": (f % 5 == 0), "lane": "fifo", "keyframe_origin": ("minted" if f % 5 == 0 else None),
+                "rx_seq": f + 1, "cam_t_wc": [0.0, 0.0, 0.0], "cam_q_wc_xyzw": [0.0, 0.0, 0.0, 1.0],
+                "cand_idx": k, "outcome": outcome, "object_id": obj, "p_world": pw, "p_cam": pc, "range_m": rng,
+                "view_bin": (k % 3 if pc else None),
+                "cos_sim": (cos if outcome == "matched" else None), "dist_m": (dist if outcome == "matched" else None),
+                "px_err": (5.0 if outcome == "matched" else None),
+                "n_nearby": (2 if outcome == "matched" else 0), "n_gate_survivors": (1 if outcome == "matched" else 0),
+                "max_cos": (cos if outcome == "matched" else None),
+                "label_topk": [["mug", 0.8], ["cup", 0.1]], "priority": 0.5 + 0.01 * k,
+                "mask": {"area_px": 1200, "bbox": [10, 10, 50, 50], "coverage": 0.6, "border_fraction": 0.0,
+                         "depth_valid": 0.9, "depth_p50": (pc[2] if pc else None), "depth_spread": 0.05,
+                         "planar_inlier_pct": None, "planar_rms_m": None, "centroid_px": [30.0, 30.0]},
+            })
+    return rows

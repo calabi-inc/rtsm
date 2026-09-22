@@ -78,6 +78,20 @@ additive):
             (source, t_sensor_ns) (zeromq: one line per rtabmap.tracking_pose,
             tracking_state "not_available", never for kf_pose). Ledger kinds
             are excluded from the A/A comparator below by kind.
+  obs       LEDGER (P2 stage B): one per CANDIDATE the associator looked at on
+            a processed frame (pipeline thread, written right after
+            association), so per frame #obs == the frame line's
+            scoring.n_selected. outcome = matched | created | spawn_capped |
+            no_p_cam | no_embedding | create_failed. Carries the RAW
+            measurement before any memory smoothing: p_world = T_wc @ p_cam as
+            the associator computed it, p_cam / range_m, the WM's own view_bin
+            for that direction, the winning match's residuals (cos_sim, dist_m,
+            px_err) plus n_nearby / n_gate_survivors / max_cos so a spawn can
+            be audited against the gates (matched_without_scoring marks a
+            match the associator's fallback path made without gating this
+            candidate: no residuals), label_topk, priority, the MaskStats
+            numbers, and the frame context (ids, epoch, lane, keyframe origin,
+            camera pose). Join to `frame` / `dequeue` on t_sensor_ns.
 
 A/A comparator contract: compare the receiver and dequeue streams PER (KIND,
 SOURCE) as ordered sequences of (frame_seq, t_sensor_ns, decision/outcome,
@@ -151,7 +165,16 @@ DQ_REASON_POSE_CONVERSION = "pose_conversion_failed"
 LEDGER_SCHEMA = 1
 LEDGER_FORMATS = ("jsonl", "parquet")
 KIND_POSE = "pose"
-LEDGER_KINDS = (KIND_POSE,)
+KIND_OBS = "obs"
+LEDGER_KINDS = (KIND_POSE, KIND_OBS)
+# Observation outcomes (the associator's six exits per candidate)
+OBS_MATCHED = "matched"
+OBS_CREATED = "created"
+OBS_SPAWN_CAPPED = "spawn_capped"       # per-cell spawn cap hit (only when a caller passes the counter)
+OBS_NO_P_CAM = "no_p_cam"               # no camera-frame centroid (depth missing under the mask)
+OBS_NO_EMBEDDING = "no_embedding"       # embeddings on, candidate has none (crop / encode failed)
+OBS_CREATE_FAILED = "create_failed"     # WorkingMemory.create_object returned None
+OBS_OUTCOMES = (OBS_MATCHED, OBS_CREATED, OBS_SPAWN_CAPPED, OBS_NO_P_CAM, OBS_NO_EMBEDDING, OBS_CREATE_FAILED)
 # tracking_state values as the receivers see them (ARKit header strings;
 # ZeroMQ has none and writes TS_NOT_AVAILABLE on every line).
 TS_NORMAL = "normal"
@@ -227,6 +250,39 @@ class PoseEvent:
     depth_valid_frac: Optional[float] = None  # pre-confidence-filter finite fraction; None when depth was not decoded
     conf_hist: Optional[List[int]] = None     # counts of confidence 0 / 1 / 2 over the raw map; None without a map
     kind: str = "pose"
+
+
+@dataclass
+class ObservationEvent:
+    """One line per candidate the associator looked at (P2 observation ledger, schema 1)."""
+    timestamp: float                          # time.monotonic() at the write (after association)
+    frame_seq: Optional[int]
+    t_sensor_ns: Optional[int]                # join key to the frame / dequeue lines
+    epoch: Optional[int]
+    is_keyframe: bool
+    lane: Optional[str]                       # IngestMeta.lane (None under the legacy queue)
+    keyframe_origin: Optional[str]            # minted | source | None
+    rx_seq: Optional[int]
+    cam_t_wc: Optional[List[float]]           # the packet's post-flip camera pose
+    cam_q_wc_xyzw: Optional[List[float]]
+    cand_idx: int                             # mask index in the segmentation output (joins ScoringTrace.mask_idx)
+    outcome: str                              # one of OBS_OUTCOMES
+    object_id: Optional[str] = None           # matched or created id
+    p_world: Optional[List[float]] = None     # RAW world point (T_wc @ p_cam), before any EMA
+    p_cam: Optional[List[float]] = None       # camera-frame centroid of the mask
+    range_m: Optional[float] = None           # |p_cam|
+    view_bin: Optional[int] = None            # the WM's bin for p_cam's direction
+    cos_sim: Optional[float] = None           # winning match's cosine (matched only)
+    dist_m: Optional[float] = None            # winning match's 3-D distance (matched only)
+    px_err: Optional[float] = None            # winning match's reprojection error (matched only; 0 without intrinsics)
+    n_nearby: int = 0                         # objects the index returned around p_world
+    n_gate_survivors: int = 0                 # of those, how many passed the distance / z / reprojection gates
+    max_cos: Optional[float] = None           # best cosine seen among scored survivors, passed or not
+    matched_without_scoring: bool = False     # matched via a stale best_id (associator fallback path; residuals absent)
+    label_topk: Optional[List[List[Any]]] = None   # [[label, score], ...] (detection label first)
+    priority: float = 0.0
+    mask: Optional[Dict[str, Any]] = None     # MaskStats numbers (area_px, bbox, coverage, ..., centroid_px)
+    kind: str = "obs"
 
 
 def _pyarrow_available() -> bool:

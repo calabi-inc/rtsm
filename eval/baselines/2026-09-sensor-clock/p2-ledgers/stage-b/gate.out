@@ -1,0 +1,15 @@
+== B_on rc=0 ==
+== B_off rc=0 ==
+B_on: (124, 65) frames 53 sha ad6f71a5b89c8506 | kinds {'meta': 1, 'pose': 240, 'receiver': 240, 'dequeue': 86, 'obs': 695, 'frame': 53} | ledgers {'enabled': True, 'schema': 1, 'format': 'jsonl'}
+   vs B1: multiset IDENTICAL | dequeue identical (86) | receiver identical (240)
+B_off: (124, 65) frames 53 sha ad6f71a5b89c8506 | kinds {'meta': 1, 'receiver': 240, 'dequeue': 86, 'frame': 53} | ledgers {'enabled': False}
+   vs B1: multiset IDENTICAL | dequeue identical (86) | receiver identical (240)
+2. B_off has no obs: True | B_on obs 695 pose 240 -> True
+3. matched obs 408 == frame sum 408 | created obs 279 == 279 | orphan obs frames 0 | per-frame #obs != n_selected: 0 [] | frames 53 | outcomes {'created': 279, 'matched': 408, 'no_p_cam': 8} -> True
+4. gates cos_min 0.9 gate_dist 0.5 gate_px 60.0: scored matches violating 0 of 403 | created-with-survivors violating 0 of 93 | matched_without_scoring (fallback stale best_id, the associator flaw the ledger exposes) 5 of 408, carrying residuals 0 -> True
+5. text messages in replay 0 | objects checked 124 (skipped 0: no obs / evicted) | outside bbox 0 [] | hits==1 mismatches 0 [] -> True
+6. view-bin sets: checked 124 objects (0 by key set, 124 by count), mismatches 0 [] -> True
+info: summary n_obs 695 objects_seen 279 created 279 matched/object p50 2.0 max 15.0 | cos p50 0.94571 p95 0.980444 | dist p50 0.035694 p95 0.138268 | px_err p50 11.345532 | range p50 2.600111 p95 3.586879 | bins {'11': 491, '12': 196} | |p_cam.z - depth_p50| < 0.5 m: 100.00% of 687
+info: ledger_ms p50 1.0167999998884625 p95 1.30141999998159 | t_total mean on 217.7 / off 217.0 ms (ratio 1.003) | events.jsonl on 1177177 B / off 127035 B -> 1339 B per obs line (net of the 240 pose lines at 497 B)
+HARD GATE: PASS | {'p1': True, 'p2': True, 'p3': True, 'p4': True, 'p5': True, 'p6': True}
+P2B_GATE_DONE
