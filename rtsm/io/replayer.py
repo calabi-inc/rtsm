@@ -50,6 +50,7 @@ class ReplayReceiver:
         event_sink: Optional[callable] = None,
         throttle_clock: str = "wall",
         pose_sink: Optional[callable] = None,
+        ledger_sink: Optional[callable] = None,
     ) -> None:
         self._recording_dir = os.path.abspath(recording_dir)
         self._ingest_q = ingest_queue
@@ -97,6 +98,8 @@ class ReplayReceiver:
             # Receive-time robot pose under replay too (every tracking-normal
             # frame), so replay-based pose-freshness checks mean something.
             pose_sink=pose_sink,
+            # P2 pose ledger (PoseEvent per recorded frame, source "replay").
+            ledger_sink=ledger_sink,
         )
 
         self._replay_speed = max(0.1, replay_speed)  # <1 = slower, >1 = faster

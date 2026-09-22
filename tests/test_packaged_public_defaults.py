@@ -109,3 +109,14 @@ def test_packaged_visualization_is_opt_in_and_tsdf_is_off():
     demo = load_config("demo_config.yaml")
     assert demo["visualization"]["enable"] is True
     assert demo["visualization"]["tsdf"]["enable"] is False
+
+
+def test_packaged_diagnostics_and_ledgers_are_off():
+    """P2 (2026-09-21): the frame-flow trace and the ledgers are opt-in in both
+    packaged bases; the ledger format defaults to JSONL (Parquet needs pyarrow)."""
+    for name in ("rtsm.yaml", "demo_config.yaml"):
+        cfg = load_config(name)
+        d = cfg["diagnostics"]
+        assert d["enabled"] is False, name
+        assert d["ledgers"] is False, name
+        assert d["ledger_format"] == "jsonl", name

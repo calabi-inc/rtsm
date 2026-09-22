@@ -448,6 +448,12 @@ diagnostics:
   event_log_path: null            # null = auto: eval_output/<YYYYMMDD_HHMMSS>/events.jsonl
                                   # "my_dir/" = auto-name inside that dir
                                   # "my_dir/run01.jsonl" = exact path (overwrites with warning if exists)
+  # P2 ledgers (2026-09): extra line kinds in the SAME file for `rtsm eval` and
+  # offline analysis; read only when enabled is true. pose = one line per sensor
+  # frame at the receiver (tracking-limited frames included), joined to the
+  # receiver line on rx_seq; ~0.4 KB per frame. Off = one null check per frame.
+  ledgers: false
+  ledger_format: jsonl            # jsonl | parquet (converted at close; needs pyarrow: pip install "rtsm[eval]")
 
 # -------------------- Runtime --------------------
 logging:
