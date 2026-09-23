@@ -13,7 +13,9 @@ Current scope:
   (schema_version 3, ledger schema 1): `pose` (stage A) -- one line per
   sensor frame at the receiver, tracking-limited frames included; `obs`
   (stage B) -- one line per candidate the associator looked at, with the
-  raw measurement and the association outcome.
+  raw measurement and the association outcome; `view` (stage C) -- one line
+  per processed frame listing the live objects in the camera frustum before
+  association (expected vs observed depth). Schema 1 frozen at G2-C.
 - ledger: reader + rollups over that file (read_events, by_kind,
   pose_health, to_parquet) and the `python -m rtsm.evaluation.ledger` CLI.
 """

@@ -3,7 +3,7 @@
 RTSM can write one append-only JSONL file per run describing what happened to every frame. It is off by default and costs nothing when off. Two things live in that file:
 
 - the **frame-flow trace** (`receiver`, `dequeue`, `frame` lines): where each frame went and why — the record the determinism gates compare between runs;
-- the **ledgers** (`pose` and `obs` today; `view` follows): the raw per-frame and per-object facts `rtsm eval` reads, kept before the working memory smooths them away.
+- the **ledgers** (`pose`, `obs`, `view`): the raw per-frame and per-object facts `rtsm eval` reads, kept before the working memory smooths them away.
 
 ```yaml
 diagnostics:
@@ -51,8 +51,8 @@ The full definitions, including the A/A comparator contract, are in the module d
 
 ## Ledger schema 1 — `pose`
 
-!!! note "In progress"
-    Schema 1 is frozen when the last ledger kind (`view`) lands. Until then fields are only added, never renamed.
+!!! note "Frozen"
+    Ledger schema 1 (`pose`, `obs`, `view`) is frozen as of P2 stage C. Later changes add fields or kinds and bump the `ledgers.schema` number in the meta line; nothing is renamed or removed.
 
 One line per **sensor frame the receiver saw**, at input rate. Websocket and replay write it at two points of the parser: in the tracking-state filter, *before* a non-normal frame is dropped, and for frames that pass the filter right after the depth decode — before the keyframe rule, the throttle and the queue admission. So throttled, refused and tracking-limited frames are all in it. ZeroMQ writes one line per `rtabmap.tracking_pose` message (never for `kf_pose`).
 
@@ -105,13 +105,33 @@ One line per **candidate the associator looked at**, on every processed frame, w
 | `cos_sim`, `dist_m`, `px_err` | float? | the winning match's residuals (`matched` only; `px_err` is 0 without intrinsics) |
 | `n_nearby`, `n_gate_survivors`, `max_cos` | | audit counters: objects the index returned, how many passed the distance / z / reprojection gates, the best cosine seen among them (passed or not) |
 | `matched_without_scoring` | bool | the associator's "scan all objects when the index returns nothing" fallback matched this candidate to the previous candidate's object without gating or scoring it — a known flaw the ledger exposes (no residuals on such lines) |
-| `label_topk` | [[str, float]] | detection label first, then the vocabulary classifier's |
+| `label_topk` | [{label, score}] | detection label first, then the vocabulary classifier's (records rather than pairs so Parquet can type the column) |
 | `priority` | float | the scoring priority that selected this candidate |
 | `mask` | dict | `area_px`, `bbox`, `coverage`, `border_fraction`, `depth_valid`, `depth_p50`, `depth_spread`, `planar_inlier_pct`, `planar_rms_m`, `centroid_px` (RGB pixel space) |
 
 Invariants a reader can check: every `matched` line without `matched_without_scoring` has `cos_sim ≥ assoc.cos_min` and `dist_m ≤ assoc.gate_dist_base_m`; a `created` line with `n_gate_survivors > 0` has `max_cos < assoc.cos_min`; the working memory's position of any object is a convex combination of its `created` and `matched` `p_world` values, so it lies inside their bounding box (absent pose corrections).
 
-`rtsm.evaluation.ledger.observation_summary(rows)` returns outcome counts, lines per frame, matched observations per object, residual and range statistics, and the view-bin coverage — the inputs to the `rtsm eval` metrics.
+`rtsm.evaluation.ledger.observation_summary(rows)` returns outcome counts, lines per frame, matched observations per object, residual and range statistics, the view-bin coverage, and the view/obs join below — the inputs to the `rtsm eval` metrics.
+
+## Ledger schema 1 — `view`
+
+One line per **processed frame**, written on the pipeline thread **before association**, so it lists the memory this frame was matched against: every live working-memory object whose stored position projects inside the RGB image (camera depth > 0.05 m). Objects created on the frame are never in it.
+
+| field | type | meaning |
+|---|---|---|
+| `frame_seq`, `t_sensor_ns`, `epoch`, `is_keyframe` | | the frame; `t_sensor_ns` joins the `frame` and `obs` lines |
+| `frustum_model` | str | `v1_occlusion_agnostic`: an object behind a wall but inside the image is listed; nothing here judges visibility |
+| `rgb_hw`, `depth_hw` | [2] | the image the pixels refer to and the depth map sampled (`null` without depth) |
+| `n_live` | int | working-memory objects considered |
+| `n_in_frustum` | int | length of `objects` |
+| `objects` | list | per in-frustum object: `id`, `confirmed`, `hits`, `stability`, `label_primary`, `u`, `v` (RGB pixels), `expected_depth` (camera z of the stored position), `observed_depth` (NaN-aware median of a 3×3 window of the frame's depth map at that pixel, after the receiver's confidence filter; `null` when nothing finite) |
+| `view_ms` | float | cost of the projection and sampling |
+
+The projection is the associator's own (`_project_px`) vectorised and tested against it point by point on random poses (`tests/evaluation/test_frustum.py`); the RGB→depth pixel mapping is the mask stage's. Invariants: an object matched on a frame should appear in that frame's `objects` (the reprojection gate allows a margin, so a small fraction can sit just outside the image); a created one never does.
+
+### Frame outcomes
+
+`rtsm.evaluation.ledger.frame_outcomes(rows)` joins the `receiver`, lane-drop and `dequeue` lines into one outcome per sensor frame, precedence dequeue > lane drop > receiver: `processed`, `gate_rejected:<reason>`, `frame_rejected:<dark|flat|depth>`, `dropped:<reason>`, `throttled`, `tracking_state`, `malformed`, `parse_error`, `duplicate_ts`, `no_camera_frame`, or `enqueued` (still queued at shutdown). `outcome_histogram(rows)` counts them; `summarize` prints it.
 
 ## Parquet
 

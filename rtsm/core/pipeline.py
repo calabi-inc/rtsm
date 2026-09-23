@@ -27,8 +27,9 @@ from rtsm.core.clock import Clock, WallClock
 from rtsm.evaluation.event_log import (
     DQ_DROPPED, DQ_FRAME_REJECTED, DQ_GATE_REJECTED, DQ_PROCESSED,
     DQ_REASON_GATE_ERROR, DQ_REASON_KEYFRAME, DQ_REASON_NO_POSE, DQ_REASON_POSE_CONVERSION,
-    DequeueEvent, EventLogWriter, FrameEvent, ObservationEvent, summarize_sources,
+    DequeueEvent, EventLogWriter, FrameEvent, ObservationEvent, ViewEvent, summarize_sources,
 )
+from rtsm.core.frustum import FRUSTUM_MODEL_V1, frustum_view
 
 logger = logging.getLogger(__name__)
 
@@ -481,6 +482,14 @@ class Pipeline:
         frame_id = None
         if pkt is not None and pkt.time.seq is not None:
             frame_id = f"ws_{pkt.time.seq}"
+        # P2 view ledger: the live objects in this frame's frustum, BEFORE
+        # association so the list is the memory this frame was matched against
+        # (objects created below are never in it).
+        t_view_start = time.perf_counter()
+        if self._event_log.ledgers_enabled:
+            self._write_view_line(pkt, snap)
+        t_view_end = time.perf_counter()
+
         # P2 observation ledger: the associator reports every candidate's exit
         # through on_observation; the records are written as `obs` lines after
         # association (same thread), with this packet's frame context.
@@ -664,6 +673,7 @@ class Pipeline:
                         "clip": (t_clip_end - t_clip_start) * 1000.0,
                         "association": (t_assoc_end - t_assoc_start) * 1000.0,
                         "ledger": (t_ledger_end - t_ledger_start) * 1000.0,
+                        "view": (t_view_end - t_view_start) * 1000.0,
                         "total": (t_assoc_end - t_step_start) * 1000.0,
                     },
                 ))
@@ -672,6 +682,42 @@ class Pipeline:
                 logger.debug("event log write failed", exc_info=True)
 
     # -------- internals --------
+    def _write_view_line(self, pkt: Optional[FramePacket], snap: Optional[Snapshot]) -> None:
+        """P2 view ledger: one `view` line per processed frame with the live WM
+        objects whose stored position projects inside this frame (see
+        rtsm/core/frustum.py). Called BEFORE association. Requires a camera
+        pose and intrinsics on the snapshot and a working memory; otherwise
+        writes nothing. Never raises into the processing path."""
+        if not self._event_log.ledgers_enabled or pkt is None or snap is None or self.working_mem is None:
+            return
+        T_cw = getattr(snap, "pose_cam_T_world", None)
+        intr = getattr(snap, "intrinsics", None) or {}
+        if T_cw is None or not all(k in intr for k in ("fx", "fy", "cx", "cy")):
+            return
+        try:
+            t0 = time.perf_counter()
+            rgb_hw = [int(snap.rgb.shape[0]), int(snap.rgb.shape[1])]
+            depth = snap.depth_m                     # the packet's depth AFTER the receiver's confidence filter
+            objs = self.working_mem.iter_objects()
+            entries, n_live = frustum_view(objs, T_cw, intr, rgb_hw, depth)
+            view_ms = (time.perf_counter() - t0) * 1000.0
+            self._event_log.write(ViewEvent(
+                timestamp=time.monotonic(),
+                frame_seq=(int(pkt.time.seq) if pkt.time.seq is not None else None),
+                t_sensor_ns=(int(pkt.time.t_sensor_ns) if pkt.time.t_sensor_ns is not None else None),
+                epoch=(int(pkt.frame_epoch) if getattr(pkt, "frame_epoch", None) is not None else None),
+                is_keyframe=bool(pkt.is_keyframe),
+                frustum_model=FRUSTUM_MODEL_V1,
+                rgb_hw=rgb_hw,
+                depth_hw=([int(depth.shape[0]), int(depth.shape[1])] if depth is not None else None),
+                n_live=int(n_live),
+                n_in_frustum=len(entries),
+                objects=entries,
+                view_ms=round(view_ms, 3),
+            ))
+        except Exception:
+            logger.debug("view ledger: line skipped", exc_info=True)
+
     def _write_obs_lines(self, pkt: Optional[FramePacket], records: List[Dict[str, Any]]) -> None:
         """P2 observation ledger: one `obs` line per associator record, with the
         frame context from the packet (ids, epoch, lane, keyframe origin, the
@@ -726,7 +772,7 @@ class Pipeline:
                     n_gate_survivors=int(rec.get("n_gate_survivors", 0) or 0),
                     max_cos=(float(rec["max_cos"]) if rec.get("max_cos") is not None else None),
                     matched_without_scoring=bool(rec.get("matched_without_scoring", False)),
-                    label_topk=[[str(l), float(sc)] for l, sc in topk],
+                    label_topk=[{"label": str(l), "score": float(sc)} for l, sc in topk],
                     priority=float(getattr(c, "priority", 0.0) or 0.0),
                     mask=_mask_stats_dict(st),
                 ))

@@ -115,9 +115,51 @@ def obs_rows(n_frames: int, *, per_frame: int = 3, n_objects: int = 4, t0_ns: in
                 "px_err": (5.0 if outcome == "matched" else None),
                 "n_nearby": (2 if outcome == "matched" else 0), "n_gate_survivors": (1 if outcome == "matched" else 0),
                 "max_cos": (cos if outcome == "matched" else None),
-                "label_topk": [["mug", 0.8], ["cup", 0.1]], "priority": 0.5 + 0.01 * k,
+                "label_topk": [{"label": "mug", "score": 0.8}, {"label": "cup", "score": 0.1}], "priority": 0.5 + 0.01 * k,
                 "mask": {"area_px": 1200, "bbox": [10, 10, 50, 50], "coverage": 0.6, "border_fraction": 0.0,
                          "depth_valid": 0.9, "depth_p50": (pc[2] if pc else None), "depth_spread": 0.05,
                          "planar_inlier_pct": None, "planar_rms_m": None, "centroid_px": [30.0, 30.0]},
             })
+    return rows
+
+
+def view_rows(n_frames: int, *, ids_per_frame: Sequence[Sequence[str]] = (), t0_ns: int = 1_000_000_000,
+              frame_dt_s: float = 1.0, n_live: int = 4, expected: float = 2.0, observed: Optional[float] = 2.1) -> List[dict]:
+    """One `view` line per frame; frame f lists ``ids_per_frame[f]`` (default: obj0, obj1)."""
+    rows: List[dict] = []
+    for f in range(n_frames):
+        ids = list(ids_per_frame[f]) if f < len(ids_per_frame) else ["obj0", "obj1"]
+        rows.append({
+            "kind": "view", "timestamp": 199.5 + f, "frame_seq": f + 1, "t_sensor_ns": t0_ns + int(round(f * frame_dt_s * 1e9)),
+            "epoch": 1, "is_keyframe": (f % 5 == 0), "frustum_model": "v1_occlusion_agnostic", "rgb_hw": [12, 16],
+            "depth_hw": [6, 8], "n_live": n_live, "n_in_frustum": len(ids),
+            "objects": [{"id": oid, "confirmed": True, "hits": 2, "stability": 0.8, "label_primary": "mug",
+                         "u": 5.0 + i, "v": 6.0, "expected_depth": expected, "observed_depth": observed} for i, oid in enumerate(ids)],
+            "view_ms": 0.2,
+        })
+    return rows
+
+
+def frame_flow_rows(spec: Sequence[Tuple[str, str, str]], *, source: str = "replay", t0_ns: int = 1_000_000_000) -> List[dict]:
+    """Receiver / lanes / dequeue lines for one frame per spec entry
+    ``(receiver_decision_or_'lanes:<reason>', dequeue_outcome_or_'', reason)``:
+      ('enqueued', 'processed', 'keyframe'), ('enqueued', 'gate_rejected', 'skip'),
+      ('enqueued', 'frame_rejected', 'dark'), ('dropped:throttle', '', ''),
+      ('dropped:queue_full', '', ''), ('lanes:superseded', '', ''), ('enqueued', '', '')  # never dequeued
+    """
+    rows: List[dict] = []
+    for i, (rx, dq, reason) in enumerate(spec):
+        ts = t0_ns + i * 100_000_000
+        base = {"timestamp": 10.0 + i, "frame_seq": i + 1, "t_sensor_ns": ts, "is_keyframe": (i == 0), "rx_seq": i + 1}
+        if rx.startswith("lanes:"):
+            rows.append({"kind": "receiver", "source": source, "decision": "enqueued", "reason": "", **base})
+            rows.append({"kind": "receiver", "source": "lanes", "decision": "dropped", "reason": rx.split(":", 1)[1], **base})
+        elif rx.startswith("dropped:"):
+            rows.append({"kind": "receiver", "source": source, "decision": "dropped", "reason": rx.split(":", 1)[1], **base})
+        else:
+            rows.append({"kind": "receiver", "source": source, "decision": "enqueued", "reason": "", **base})
+        if dq:
+            rows.append({"kind": "dequeue", "timestamp": 10.5 + i, "frame_seq": i + 1, "t_sensor_ns": ts,
+                         "is_keyframe": (i == 0), "queue_wait_s": 0.01, "queue_depth": 0, "outcome": dq, "reason": reason,
+                         "clock_s": 100.0 + i})
     return rows
