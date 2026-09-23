@@ -19,11 +19,15 @@ This module deliberately does not import WM or ObjectIndex types — they are du
 
 from __future__ import annotations
 from dataclasses import dataclass
-from typing import List, Optional, Tuple, Dict, Any
+from typing import List, Optional, Tuple, Dict, Any, Callable
 import logging
 import numpy as np
 
 logger = logging.getLogger(__name__)
+
+from rtsm.evaluation.event_log import (
+    OBS_CREATE_FAILED, OBS_CREATED, OBS_MATCHED, OBS_NO_EMBEDDING, OBS_NO_P_CAM, OBS_SPAWN_CAPPED,
+)
 
 # ---------- local observation envelope passed to WM.update_object ----------
 
@@ -88,16 +92,31 @@ class Associator:
     def __init__(self, cfg: Dict[str, Any]) -> None:
         self.cfg = cfg
 
-    def update_with_candidates(self, cands, snap, wm, index, *, per_cell_spawn_counter: Optional[Dict[Tuple[int, int, int] | Tuple[int, int], int]] = None, is_keyframe: bool = False, frame_id: Optional[str] = None) -> Dict[str, int]:
+    def update_with_candidates(self, cands, snap, wm, index, *, per_cell_spawn_counter: Optional[Dict[Tuple[int, int, int] | Tuple[int, int], int]] = None, is_keyframe: bool = False, frame_id: Optional[str] = None, on_observation: Optional[Callable[[Dict[str, Any]], None]] = None) -> Dict[str, int]:
         """Process a batch of Candidates for one Snapshot.
         - cands: iterable of Candidate (duck-typed: .stats.centroid_cam, .emb_vis, .stats.centroid_px, .priority)
         - snap: Snapshot (duck-typed: .pose_cam_T_world [4x4], .intrinsics {fx,fy,cx,cy})
         - wm: WorkingMemory-like (duck-typed)
         - index: ObjectIndex-like (duck-typed)
         - per_cell_spawn_counter: optional dict to enforce per-cell spawn cap per trigger
+        - on_observation: P2 observation ledger hook. Called ONCE per candidate
+          with a dict {cand, outcome, object_id?, p_world?, p_cam?, cos_sim?,
+          dist_m?, px_err?, n_nearby, n_gate_survivors, max_cos?} at every exit
+          (matched / created / spawn_capped / no_p_cam / no_embedding /
+          create_failed). Observes only: it never changes a decision, and an
+          exception inside it is logged, not raised. None (the default) costs
+          nothing.
         """
         if not cands:
             return {"matched": 0, "created": 0}
+
+        def _notify(**rec: Any) -> None:
+            if on_observation is None:
+                return
+            try:
+                on_observation(rec)
+            except Exception:  # noqa: BLE001 -- a ledger hook must never break association
+                logger.debug("[assoc] on_observation failed", exc_info=True)
 
         assoc_cfg = self.cfg.get('assoc', {})
         rings = int(assoc_cfg.get('rings', 1))
@@ -162,11 +181,21 @@ class Associator:
             # require 3D centroid; embedding is optional if use_embeddings=False
             p_cam = getattr(c.stats, 'centroid_cam', None)
             e = getattr(c, 'emb_vis', None)
-            if p_cam is None or (use_embeddings and e is None):
+            if p_cam is None:
+                _notify(cand=c, outcome=OBS_NO_P_CAM)
+                continue
+            if use_embeddings and e is None:
+                _notify(cand=c, outcome=OBS_NO_EMBEDDING, p_cam=p_cam)
                 continue
 
             # world point: transform p_cam (camera frame) to world frame using T_wc
             pw = (T_wc @ np.append(p_cam.astype(np.float32), 1.0))[:3]
+            # per-candidate audit counters for the observation ledger
+            n_nearby = 0
+            n_gate = 0
+            max_cos: Optional[float] = None
+            best_px = 0.0
+            scored = False          # True once THIS candidate went through the gates + scoring
 
             # Diagnostic position logging (enable via assoc.debug_positions: true)
             if bool(assoc_cfg.get('debug_positions', False)):
@@ -209,7 +238,18 @@ class Associator:
                         pass
                 if not cand_ids:
                     best_id = None
+                # NOTE (found by the P2 observation ledger, 2026-09-22): when the
+                # fallback fills cand_ids, this branch ends WITHOUT gating or
+                # scoring them -- best_id keeps the previous candidate's value
+                # (a "match" to that object with its residuals, or None -> a
+                # spawn). Scoring the fallback ids here changes the association
+                # result (session1 anchor 124 -> 123 objects), so the flow is
+                # kept as-is; the ledger records such lines with
+                # matched_without_scoring=True. Decide the fix with a new anchor.
+                n_nearby = len(cand_ids)
             else:
+                n_nearby = len(cand_ids)
+                scored = True
                 # Pre-gate by 3D/Z and (optionally) px reprojection, then keep nearest_m for cosine
                 survivors: List[Tuple[str, float, float]] = []  # (oid, dist, pxerr)
                 px_obs = getattr(c.stats, 'centroid_px', None)
@@ -245,6 +285,7 @@ class Associator:
 
                     survivors.append((oid, dist, px_err))
 
+                n_gate = len(survivors)
                 if not survivors:
                     best_id = None
                 else:
@@ -286,6 +327,7 @@ class Associator:
                             ref = o.emb_mean
                         if use_embeddings and e is not None:
                             cos = float(np.dot(e, ref.astype(np.float32)))
+                            max_cos = cos if max_cos is None else max(max_cos, cos)
                             if cos < cos_min:
                                 continue
                         else:
@@ -296,6 +338,7 @@ class Associator:
                             best_id = oid
                             best_cos = cos
                             best_dist = dist
+                            best_px = px_err
 
             # Snapshot gallery prefers the judgment crop (native-res,
             # unmasked, padded — 2026-08-30); the 224 masked embedding
@@ -323,6 +366,15 @@ class Associator:
                 wm.update_object(best_id, assoc_update)
                 wm.maybe_promote(best_id)
                 matched_count += 1
+                if scored:
+                    _notify(cand=c, outcome=OBS_MATCHED, object_id=best_id, p_world=pw, p_cam=p_cam,
+                            cos_sim=best_cos, dist_m=best_dist, px_err=best_px,
+                            n_nearby=n_nearby, n_gate_survivors=n_gate, max_cos=max_cos)
+                else:
+                    # stale best_id (see the fallback NOTE above): the residuals
+                    # belong to an earlier candidate, so none are recorded.
+                    _notify(cand=c, outcome=OBS_MATCHED, object_id=best_id, p_world=pw, p_cam=p_cam,
+                            n_nearby=n_nearby, n_gate_survivors=0, matched_without_scoring=True)
                 continue
 
             # no match → consider spawn (respect per-cell spawn cap)
@@ -330,6 +382,8 @@ class Associator:
             if per_cell_spawn_counter is not None:
                 count = per_cell_spawn_counter.get(cell, 0)
                 if count >= spawn_cap:
+                    _notify(cand=c, outcome=OBS_SPAWN_CAPPED, p_world=pw, p_cam=p_cam,
+                            n_nearby=n_nearby, n_gate_survivors=n_gate, max_cos=max_cos)
                     continue
                 per_cell_spawn_counter[cell] = count + 1
 
@@ -345,6 +399,11 @@ class Associator:
             # No promote here; will happen after subsequent matches
             if oid is not None:
                 created_count += 1
+                _notify(cand=c, outcome=OBS_CREATED, object_id=oid, p_world=pw, p_cam=p_cam,
+                        n_nearby=n_nearby, n_gate_survivors=n_gate, max_cos=max_cos)
+            else:
+                _notify(cand=c, outcome=OBS_CREATE_FAILED, p_world=pw, p_cam=p_cam,
+                        n_nearby=n_nearby, n_gate_survivors=n_gate, max_cos=max_cos)
 
         # End for each candidate
         return {"matched": matched_count, "created": created_count}
