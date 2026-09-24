@@ -38,6 +38,8 @@ def _sha(a) -> str:
 def _r(v, nd=4):
     if v is None:
         return None
+    if isinstance(v, dict):
+        return {str(k): _r(x, nd) for k, x in v.items()}
     if isinstance(v, (list, tuple, np.ndarray)):
         return [_r(x, nd) for x in v]
     if isinstance(v, (float, np.floating)):
@@ -54,6 +56,8 @@ def _rx_line(e) -> dict:
 
 def _pose_line(p) -> dict:
     d = {k: v for k, v in p.__dict__.items() if k != "timestamp"}
+    if d.get("pose_clock") == "server":
+        d["t_wall_utc_s"] = "server-clock"                      # this process's time.time(): not reproducible
     return _r(d)
 
 
@@ -125,7 +129,8 @@ def run_websocket_stream() -> dict:
     recv = WebSocketReceiver(
         ingest_queue=q, keyframe_every_n=4, nonkf_min_interval_s=0.5, confidence_threshold=2,
         apply_camera_flip=True, throttle_clock="sensor",
-        pose_sink=lambda t, qq, ts, ep, **kw: sink_calls.append([_r(t.tolist()), _r(qq.tolist()), _r(ts, 3), ep, _r(kw)]),
+        pose_sink=lambda t, qq, ts, ep, **kw: sink_calls.append([_r(t.tolist()), _r(qq.tolist()),
+                                                                 (_r(ts, 3) if kw.get("pose_clock") == "sender" else "server-clock"), ep, _r(kw)]),
         event_sink=events.append, ledger_sink=poses.append,
         on_camera_frame=lambda p: cam.append(p.time.seq), on_keyframe=lambda p: kfs.append(p.time.seq),
         on_pose_corrections_batch=lambda b: corr.append(sorted(b)),
@@ -154,7 +159,7 @@ def run_websocket_stream() -> dict:
             recv._note_session("s2"); continue
         if item == "corrections":
             recv._handle_text_message(json.dumps({"type": "pose_corrections", "corrections": {
-                "ws_1": [0.0, 0.0, 0.0, 1.0, 0.1, 0.2, 0.3], "ws_2": list(np.eye(4, dtype=np.float32).flatten(order="F"))}}))
+                "ws_1": [0.0, 0.0, 0.0, 1.0, 0.1, 0.2, 0.3], "ws_2": np.eye(4, dtype=np.float32).flatten(order="F").tolist()}}))
             continue
         try:
             pkt = recv._parse_binary_message(_ws_frame(**item))
@@ -203,22 +208,25 @@ def run_zeromq_stream() -> dict:
     from rtsm.io.zeromq import ZeroMQSubscriber
 
     events, poses, sink_calls, cam = [], [], [], []
-    q = IngestQueue(maxsize=2)
+    q = IngestQueue(maxsize=3)
     sub = ZeroMQSubscriber(camera_endpoint="tcp://127.0.0.1:1", rtabmap_endpoint="tcp://127.0.0.1:1", ingest_queue=q,
                            pose_sink=lambda t, qq, ts, ep, **kw: sink_calls.append([_r(t.tolist()), _r(qq.tolist()), ep, _r(kw)]),
                            event_sink=events.append, ledger_sink=poses.append, throttle_clock="sensor",
                            nonkf_min_interval_s=0.5)
     try:
         base = 10_000                                                       # stamp_ms
-        script = []
-        for i in range(6):                                                  # poses every 33 ms, camera for most
+        script = [("cam", base, 0), ("pose", base, [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]),   # first non-KF: enqueued (1/3)
+                  ("pose", base, [0.0, 0.0, 0.0, 0.0, 0.0, 0.0])]                   # same stamp again: duplicate_ts
+        for i in range(1, 6):                                               # poses every 33 ms: throttled (0.5 s window)
             ms = base + i * 33
             if i != 2:
                 script.append(("cam", ms, i))
             script.append(("pose", ms, [0.1 * i, 0.0, 0.0, 0.0, 0.0, 0.0]))
-        script.append(("pose", base + 5 * 33, [0.5, 0.0, 0.0, 0.0, 0.0, 0.0]))        # duplicate stamp
-        script.append(("cam", base + 600, 6)); script.append(("pose", base + 600, [0.6, 0.0, 0.0, 0.0, 0.0, 0.0]))   # due again
-        script.append(("kf", base + 600, 4)); script.append(("kf_nostamp", None, 5))    # stamped kf + stampless kf (inherits)
+        script.append(("pose", base + 550, [0.55, 0.0, 0.0, 0.0, 0.0, 0.0]))         # due, but no camera frame
+        script.append(("kf", base + 600, 4)); script.append(("cam", base + 600, 6))    # stamped kf BEFORE its camera frame: no_camera_frame
+        script.append(("kf", base + 600, 4))                                           # stamped kf again: enqueued KF (2/3)
+        script.append(("pose", base + 600, [0.6, 0.0, 0.0, 0.0, 0.0, 0.0]))            # non-KF at the same stamp: enqueued (3/3)
+        script.append(("kf_nostamp", None, 5))                                         # stampless kf inherits +600: refusal (q full)
         script.append(("cam", base + 1200, 7)); script.append(("pose", base + 1200, [1.2, 0.0, 0.0, 0.0, 0.0, 0.0]))  # refusal (q full)
         script.append(("bad", None, None))                                              # malformed (3 parts)
         script.append(("cam", 1_000, 8)); script.append(("pose", 1_000, [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]))            # 9 s back -> epoch 1
@@ -246,7 +254,7 @@ def run_zeromq_stream() -> dict:
             "pose_ledger": [_pose_line(p) for p in poses],
             "packets": packets,
             "state": {"frame_epoch": sub._frame_epoch, "kf_stamps_inherited": sub._kf_stamps_inherited,
-                      "last_pose_ts_ns": sub._last_pose_ts_ns, "window": sub.fw.stats() if hasattr(sub.fw, "stats") else None},
+                      "last_pose_ts_ns": sub._last_pose_ts_ns},
         }
     finally:
         sub.close()
