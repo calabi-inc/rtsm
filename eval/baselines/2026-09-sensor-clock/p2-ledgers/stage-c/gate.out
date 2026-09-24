@@ -1,0 +1,24 @@
+== C1_on rc=0 ==
+== C1_off rc=0 ==
+== C2_on rc=0 ==
+== C2_off rc=0 ==
+== C3_on rc=0 ==
+== C3_off rc=0 ==
+C1_on: (124, 65) frames 53 sha ad6f71a5b89c8506 t_total 204.2 ms | kinds {'meta': 1, 'pose': 240, 'receiver': 240, 'dequeue': 86, 'view': 53, 'obs': 695, 'frame': 53} | vs B1: multiset IDENTICAL, dequeue identical (86), receiver identical (240)
+C2_on: (124, 65) frames 53 sha ad6f71a5b89c8506 t_total 202.1 ms | kinds {'meta': 1, 'pose': 240, 'receiver': 240, 'dequeue': 86, 'view': 53, 'obs': 695, 'frame': 53} | vs B1: multiset IDENTICAL, dequeue identical (86), receiver identical (240)
+C3_on: (124, 65) frames 53 sha ad6f71a5b89c8506 t_total 204.6 ms | kinds {'meta': 1, 'pose': 240, 'receiver': 240, 'dequeue': 86, 'view': 53, 'obs': 695, 'frame': 53} | vs B1: multiset IDENTICAL, dequeue identical (86), receiver identical (240)
+C1_off: (124, 65) frames 53 sha ad6f71a5b89c8506 t_total 204.6 ms | kinds {'meta': 1, 'receiver': 240, 'dequeue': 86, 'frame': 53} | vs B1: multiset IDENTICAL, dequeue identical (86), receiver identical (240)
+C2_off: (124, 65) frames 53 sha ad6f71a5b89c8506 t_total 204.2 ms | kinds {'meta': 1, 'receiver': 240, 'dequeue': 86, 'frame': 53} | vs B1: multiset IDENTICAL, dequeue identical (86), receiver identical (240)
+C3_off: (124, 65) frames 53 sha ad6f71a5b89c8506 t_total 203.5 ms | kinds {'meta': 1, 'receiver': 240, 'dequeue': 86, 'frame': 53} | vs B1: multiset IDENTICAL, dequeue identical (86), receiver identical (240)
+1. anchor + sequences on all six -> True
+2. C1_off ledger kinds present [] | C2_off ledger kinds present [] | C3_off ledger kinds present [] | C1_on view 53 frame 53 pose 240 obs 695 join True | C2_on view 53 frame 53 pose 240 obs 695 join True | C3_on view 53 frame 53 pose 240 obs 695 join True -> True
+3. scored matches whose object is in the frame's view: 402/403 = 99.752% (>= 95 %) | created objects already in view: 0 (must be 0) | outside cases (ts, id, dist_m, px_err, normalized u/v & z of the FINAL position): [(683362774151416, '0cafb2b4', 0.174, 55.4, 16)] -> True
+4. matched-in-view depth agreement: |expected - observed| < 0.30 m on 388/390 = 99.5% (>= 80 %) | abs err p50 0.027 p95 0.134 | worst (err, expected, observed, id): [(0.313, 2.751, 2.438, 'e870d78a'), (0.307, 2.793, 2.486, 'e870d78a'), (0.295, 2.76, 2.465, 'e870d78a'), (0.269, 2.515, 2.246, 'e870d78a'), (0.235, 3.62, 3.855, 'db3c3653')] -> True
+5. OVERHEAD: t_total mean ON [204.2, 202.1, 204.6] -> 203.6 ms | OFF [204.6, 204.2, 203.5] -> 204.1 ms | ratio 0.9977 (<= 1.05) | view_ms p50 1.304 p95 2.026 | ledger_ms p50 0.979 p95 1.264 -> True
+6. frame_outcomes(C1_on) {'processed': 53, 'gate_rejected:near_recent_keyframe': 4, 'throttled': 154, 'gate_rejected:skip': 29} == P1 counters {'processed': 53, 'gate_rejected:skip': 29, 'gate_rejected:near_recent_keyframe': 4, 'throttled': 154} -> True (sum 240)
+7. parquet: {'pose': 240, 'obs': 695, 'view': 53, 'receiver': 240, 'dequeue': 86, 'frame': 53} vs jsonl {'pose': 240, 'receiver': 240, 'dequeue': 86, 'view': 53, 'obs': 695, 'frame': 53} -> True
+8. schema: meta 3 ledgers {'enabled': True, 'schema': 1, 'format': 'jsonl'} | view frustum_model all v1 True | LEDGER_KINDS ('pose', 'obs', 'view') -> True (schema 1 FROZEN)
+info: view join: frames 53 | in-frustum per frame p50 32.0 max 63.0 | n_live per frame p50 106.0 max 126.0 | in&matched 398 in&missed 1235 matched-outside 1 created-in-view 0 | matched depth |err| mean 0.044041 p95 0.13385 | view_ms p50 1.086 p95 1.6336
+info: events.jsonl on 1551908 B / off 129115 B | view lines 309216 B total -> 5834 B per view line
+HARD GATE: PASS | {'p1': True, 'p2': True, 'p3': True, 'p4': True, 'p5': np.True_, 'p6': True, 'p7': True, 'p8': True}
+P2C_GATE_DONE

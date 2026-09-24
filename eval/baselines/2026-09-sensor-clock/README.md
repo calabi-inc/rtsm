@@ -350,3 +350,44 @@ max 15; view bins used {11: 491, 12: 196} — 2 of the 24 bins (a forward-lookin
 at the end (155 protos expired — a P3 "duplicate spawn" input); `timing_ms.ledger` p50 1.02 / p95 1.30 ms per processed
 frame; `t_total` mean 217.7 ms (on) vs 217.0 ms (off), +0.3 %; 1 339 B per obs line, events.jsonl 1.18 MB (on) vs
 127 KB (off) for the 46 s replay.
+
+## P2 stage C reproduction (view ledger, frame outcomes, Parquet, schema freeze; 2026-09-23) — `p2-ledgers/stage-c/` — **G2-C = G2 HARD GATE PASS 8/8 — P2 EXIT GATE MET**
+
+Branch `feature/p2-view-ledger` (stacked on stage B, PR #43): `ViewEvent` kind `view` — one line per processed frame,
+written BEFORE association, listing every live WM object whose stored position projects inside the RGB image with
+`u`/`v`, `expected_depth` (camera z of the stored position) and `observed_depth` (NaN-aware 3×3 median of the frame's
+depth map at that pixel, mapped RGB→depth with the mask stage's rule); `rtsm/core/frustum.py` = the associator's
+`_project_px` vectorised, pinned to it point by point on random poses by `tests/evaluation/test_frustum.py` (the
+CLAUDE.md pose-math rule) BEFORE any pipeline wiring; `ledger.frame_outcomes` / `outcome_histogram` (one outcome per
+sensor frame across receiver / lane / dequeue lines); the view/obs join in `observation_summary`; `to_parquet` verified
+end to end; `obs.label_topk` changed from `[[label, score]]` pairs to `[{label, score}]` records because Arrow cannot
+type mixed-type pairs (found by the gate on the real file, not by the unit tests, which were skipped without pyarrow;
+pyarrow is now installed on the dev box and a test converts every kind on realistic rows). **Ledger schema 1
+(`pose`, `obs`, `view`) is FROZEN with this stage**: later changes add fields or kinds and bump `ledgers.schema`.
+`p2c_gate.sh` = six headless dual replays of session1 (C1–C3 on / off, interleaved); `gate.out` is verbatim.
+
+| run | multiset | dequeue / receiver vs B1 | kinds | `t_total` mean |
+|---|---|---|---|---|
+| C1/C2/C3_on | 124/65 @53 `ad6f71a5b89c8506` ×3 | identical ×3 | pose 240, obs 695, view 53 (+ trace) | 204.2 / 202.1 / 204.6 ms |
+| C1/C2/C3_off | 124/65 @53 `ad6f71a5b89c8506` ×3 | identical ×3 | trace only | 204.6 / 204.2 / 203.5 ms |
+
+Predicates: (1) anchor + sequences identical on all six; (2) off runs carry no ledger kind, on runs have `#view == #frame
+== 53` with a 1:1 stamp join, pose 240, obs 695; (3) **logic — the projection agrees with the associator on real data:**
+402 of 403 scored matches have their object in that frame's view list (99.75 %); the one exception matched at
+`px_err` 55.4 px of the 60 px reprojection gate, i.e. the stored position sat just outside the image edge (a 16-hit
+object); 0 of 279 created objects were already in a view list; (4) **logic — depth:** of the 390 matched-in-view pairs
+with an observed depth, 388 agree within 0.30 m (99.5 %; |err| p50 0.027 m, p95 0.134 m); the two beyond are one object
+seen at expected 2.75–2.79 m vs observed 2.44–2.49 m, a stored centroid ≈ 0.3 m behind the visible surface — the
+along-ray / partial-view bias P4's attribution is built to separate; (5) **overhead (the G2 number):** `t_total` mean
+203.6 ms (on) vs 204.1 ms (off), ratio 0.998 — the ledgers' cost is inside run-to-run noise; `timing_ms.view` p50 1.30 /
+p95 2.03 ms and `timing_ms.ledger` p50 0.98 / p95 1.26 ms per processed frame; (6) `frame_outcomes` == the P1 counters
+(processed 53, gate_rejected:skip 29, gate_rejected:near_recent_keyframe 4, throttled 154; 240 frames, none left
+enqueued); (7) Parquet: all six kinds written with row counts equal to the JSONL (1 551 842 B → 264 228 B, 5.9×); (8)
+meta schema_version 3, ledgers schema 1, every view line `v1_occlusion_agnostic`, `LEDGER_KINDS == (pose, obs, view)`.
+
+**Recorded (P3 inputs, occlusion-agnostic model):** in-frustum objects per processed frame p50 32 / max 63 out of a
+live memory p50 106 / max 126; over the 53 frames 398 in-frustum object-views were matched and 1 235 were not (24 % —
+the raw "detection rate over in-frustum views" before visibility from the depth pair is applied); 5 834 B per view line;
+`events.jsonl` 1.55 MB (on) vs 129 KB (off) for the 46 s replay ≈ 34 KB/s with every ledger on at this cadence.
+CPU suite: 841 passed, 1 failed (the RC-car fake-car e2e, pre-existing and flaky: it fails on main and passed on the
+stage-B run of the same tree).

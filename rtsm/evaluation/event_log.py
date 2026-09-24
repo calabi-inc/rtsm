@@ -92,6 +92,19 @@ additive):
             candidate: no residuals), label_topk, priority, the MaskStats
             numbers, and the frame context (ids, epoch, lane, keyframe origin,
             camera pose). Join to `frame` / `dequeue` on t_sensor_ns.
+  view      LEDGER (P2 stage C): one per PROCESSED frame, written BEFORE
+            association (so it lists the objects that existed when the frame
+            arrived, never the ones this frame creates): every live WM object
+            whose stored position projects inside the RGB image (z > 0.05 m),
+            with u / v, expected_depth (camera z of the stored position) and
+            observed_depth (the frame's depth map at that pixel, NaN-aware
+            median of a 3x3 depth-space window; None when nothing finite) --
+            frustum_model "v1_occlusion_agnostic": nothing here judges
+            visibility. n_live is the WM size at the snapshot. Join to `frame`
+            / `obs` on t_sensor_ns: an object matched on this frame should be
+            in its view list; a created one never is.
+            LEDGER SCHEMA 1 IS FROZEN with this kind (G2-C): later changes add
+            fields or kinds and bump LEDGER_SCHEMA; nothing is renamed.
 
 A/A comparator contract: compare the receiver and dequeue streams PER (KIND,
 SOURCE) as ordered sequences of (frame_seq, t_sensor_ns, decision/outcome,
@@ -166,7 +179,8 @@ LEDGER_SCHEMA = 1
 LEDGER_FORMATS = ("jsonl", "parquet")
 KIND_POSE = "pose"
 KIND_OBS = "obs"
-LEDGER_KINDS = (KIND_POSE, KIND_OBS)
+KIND_VIEW = "view"
+LEDGER_KINDS = (KIND_POSE, KIND_OBS, KIND_VIEW)
 # Observation outcomes (the associator's six exits per candidate)
 OBS_MATCHED = "matched"
 OBS_CREATED = "created"
@@ -279,10 +293,29 @@ class ObservationEvent:
     n_gate_survivors: int = 0                 # of those, how many passed the distance / z / reprojection gates
     max_cos: Optional[float] = None           # best cosine seen among scored survivors, passed or not
     matched_without_scoring: bool = False     # matched via a stale best_id (associator fallback path; residuals absent)
-    label_topk: Optional[List[List[Any]]] = None   # [[label, score], ...] (detection label first)
+    label_topk: Optional[List[Dict[str, Any]]] = None   # [{label, score}, ...] (detection label first); records, not pairs, so Parquet can type it
     priority: float = 0.0
     mask: Optional[Dict[str, Any]] = None     # MaskStats numbers (area_px, bbox, coverage, ..., centroid_px)
     kind: str = "obs"
+
+
+@dataclass
+class ViewEvent:
+    """One line per processed frame: the live objects in the camera frustum,
+    computed BEFORE association (P2 view ledger, schema 1)."""
+    timestamp: float                          # time.monotonic() at the write
+    frame_seq: Optional[int]
+    t_sensor_ns: Optional[int]                # join key to the frame / obs lines
+    epoch: Optional[int]
+    is_keyframe: bool
+    frustum_model: str                        # v1_occlusion_agnostic
+    rgb_hw: List[int]                         # the image the pixels refer to
+    depth_hw: Optional[List[int]]             # the depth map sampled (None without depth)
+    n_live: int                               # WM objects considered
+    n_in_frustum: int                         # len(objects)
+    objects: List[Dict[str, Any]]             # {id, confirmed, hits, stability, label_primary, u, v, expected_depth, observed_depth}
+    view_ms: float                            # cost of the projection + sampling
+    kind: str = "view"
 
 
 def _pyarrow_available() -> bool:

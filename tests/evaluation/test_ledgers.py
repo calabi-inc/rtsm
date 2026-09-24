@@ -27,7 +27,7 @@ from rtsm.evaluation import ledger
 from rtsm.evaluation.event_log import (
     LEDGER_SCHEMA, OBS_CREATE_FAILED, OBS_CREATED, OBS_MATCHED, OBS_NO_EMBEDDING, OBS_NO_P_CAM,
     OBS_SPAWN_CAPPED, RX_ENQUEUED, SCHEMA_VERSION, EventLogWriter, ObservationEvent, PoseEvent,
-    resolve_ledger_config,
+    ViewEvent, resolve_ledger_config,
 )
 from rtsm.io.ingest_queue import IngestQueue
 from rtsm.io.websocket import WebSocketReceiver
@@ -678,7 +678,7 @@ class TestObservationLines:
         assert a["view_bin"] == wm.view_bin_id(np.array([0.3, 0.0, 4.0], dtype=np.float32) / np.linalg.norm([0.3, 0.0, 4.0]))
         assert a["cos_sim"] == pytest.approx(0.97) and a["dist_m"] == 0.12 and a["px_err"] == 3.5
         assert (a["n_nearby"], a["n_gate_survivors"], a["max_cos"]) == (2, 1, 0.97) and a["matched_without_scoring"] is False
-        assert a["label_topk"] == [["tissue box", 0.9], ["card box", 0.2]] and a["priority"] == 0.7
+        assert a["label_topk"] == [{"label": "tissue box", "score": 0.9}, {"label": "card box", "score": 0.2}] and a["priority"] == 0.7
         assert a["mask"]["bbox"] == [1, 2, 3, 4] and a["mask"]["centroid_px"] == [8.0, 8.0] and a["mask"]["depth_p50"] == 2.0
         assert "plane_normal_cam" not in a["mask"]
         assert b["outcome"] == "no_p_cam" and b["p_world"] is None and b["range_m"] is None and b["view_bin"] is None
@@ -733,3 +733,168 @@ class TestObservationSummary:
         w.close()
         (r,) = [r for r in _lines(w.path) if r["kind"] == "obs"]
         assert r["outcome"] == "no_embedding" and r["p_world"] is None and r["mask"] is None
+
+
+# ───────────────────────────── stage C: view ledger, frame outcomes ─────────────────────────────
+
+class _ViewObj:
+    def __init__(self, oid, xyz, confirmed=True, hits=2, stability=0.7, label="cup"):
+        self.id = oid; self.xyz_world = np.asarray(xyz, dtype=np.float32); self.confirmed = confirmed
+        self.hits = hits; self.stability = stability; self.label_primary = label
+
+
+class _ViewWM(_WM):
+    def __init__(self, objs):
+        super().__init__()
+        self._objs = list(objs)
+
+    def iter_objects(self):
+        return list(self._objs)
+
+
+class TestViewLine:
+    def _pipe(self, tmp_path, wm, ledgers=True):
+        from rtsm.core.pipeline import Pipeline
+        w = EventLogWriter(enabled=True, configured_path=str(tmp_path / "events.jsonl"), ledgers=ledgers)
+        pipe = Pipeline(cfg={}, segmenter=None, clip=None, working_mem=wm, proximity_index=None, associator=None,
+                        ingest_gate=None, ingest_q=IngestQueue(), sweep_cache=None, event_log=w)
+        return pipe, w
+
+    @staticmethod
+    def _snap(depth):
+        from rtsm.core.pipeline import Snapshot
+        return Snapshot(rgb=np.zeros((12, 16, 3), dtype=np.uint8), depth_m=depth,
+                        intrinsics={"fx": 10.0, "fy": 10.0, "cx": 8.0, "cy": 6.0}, pose_cam_T_world=np.eye(4, dtype=np.float32))
+
+    def test_lists_in_frustum_objects_with_depths_at_a_different_resolution(self, tmp_path):
+        depth = np.full((6, 8), np.nan, dtype=np.float32)
+        depth[3, 4] = 2.5                                                    # under RGB pixel (u 9, v 7)
+        wm = _ViewWM([_ViewObj("front", [0.1, 0.1, 1.0]), _ViewObj("behind", [0.0, 0.0, -1.0]),
+                      _ViewObj("outside", [5.0, 0.0, 1.0])])
+        pipe, w = self._pipe(tmp_path, wm)
+        pipe._write_view_line(TestObservationLines._packet(), self._snap(depth))
+        w.close()
+        (v,) = [r for r in _lines(w.path) if r["kind"] == "view"]
+        assert (v["frame_seq"], v["t_sensor_ns"], v["epoch"], v["is_keyframe"]) == (7, 123_000, 4, True)
+        assert v["frustum_model"] == "v1_occlusion_agnostic" and v["rgb_hw"] == [12, 16] and v["depth_hw"] == [6, 8]
+        assert v["n_live"] == 3 and v["n_in_frustum"] == 1 and v["view_ms"] >= 0.0
+        (e,) = v["objects"]
+        assert e["id"] == "front" and e["u"] == 9.0 and e["v"] == 7.0
+        assert e["expected_depth"] == pytest.approx(1.0) and e["observed_depth"] == pytest.approx(2.5)
+        assert (e["confirmed"], e["hits"], e["stability"], e["label_primary"]) == (True, 2, 0.7, "cup")
+
+    def test_no_pose_or_intrinsics_writes_nothing(self, tmp_path):
+        from rtsm.core.pipeline import Snapshot
+        pipe, w = self._pipe(tmp_path, _ViewWM([_ViewObj("a", [0, 0, 2])]))
+        pipe._write_view_line(TestObservationLines._packet(), Snapshot(rgb=np.zeros((12, 16, 3), np.uint8), depth_m=None,
+                                                                       intrinsics={}, pose_cam_T_world=np.eye(4)))
+        pipe._write_view_line(TestObservationLines._packet(), Snapshot(rgb=np.zeros((12, 16, 3), np.uint8), depth_m=None,
+                                                                       intrinsics={"fx": 1, "fy": 1, "cx": 1, "cy": 1},
+                                                                       pose_cam_T_world=None))
+        w.close()
+        assert [r["kind"] for r in _lines(w.path)] == ["meta"]
+
+    def test_ledgers_off_writes_no_view_line(self, tmp_path):
+        pipe, w = self._pipe(tmp_path, _ViewWM([_ViewObj("a", [0, 0, 2])]), ledgers=False)
+        pipe._write_view_line(TestObservationLines._packet(), self._snap(None))
+        w.close()
+        assert [r["kind"] for r in _lines(w.path)] == ["meta"]
+
+    def test_empty_memory_still_writes_a_line(self, tmp_path):
+        pipe, w = self._pipe(tmp_path, _ViewWM([]))
+        pipe._write_view_line(TestObservationLines._packet(), self._snap(None))
+        w.close()
+        (v,) = [r for r in _lines(w.path) if r["kind"] == "view"]
+        assert v["n_live"] == 0 and v["objects"] == [] and v["depth_hw"] is None
+
+    def test_view_line_is_written_before_association_in_run_one_step(self):
+        """Source-order pin: the view snapshot precedes the association call, so
+        objects created on a frame can never appear in that frame's view."""
+        import inspect
+        from rtsm.core.pipeline import Pipeline
+        src = inspect.getsource(Pipeline.run_one_step)
+        assert src.index("self._write_view_line(") < src.index("update_with_candidates(") < src.index("self._write_obs_lines(")
+
+
+class TestFrameOutcomes:
+    def test_enumeration_and_precedence(self):
+        rows = synth_ledger.meta_row() + synth_ledger.frame_flow_rows([
+            ("enqueued", "processed", "keyframe"),
+            ("enqueued", "gate_rejected", "skip"),
+            ("enqueued", "frame_rejected", "dark"),
+            ("dropped:throttle", "", ""),
+            ("dropped:queue_full", "", ""),
+            ("lanes:superseded", "", ""),
+            ("enqueued", "", ""),
+            ("dropped:tracking_state", "", ""),
+            ("enqueued", "dropped", "pose_conversion_failed"),
+        ])
+        got = ledger.frame_outcomes(rows)
+        vals = [got[("ts", 1_000_000_000 + i * 100_000_000)] for i in range(9)]
+        assert vals == ["processed", "gate_rejected:skip", "frame_rejected:dark", "throttled", "dropped:queue_full",
+                        "dropped:superseded", "enqueued", "tracking_state", "dropped:pose_conversion_failed"]
+        assert ledger.outcome_histogram(rows) == {"processed": 1, "gate_rejected:skip": 1, "frame_rejected:dark": 1,
+                                                  "throttled": 1, "dropped:queue_full": 1, "dropped:superseded": 1,
+                                                  "enqueued": 1, "tracking_state": 1, "dropped:pose_conversion_failed": 1}
+
+    def test_malformed_lines_key_on_rx_seq(self):
+        rows = [{"kind": "receiver", "source": "websocket", "decision": "dropped", "reason": "malformed",
+                 "frame_seq": None, "t_sensor_ns": None, "rx_seq": 3}]
+        assert ledger.frame_outcomes(rows) == {("rx", "websocket", 3): "malformed"}
+
+
+class TestViewJoin:
+    def test_summary_joins_view_and_obs(self):
+        obs = synth_ledger.obs_rows(3, per_frame=2, n_objects=3)       # f0: obj0 created, obj1 created; f1: obj1 matched, obj2 created; f2: obj2 matched, obj0 matched
+        views = synth_ledger.view_rows(3, ids_per_frame=[[], ["obj1", "obj0"], ["obj2", "obj1"]], expected=2.0, observed=2.4)
+        s = ledger.observation_summary(synth_ledger.meta_row() + obs + views)["view"]
+        assert s["n_frames_with_view"] == 3 and s["in_frustum_per_frame"]["max"] == 2
+        assert s["in_frustum_and_matched"] == 2                             # f1 obj1, f2 obj2
+        assert s["in_frustum_and_missed"] == 2                              # f1 obj0 (not matched there), f2 obj1
+        assert s["matched_outside_frustum"] == 1                            # f2 obj0 matched but not listed
+        assert s["created_already_in_view"] == 0
+        assert s["matched_depth_abs_err_m"]["n"] == 2 and s["matched_depth_abs_err_m"]["mean"] == pytest.approx(0.4)
+
+    def test_summarize_cli_includes_frame_outcomes_and_view(self, tmp_path, capsys):
+        w = _writer(tmp_path)
+        for r in synth_ledger.frame_flow_rows([("enqueued", "processed", "keyframe"), ("dropped:throttle", "", "")]) \
+                + synth_ledger.view_rows(1):
+            w.write(r)
+        w.close()
+        assert ledger.main(["summarize", str(w.path)]) == 0
+        out = json.loads(capsys.readouterr().out)
+        assert out["frame_outcomes"] == {"processed": 1, "throttled": 1}
+        assert out["observation_summary"]["view"]["n_frames_with_view"] == 1
+
+    def test_view_event_roundtrip_and_parquet_kind(self, tmp_path):
+        w = _writer(tmp_path)
+        w.write(ViewEvent(timestamp=0.0, frame_seq=1, t_sensor_ns=5, epoch=0, is_keyframe=True,
+                          frustum_model="v1_occlusion_agnostic", rgb_hw=[12, 16], depth_hw=None, n_live=1, n_in_frustum=1,
+                          objects=[{"id": "a", "confirmed": False, "hits": 1, "stability": 0.25, "label_primary": None,
+                                    "u": 1.0, "v": 2.0, "expected_depth": 2.0, "observed_depth": None}], view_ms=0.1))
+        w.close()
+        (v,) = [r for r in _lines(w.path) if r["kind"] == "view"]
+        assert v["objects"][0]["observed_depth"] is None and v["n_in_frustum"] == 1
+        pq = pytest.importorskip("pyarrow.parquet")
+        written = ledger.to_parquet(w.path)
+        assert "view" in written and pq.read_table(written["view"]).num_rows == 1
+
+
+class TestParquetAllKinds:
+    def test_every_ledger_kind_converts_with_realistic_rows(self, tmp_path):
+        """The gate found `obs` untypable (mixed [str, float] pairs) on the real file; this
+        pins every kind's Arrow-typability on rows shaped like the writers' output."""
+        pq = pytest.importorskip("pyarrow.parquet")
+        from rtsm.evaluation.event_log import LEDGER_KINDS
+        w = _writer(tmp_path)
+        for r in (synth_ledger.pose_rows(4, limited=[(1, 1)]) + synth_ledger.obs_rows(3, per_frame=3)
+                  + synth_ledger.view_rows(3, ids_per_frame=[[], ["obj0"], ["obj0", "obj1"]])
+                  + synth_ledger.frame_flow_rows([("enqueued", "processed", "keyframe"), ("dropped:throttle", "", "")])):
+            w.write(r)
+        w.close()
+        written = ledger.to_parquet(w.path)
+        assert set(LEDGER_KINDS) <= set(written), sorted(written)
+        assert pq.read_table(written["obs"]).num_rows == 9 and pq.read_table(written["view"]).num_rows == 3
+        assert pq.read_table(written["pose"]).num_rows == 4 and pq.read_table(written["receiver"]).num_rows == 2
+        topk = pq.read_table(written["obs"]).column("label_topk")[0].as_py()
+        assert topk[0] == {"label": "mug", "score": 0.8}

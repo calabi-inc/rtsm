@@ -15,7 +15,11 @@ NumPy only; pyarrow is imported lazily by ``to_parquet``.
                                                    per (source, epoch) and in total
   observation_summary(rows)      -> dict           outcomes, per-frame and per-object
                                                    counts, match residuals, ranges,
-                                                   view-bin coverage (P3 metric inputs)
+                                                   view-bin coverage, the view/obs join
+                                                   (in-frustum and matched / missed)
+  frame_outcomes(rows)           -> {key: str}     one outcome per sensor frame joined
+                                                   across receiver / lanes / dequeue lines
+  outcome_histogram(rows)        -> Counter        the same, counted
   to_parquet(path, out_dir=None) -> {kind: Path}   one Parquet table per kind
 
 CLI:
@@ -49,7 +53,7 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence
 
 import numpy as np
 
-from rtsm.evaluation.event_log import KIND_OBS, KIND_POSE, LEDGER_KINDS, OBS_CREATED, OBS_MATCHED, TS_NORMAL
+from rtsm.evaluation.event_log import KIND_OBS, KIND_POSE, KIND_VIEW, LEDGER_KINDS, OBS_CREATED, OBS_MATCHED, TS_NORMAL
 
 logger = logging.getLogger(__name__)
 
@@ -285,6 +289,70 @@ def pose_health(rows: Iterable[dict], *, disc_base_m: float = 0.5, disc_rate_mps
     }
 
 
+# ───────────────────────────── frame outcomes ─────────────────────────────
+
+_RX_KEEP_VERBATIM = ("tracking_state", "malformed", "parse_error", "duplicate_ts", "no_camera_frame")
+
+
+def _frame_key(r: dict) -> Any:
+    """Join key of a receiver / lanes / dequeue line: the sensor stamp when the
+    header parsed (unique per frame on every source), else the receiver's
+    rx_seq (malformed lines), else the file position."""
+    ts = _stamp(r)
+    if ts is not None:
+        return ("ts", int(ts))
+    if r.get("rx_seq") is not None:
+        return ("rx", str(r.get("source")), int(r["rx_seq"]))
+    return ("row", id(r))
+
+
+def frame_outcomes(rows: Iterable[dict]) -> Dict[Any, str]:
+    """One outcome string per sensor frame, precedence dequeue > lane drop >
+    receiver decision (a frame is characterised by the furthest point it
+    reached):
+      processed | gate_rejected:<reason> | frame_rejected:<dark|flat|depth> |
+      dropped:<reason> (pose conversion, queue_full, kf_lane_full, superseded,
+      kf_dropped, age, closed) | throttled | tracking_state | malformed |
+      parse_error | duplicate_ts | no_camera_frame | enqueued (still queued
+      at shutdown)."""
+    out: Dict[Any, str] = {}
+    rank: Dict[Any, int] = {}
+
+    def put(key: Any, value: str, level: int) -> None:
+        if rank.get(key, -1) <= level:
+            out[key] = value
+            rank[key] = level
+
+    for r in rows:
+        kind = r.get("kind")
+        if kind == "receiver":
+            key = _frame_key(r)
+            if r.get("source") == "lanes":
+                put(key, f"dropped:{r.get('reason')}", 1)
+            elif r.get("decision") == "enqueued":
+                put(key, "enqueued", 0)
+            else:
+                reason = str(r.get("reason"))
+                if reason == "throttle":
+                    put(key, "throttled", 0)
+                elif reason in _RX_KEEP_VERBATIM:
+                    put(key, reason, 0)
+                else:
+                    put(key, f"dropped:{reason}", 0)
+        elif kind == "dequeue":
+            key = _frame_key(r)
+            outcome = str(r.get("outcome"))
+            if outcome == "processed":
+                put(key, "processed", 2)
+            else:
+                put(key, f"{outcome}:{r.get('reason')}", 2)
+    return out
+
+
+def outcome_histogram(rows: Iterable[dict]) -> Counter:
+    return Counter(frame_outcomes(rows).values())
+
+
 # ───────────────────────────── observation summary ─────────────────────────────
 
 def observation_summary(rows: Iterable[dict]) -> dict:
@@ -301,7 +369,45 @@ def observation_summary(rows: Iterable[dict]) -> dict:
     objects_seen = set(per_object) | {r["object_id"] for r in created if r.get("object_id")}
     per_frame = Counter(r.get("t_sensor_ns") for r in obs)
     bins = Counter(r.get("view_bin") for r in matched + created if r.get("view_bin") is not None)
+    # The view / obs join: for each frame with a `view` line, which in-frustum
+    # objects were matched (seen again), which were missed, and whether any
+    # object created on the frame was already listed (must never happen: the
+    # view precedes association).
+    views = [r for r in rows if r.get("kind") == KIND_VIEW]
+    matched_by_ts: Dict[Any, set] = defaultdict(set)
+    created_by_ts: Dict[Any, set] = defaultdict(set)
+    for r in matched:
+        if r.get("object_id"):
+            matched_by_ts[r.get("t_sensor_ns")].add(r["object_id"])
+    for r in created:
+        if r.get("object_id"):
+            created_by_ts[r.get("t_sensor_ns")].add(r["object_id"])
+    in_and_matched = in_and_missed = matched_outside = created_in_view = 0
+    depth_pairs = []
+    for vw in views:
+        ts = vw.get("t_sensor_ns")
+        ids = {e.get("id") for e in (vw.get("objects") or [])}
+        m = matched_by_ts.get(ts, set())
+        in_and_matched += len(ids & m)
+        in_and_missed += len(ids - m)
+        matched_outside += len(m - ids)
+        created_in_view += len(ids & created_by_ts.get(ts, set()))
+        for e in (vw.get("objects") or []):
+            if e.get("id") in m and e.get("observed_depth") is not None and e.get("expected_depth") is not None:
+                depth_pairs.append(abs(float(e["expected_depth"]) - float(e["observed_depth"])))
+    view_join = {
+        "n_frames_with_view": len(views),
+        "in_frustum_per_frame": _stats(len(vw.get("objects") or []) for vw in views),
+        "n_live_per_frame": _stats(vw.get("n_live") for vw in views),
+        "in_frustum_and_matched": in_and_matched,
+        "in_frustum_and_missed": in_and_missed,
+        "matched_outside_frustum": matched_outside,
+        "created_already_in_view": created_in_view,
+        "matched_depth_abs_err_m": _stats(depth_pairs),
+        "view_ms": _stats(vw.get("view_ms") for vw in views),
+    }
     return {
+        "view": view_join,
         "n_obs": len(obs),
         "outcomes": dict(outcomes),
         "n_matched_without_scoring": sum(1 for r in matched if r.get("matched_without_scoring")),
@@ -363,6 +469,7 @@ def summarize(rows: Sequence[dict]) -> dict:
         "counts": {k: len(v) for k, v in sorted(kinds.items())},
         "pose_health": pose_health(rows),
         "observation_summary": observation_summary(rows),
+        "frame_outcomes": dict(outcome_histogram(rows)),
     }
 
 
