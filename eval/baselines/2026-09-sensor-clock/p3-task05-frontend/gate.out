@@ -1,0 +1,18 @@
+== F_on rc=0 ==
+== F_off rc=0 ==
+== 5. CPU predicates ==
+...                                                                      [100%]
+291 passed in 14.26s
+cpu_rc=0
+F_on: (124, 65) frames 53 sha ad6f71a5b89c8506 t_total 254.5 ms | meta clock=sensor policy=lossless ledgers {'enabled': True, 'schema': 1, 'format': 'jsonl'} | kinds {'meta': 1, 'pose': 240, 'receiver': 240, 'dequeue': 86, 'view': 53, 'obs': 695, 'frame': 53}
+   vs B1: multiset IDENTICAL | dequeue identical (86) | receiver identical (240)
+F_off: (124, 65) frames 53 sha ad6f71a5b89c8506 t_total 266.1 ms | meta clock=sensor policy=lossless ledgers {'enabled': False} | kinds {'meta': 1, 'receiver': 240, 'dequeue': 86, 'frame': 53}
+   vs B1: multiset IDENTICAL | dequeue identical (86) | receiver identical (240)
+1. anchor + sequences on both -> True
+2. F_on vs stage-C C1_on (full lines): receiver 240 vs 240 equal=True first diff None | keys compared ['decision', 'depth_valid_frac', 'frame_count', 'frame_seq', 'is_keyframe', 'kind', 'lane', 'reason', 'rx_seq', 'source', 't_sensor_ns'] | pose 240 vs 240 equal=True first diff None | obs 695 vs 695 | view 53 vs 53 -> True
+3. sources receiver {'replay': 240} pose {'replay': 240} | F_off ledger kinds [] | F_on counts {'receiver': 240, 'dequeue': 86, 'frame': 53, 'pose': 240, 'obs': 695, 'view': 53} | /stats.robot_pose writes/regressions/rejects/clock/epoch (240, 0, 0, 'sender', 0) (240/0/0/sender/0) -> True
+4. pose_health replay/1: n_frames 240 span 40.5194 s sensor_hz 5.8984 | gaps 0 discontinuities 0 limited episodes 0 pose_errors 0 | writes_expected 240 groups 1 -> True
+5. CPU predicates (golden traces + front-end unit tests + ingest suites): rc 0 -> True
+info: t_total mean F_on 254.5 ms / F_off 266.1 ms (single runs, no predicate) | events.jsonl on 1551899 B / off 129150 B
+HARD GATE: PASS | {'p1': True, 'p2': True, 'p3': True, 'p4': True, 'p5': True}
+P3T05_GATE_DONE

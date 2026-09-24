@@ -94,19 +94,24 @@ def test_runner_builds_wires_starts_and_stops_the_ticker(modname, fn):
 # ---------------- P1 task 6: receiver timing comes from lane_cfg, never from io.websocket ----------------
 
 
-@pytest.mark.parametrize("modname,fn,sites,zmq", [("rtsm.demo", "run_demo", 1, 0), ("rtsm.run", "main", 3, 1)])
+@pytest.mark.parametrize("modname,fn,sites,zmq", [("rtsm.demo", "run_demo", 1, 0), ("rtsm.run", "main", 2, 0)])
 def test_runner_receivers_read_timing_from_lane_cfg_not_ws_cfg(modname, fn, sites, zmq):
     """The silent-fallback trap: a leftover ws_cfg.get("keyframe_every_n", 30) would
     keep every default-valued run green. The receivers must take the validated
-    LaneConfig values (run.py: record-only, replay, websocket; + ZeroMQ for the
-    throttle), and the two key names must not be read through `.get()` anywhere
-    in the runner body."""
+    LaneConfig values, and the two key names must not be read through `.get()`
+    anywhere in the runner body. Since P3 task 0.5 the runners build ONE
+    SourceContext for every source (run.py: the record-only receiver + the
+    context = 2 sites; demo.py: the context = 1) and the ZeroMQ pairing window
+    travels as make_source options, so the throttle no longer has a separate
+    ZeroMQ read (zmq = 0); the pair-window reads are pinned unconditionally on
+    run.py below."""
     code = getattr(importlib.import_module(modname), fn).__code__
-    # Exact counts: one read per receiver site (an extra read of the old block cannot hide behind a >=).
+    # Exact counts: one read per site (an extra read of the old block cannot hide behind a >=).
     assert len(_attr_calls_on(code, "lane_cfg", "keyframe_every_n")) == sites
     assert len(_attr_calls_on(code, "lane_cfg", "nonkf_min_interval_s")) == sites + zmq
-    if zmq:
+    if modname == "rtsm.run":
         assert _attr_calls_on(code, "lane_cfg", "pair_window_s") and _attr_calls_on(code, "lane_cfg", "pair_window_frames")
+        assert any("make_source" == x.argval for cc in _codes(code) for x in dis.get_instructions(cc)), "run.main must build its source through sources.make_source"
     # The key names may legitimately remain as constants: a receiver call with
     # many kwargs is compiled through CALL_FUNCTION_EX with a dict of names.
     # What must be gone is reading them through a mapping: `.get("<key>", ...)`.

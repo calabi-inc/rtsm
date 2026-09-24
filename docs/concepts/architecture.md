@@ -66,6 +66,8 @@ Receives RGB-D frames and camera poses from multiple sources:
 - **ZeroMQ** — Intel RealSense D435i + RTAB-Map
 - **Replay** — Recorded sessions for deterministic benchmarking
 
+Each source is a transport adapter that turns bytes into a `RawFrame` (still-encoded payloads + header) or a pose event; the **ingest front-end** (`rtsm/io/ingest_frontend.py`) then runs the one admission chain for all of them — tracking filter, receive-time pose mailbox, keyframe rule, non-keyframe throttle on the ingest clock, lane admission before any pixel is decoded, decode on admit, `FramePacket`, frame-flow trace. New sources register by name (`rtsm/io/sources.py`, the `rtsm.sources` entry-point group); see the [Ingest Sources guide](../guides/ingest-sources.md).
+
 Frames wait in the **ingest lanes** (`rtsm/io/ingest_lanes.py`; `ingest.policy`): live, a small keyframe FIFO drained first plus one non-keyframe slot a newer frame supersedes (`latest`); under replay and evaluation a producer-paced FIFO that never drops (`lossless`); the previous 512-deep tail-drop `IngestQueue` remains as the `legacy` rollback. The **Ingest Gate** selects which frames to process based on keyframe priority and sweep-cache novelty, throttling 30 Hz input to ~1-5 Hz processing.
 
 ### Perception Pipeline

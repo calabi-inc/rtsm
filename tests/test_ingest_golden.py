@@ -118,6 +118,34 @@ def _ws_frame(*, frame_id, timestamp_ns, tracking_state="normal", T_wc=None, uni
     return msg[: len(msg) // 2] if truncate else msg
 
 
+def ws_conf() -> np.ndarray:
+    """The confidence map the websocket stream attaches to frames 1 and 12."""
+    conf = np.zeros((4, 4), dtype=np.uint8); conf.flat[:6] = 2; conf.flat[6:9] = 1
+    return conf
+
+
+def ws_stream() -> list:
+    """The golden websocket stream (module level so tests/test_ingest_frontend.py
+    can push the SAME stream through a bare front-end)."""
+    conf = ws_conf()
+    return [
+        dict(frame_id=1, timestamp_ns=1_000_000_000, conf=conf, rgb_seed=1),           # KF (first)
+        dict(frame_id=2, timestamp_ns=1_100_000_000, rgb_seed=2),                      # non-KF admitted (first)
+        dict(frame_id=3, timestamp_ns=1_200_000_000, rgb_seed=3),                      # throttled (0.1 s)
+        dict(frame_id=4, timestamp_ns=1_300_000_000, tracking_state="limited"),        # tracking drop (pose parses)
+        dict(frame_id=5, timestamp_ns=1_350_000_000, tracking_state="limited", T_wc=[1.0, 2.0]),   # tracking drop, bad pose
+        dict(frame_id=6, timestamp_ns=1_700_000_000, rgb_seed=6),                      # admitted -> queue full? (q holds 2) -> refused
+        dict(frame_id=7, timestamp_ns=1_750_000_000, truncate=True),                   # malformed
+        dict(frame_id=8, timestamp_ns=1_800_000_000, T_wc=[1.0, 2.0]),                 # parse_error (raises)
+        dict(frame_id=9, timestamp_ns=2_400_000_000, rgb_seed=9, unix_ts=0),           # server clock; KF? (count 4)
+        "session:s2",
+        dict(frame_id=10, timestamp_ns=500_000_000, rgb_seed=10),                      # new session: count 1 -> KF, stamps reset
+        dict(frame_id=11, timestamp_ns=600_000_000, rgb_seed=11),                      # non-KF (first after reset)
+        "corrections",
+        dict(frame_id=12, timestamp_ns=1_200_000_000, rgb_seed=12, conf=conf),         # admitted (0.6 s)
+    ]
+
+
 def run_websocket_stream() -> dict:
     """The stream loop's contract, driven by hand: parse -> put -> trace enqueued
     (or the receiver's own refusal path), plus a mid-stream new session and a
@@ -136,23 +164,7 @@ def run_websocket_stream() -> dict:
         on_pose_corrections_batch=lambda b: corr.append(sorted(b)),
     )
     recv._note_session("s1")
-    conf = np.zeros((4, 4), dtype=np.uint8); conf.flat[:6] = 2; conf.flat[6:9] = 1
-    stream = [
-        dict(frame_id=1, timestamp_ns=1_000_000_000, conf=conf, rgb_seed=1),           # KF (first)
-        dict(frame_id=2, timestamp_ns=1_100_000_000, rgb_seed=2),                      # non-KF admitted (first)
-        dict(frame_id=3, timestamp_ns=1_200_000_000, rgb_seed=3),                      # throttled (0.1 s)
-        dict(frame_id=4, timestamp_ns=1_300_000_000, tracking_state="limited"),        # tracking drop (pose parses)
-        dict(frame_id=5, timestamp_ns=1_350_000_000, tracking_state="limited", T_wc=[1.0, 2.0]),   # tracking drop, bad pose
-        dict(frame_id=6, timestamp_ns=1_700_000_000, rgb_seed=6),                      # admitted -> queue full? (q holds 2) -> refused
-        dict(frame_id=7, timestamp_ns=1_750_000_000, truncate=True),                   # malformed
-        dict(frame_id=8, timestamp_ns=1_800_000_000, T_wc=[1.0, 2.0]),                 # parse_error (raises)
-        dict(frame_id=9, timestamp_ns=2_400_000_000, rgb_seed=9, unix_ts=0),           # server clock; KF? (count 4)
-        "session:s2",
-        dict(frame_id=10, timestamp_ns=500_000_000, rgb_seed=10),                      # new session: count 1 -> KF, stamps reset
-        dict(frame_id=11, timestamp_ns=600_000_000, rgb_seed=11),                      # non-KF (first after reset)
-        "corrections",
-        dict(frame_id=12, timestamp_ns=1_200_000_000, rgb_seed=12, conf=conf),         # admitted (0.6 s)
-    ]
+    stream = ws_stream()
     packets, errors = [], []
     for item in stream:
         if item == "session:s2":
