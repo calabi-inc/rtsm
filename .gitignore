@@ -171,3 +171,6 @@ logs/
 
 # Bags converted from recordings (scripts/recording_to_mcap.py): gigabytes, regenerable
 recordings/*_bag/
+
+# External datasets fetched for reader tests (TUM RGB-D bags etc.; see eval/datasets/external-corpus.md)
+recordings/external/
