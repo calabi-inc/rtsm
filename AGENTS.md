@@ -55,7 +55,11 @@ RTSM (Real-Time Spatio-Semantic Memory) is a persistent, queryable spatial memor
 | `rtsm/stores/proximity_index.py` | Spatial index with WM-aware eviction |
 | `rtsm/stores/sweep_policy.py` | TTL + parallax + look-cell novelty gating |
 | `rtsm/models/segmentation/` | All segmenter backends (SAM2, GDINO, FastSAM, YOLOE, dual) |
-| `rtsm/io/websocket.py` | iPhone ARKit WebSocket receiver |
+| `rtsm/io/ingest_frontend.py` | The one ingest chain every source runs (tracking filter → pose mailbox → keyframe rule → throttle → admission → decode on admit → FramePacket → trace); `FrontEndPolicy` per source flavour |
+| `rtsm/io/contracts.py` | Versioned ingest seam: `RawFrame` / `FrameHeader`, `PoseSample`, `TrackingStatus`, `FrameCorrection`, `Source`, `SourceContext` |
+| `rtsm/io/codecs.py` | Encoding-keyed decoders (RGB / depth / confidence / poses / conventions) |
+| `rtsm/io/sources.py` | Source registry: built-ins `websocket` / `zeromq` / `replay` + `rtsm.sources` entry points |
+| `rtsm/io/websocket.py` | iPhone ARKit WebSocket receiver (Lens framing → `RawFrame`; a transport adapter) |
 | `rtsm/io/mcp_embedded.py` | MCP server (SSE transport, 6 tools) |
 | `rtsm/api/server.py` | FastAPI REST API + Prometheus metrics |
 | `config/rtsm.yaml` | All pipeline configuration |

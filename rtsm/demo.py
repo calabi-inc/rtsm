@@ -172,7 +172,8 @@ def run_demo(argv: list[str] | None = None) -> None:
     from rtsm.core.association import Associator
     from rtsm.core.ingest_gate import IngestGate
     from rtsm.stores.sweep_cache import SweepCache
-    from rtsm.io.replayer import ReplayReceiver
+    from rtsm.io.contracts import SourceContext
+    from rtsm.io.sources import make_source
     from rtsm.api.server import create_app, start_server, ResetComponents
     from rtsm.utils.net import get_local_ipv4_addresses
     from rtsm.utils.static_dir import find_static_dir
@@ -257,13 +258,13 @@ def run_demo(argv: list[str] | None = None) -> None:
     # trace lines with source "lanes" + analytics counters.
     ingest_q.set_on_drop(lane_drop_handler(event_sink, latency_analytics, ingest_q))
 
-    # ── Start replay ──
-    replay = ReplayReceiver(
-        recording_dir=demo_dir,
+    # ── Start replay (the replay source on the one ingest front-end) ──
+    replay = make_source("replay", cfg, SourceContext(
         ingest_queue=ingest_q,
-        require_tracking_normal=bool(ws_cfg.get("require_tracking_normal", True)),
+        clock_mode=clock_mode,
         keyframe_every_n=lane_cfg.keyframe_every_n,          # ingest.* (the packaged demo base sets 5 / 0.3)
         nonkf_min_interval_s=lane_cfg.nonkf_min_interval_s,
+        require_tracking_normal=bool(ws_cfg.get("require_tracking_normal", True)),
         confidence_threshold=int(ws_cfg.get("confidence_threshold", 1)),
         apply_camera_flip=bool(vis_cfg.get("apply_camera_flip", False)),
         on_keyframe=vis_server.handle_frame_packet if vis_server else None,
@@ -273,10 +274,9 @@ def run_demo(argv: list[str] | None = None) -> None:
         latency_analytics=latency_analytics,
         event_sink=event_sink,
         ledger_sink=ledger_sink,
-        throttle_clock=clock_mode,
         # Receive-time robot pose under replay (every tracking-normal frame)
         pose_sink=wm.update_robot_pose,
-    )
+    ), recording_dir=demo_dir, replay_speed=1.0)
 
     pipe = Pipeline(
         cfg=cfg,

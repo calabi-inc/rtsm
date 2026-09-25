@@ -1,0 +1,911 @@
+{
+ "packets": [
+  {
+   "confidence": null,
+   "depth": [
+    [
+     8,
+     8
+    ],
+    0,
+    "6356b3ef83e4"
+   ],
+   "depth_valid_frac": null,
+   "frame_epoch": 0,
+   "intr": [
+    5.0,
+    5.0,
+    4.0,
+    4.0,
+    8,
+    8
+   ],
+   "is_keyframe": false,
+   "keyframe_origin": null,
+   "pose": [
+    [
+     0.0,
+     0.0,
+     0.0
+    ],
+    [
+     0.0,
+     0.0,
+     0.0,
+     1.0
+    ]
+   ],
+   "rgb": [
+    [
+     8,
+     8,
+     3
+    ],
+    "b7c571959981"
+   ],
+   "rgb_jpeg": null,
+   "rx_seq": 1,
+   "seq": null,
+   "t_sensor_ns": 10000000000
+  },
+  {
+   "confidence": null,
+   "depth": [
+    [
+     8,
+     8
+    ],
+    0,
+    "a65acc55a6c8"
+   ],
+   "depth_valid_frac": null,
+   "frame_epoch": 0,
+   "intr": [
+    5.0,
+    5.0,
+    4.0,
+    4.0,
+    8,
+    8
+   ],
+   "is_keyframe": true,
+   "keyframe_origin": "source",
+   "pose": [
+    [
+     0.6,
+     0.0,
+     0.0
+    ],
+    [
+     0.0,
+     0.0,
+     0.0,
+     1.0
+    ]
+   ],
+   "rgb": [
+    [
+     8,
+     8,
+     3
+    ],
+    "70842217c202"
+   ],
+   "rgb_jpeg": null,
+   "rx_seq": 10,
+   "seq": null,
+   "t_sensor_ns": 10600000000
+  },
+  {
+   "confidence": null,
+   "depth": [
+    [
+     8,
+     8
+    ],
+    0,
+    "a65acc55a6c8"
+   ],
+   "depth_valid_frac": null,
+   "frame_epoch": 0,
+   "intr": [
+    5.0,
+    5.0,
+    4.0,
+    4.0,
+    8,
+    8
+   ],
+   "is_keyframe": true,
+   "keyframe_origin": "source",
+   "pose": [
+    [
+     0.6,
+     0.0,
+     0.0
+    ],
+    [
+     0.0,
+     0.0,
+     0.0,
+     1.0
+    ]
+   ],
+   "rgb": [
+    [
+     8,
+     8,
+     3
+    ],
+    "70842217c202"
+   ],
+   "rgb_jpeg": null,
+   "rx_seq": 12,
+   "seq": null,
+   "t_sensor_ns": 10600000000
+  }
+ ],
+ "pose_ledger": [
+  {
+   "conf_hist": null,
+   "depth_valid_frac": null,
+   "epoch": 0,
+   "frame_seq": null,
+   "kind": "pose",
+   "mailbox_write": true,
+   "pose_clock": "server",
+   "pose_error": null,
+   "q_wc_xyzw": [
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ],
+   "rx_seq": null,
+   "source": "zeromq",
+   "t_sensor_ns": 10000000000,
+   "t_wall_utc_s": "server-clock",
+   "t_wc": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "tracking_state": "not_available"
+  },
+  {
+   "conf_hist": null,
+   "depth_valid_frac": null,
+   "epoch": 0,
+   "frame_seq": null,
+   "kind": "pose",
+   "mailbox_write": true,
+   "pose_clock": "server",
+   "pose_error": null,
+   "q_wc_xyzw": [
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ],
+   "rx_seq": null,
+   "source": "zeromq",
+   "t_sensor_ns": 10000000000,
+   "t_wall_utc_s": "server-clock",
+   "t_wc": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "tracking_state": "not_available"
+  },
+  {
+   "conf_hist": null,
+   "depth_valid_frac": null,
+   "epoch": 0,
+   "frame_seq": null,
+   "kind": "pose",
+   "mailbox_write": true,
+   "pose_clock": "server",
+   "pose_error": null,
+   "q_wc_xyzw": [
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ],
+   "rx_seq": null,
+   "source": "zeromq",
+   "t_sensor_ns": 10033000000,
+   "t_wall_utc_s": "server-clock",
+   "t_wc": [
+    0.1,
+    0.0,
+    0.0
+   ],
+   "tracking_state": "not_available"
+  },
+  {
+   "conf_hist": null,
+   "depth_valid_frac": null,
+   "epoch": 0,
+   "frame_seq": null,
+   "kind": "pose",
+   "mailbox_write": true,
+   "pose_clock": "server",
+   "pose_error": null,
+   "q_wc_xyzw": [
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ],
+   "rx_seq": null,
+   "source": "zeromq",
+   "t_sensor_ns": 10066000000,
+   "t_wall_utc_s": "server-clock",
+   "t_wc": [
+    0.2,
+    0.0,
+    0.0
+   ],
+   "tracking_state": "not_available"
+  },
+  {
+   "conf_hist": null,
+   "depth_valid_frac": null,
+   "epoch": 0,
+   "frame_seq": null,
+   "kind": "pose",
+   "mailbox_write": true,
+   "pose_clock": "server",
+   "pose_error": null,
+   "q_wc_xyzw": [
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ],
+   "rx_seq": null,
+   "source": "zeromq",
+   "t_sensor_ns": 10099000000,
+   "t_wall_utc_s": "server-clock",
+   "t_wc": [
+    0.3,
+    0.0,
+    0.0
+   ],
+   "tracking_state": "not_available"
+  },
+  {
+   "conf_hist": null,
+   "depth_valid_frac": null,
+   "epoch": 0,
+   "frame_seq": null,
+   "kind": "pose",
+   "mailbox_write": true,
+   "pose_clock": "server",
+   "pose_error": null,
+   "q_wc_xyzw": [
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ],
+   "rx_seq": null,
+   "source": "zeromq",
+   "t_sensor_ns": 10132000000,
+   "t_wall_utc_s": "server-clock",
+   "t_wc": [
+    0.4,
+    0.0,
+    0.0
+   ],
+   "tracking_state": "not_available"
+  },
+  {
+   "conf_hist": null,
+   "depth_valid_frac": null,
+   "epoch": 0,
+   "frame_seq": null,
+   "kind": "pose",
+   "mailbox_write": true,
+   "pose_clock": "server",
+   "pose_error": null,
+   "q_wc_xyzw": [
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ],
+   "rx_seq": null,
+   "source": "zeromq",
+   "t_sensor_ns": 10165000000,
+   "t_wall_utc_s": "server-clock",
+   "t_wc": [
+    0.5,
+    0.0,
+    0.0
+   ],
+   "tracking_state": "not_available"
+  },
+  {
+   "conf_hist": null,
+   "depth_valid_frac": null,
+   "epoch": 0,
+   "frame_seq": null,
+   "kind": "pose",
+   "mailbox_write": true,
+   "pose_clock": "server",
+   "pose_error": null,
+   "q_wc_xyzw": [
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ],
+   "rx_seq": null,
+   "source": "zeromq",
+   "t_sensor_ns": 10550000000,
+   "t_wall_utc_s": "server-clock",
+   "t_wc": [
+    0.55,
+    0.0,
+    0.0
+   ],
+   "tracking_state": "not_available"
+  },
+  {
+   "conf_hist": null,
+   "depth_valid_frac": null,
+   "epoch": 0,
+   "frame_seq": null,
+   "kind": "pose",
+   "mailbox_write": true,
+   "pose_clock": "server",
+   "pose_error": null,
+   "q_wc_xyzw": [
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ],
+   "rx_seq": null,
+   "source": "zeromq",
+   "t_sensor_ns": 10600000000,
+   "t_wall_utc_s": "server-clock",
+   "t_wc": [
+    0.6,
+    0.0,
+    0.0
+   ],
+   "tracking_state": "not_available"
+  },
+  {
+   "conf_hist": null,
+   "depth_valid_frac": null,
+   "epoch": 0,
+   "frame_seq": null,
+   "kind": "pose",
+   "mailbox_write": true,
+   "pose_clock": "server",
+   "pose_error": null,
+   "q_wc_xyzw": [
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ],
+   "rx_seq": null,
+   "source": "zeromq",
+   "t_sensor_ns": 11200000000,
+   "t_wall_utc_s": "server-clock",
+   "t_wc": [
+    1.2,
+    0.0,
+    0.0
+   ],
+   "tracking_state": "not_available"
+  },
+  {
+   "conf_hist": null,
+   "depth_valid_frac": null,
+   "epoch": 1,
+   "frame_seq": null,
+   "kind": "pose",
+   "mailbox_write": true,
+   "pose_clock": "server",
+   "pose_error": null,
+   "q_wc_xyzw": [
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ],
+   "rx_seq": null,
+   "source": "zeromq",
+   "t_sensor_ns": 1000000000,
+   "t_wall_utc_s": "server-clock",
+   "t_wc": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "tracking_state": "not_available"
+  },
+  {
+   "conf_hist": null,
+   "depth_valid_frac": null,
+   "epoch": 1,
+   "frame_seq": null,
+   "kind": "pose",
+   "mailbox_write": true,
+   "pose_clock": "server",
+   "pose_error": null,
+   "q_wc_xyzw": [
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ],
+   "rx_seq": null,
+   "source": "zeromq",
+   "t_sensor_ns": 1033000000,
+   "t_wall_utc_s": "server-clock",
+   "t_wc": [
+    0.1,
+    0.0,
+    0.0
+   ],
+   "tracking_state": "not_available"
+  }
+ ],
+ "pose_sink": [
+  [
+   [
+    0.0,
+    0.0,
+    0.0
+   ],
+   [
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ],
+   0,
+   {
+    "pose_clock": "server",
+    "sensor_ts_ns": 10000000000
+   }
+  ],
+  [
+   [
+    0.0,
+    0.0,
+    0.0
+   ],
+   [
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ],
+   0,
+   {
+    "pose_clock": "server",
+    "sensor_ts_ns": 10000000000
+   }
+  ],
+  [
+   [
+    0.1,
+    0.0,
+    0.0
+   ],
+   [
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ],
+   0,
+   {
+    "pose_clock": "server",
+    "sensor_ts_ns": 10033000000
+   }
+  ],
+  [
+   [
+    0.2,
+    0.0,
+    0.0
+   ],
+   [
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ],
+   0,
+   {
+    "pose_clock": "server",
+    "sensor_ts_ns": 10066000000
+   }
+  ],
+  [
+   [
+    0.3,
+    0.0,
+    0.0
+   ],
+   [
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ],
+   0,
+   {
+    "pose_clock": "server",
+    "sensor_ts_ns": 10099000000
+   }
+  ],
+  [
+   [
+    0.4,
+    0.0,
+    0.0
+   ],
+   [
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ],
+   0,
+   {
+    "pose_clock": "server",
+    "sensor_ts_ns": 10132000000
+   }
+  ],
+  [
+   [
+    0.5,
+    0.0,
+    0.0
+   ],
+   [
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ],
+   0,
+   {
+    "pose_clock": "server",
+    "sensor_ts_ns": 10165000000
+   }
+  ],
+  [
+   [
+    0.55,
+    0.0,
+    0.0
+   ],
+   [
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ],
+   0,
+   {
+    "pose_clock": "server",
+    "sensor_ts_ns": 10550000000
+   }
+  ],
+  [
+   [
+    0.6,
+    0.0,
+    0.0
+   ],
+   [
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ],
+   0,
+   {
+    "pose_clock": "server",
+    "sensor_ts_ns": 10600000000
+   }
+  ],
+  [
+   [
+    1.2,
+    0.0,
+    0.0
+   ],
+   [
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ],
+   0,
+   {
+    "pose_clock": "server",
+    "sensor_ts_ns": 11200000000
+   }
+  ],
+  [
+   [
+    0.0,
+    0.0,
+    0.0
+   ],
+   [
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ],
+   1,
+   {
+    "pose_clock": "server",
+    "sensor_ts_ns": 1000000000
+   }
+  ],
+  [
+   [
+    0.1,
+    0.0,
+    0.0
+   ],
+   [
+    0.0,
+    0.0,
+    0.0,
+    1.0
+   ],
+   1,
+   {
+    "pose_clock": "server",
+    "sensor_ts_ns": 1033000000
+   }
+  ]
+ ],
+ "receiver": [
+  {
+   "decision": "enqueued",
+   "depth_valid_frac": null,
+   "frame_count": null,
+   "frame_seq": null,
+   "is_keyframe": false,
+   "kind": "receiver",
+   "lane": null,
+   "queue_depth": 1,
+   "reason": "",
+   "rx_seq": 1,
+   "source": "zeromq",
+   "t_sensor_ns": 10000000000
+  },
+  {
+   "decision": "dropped",
+   "depth_valid_frac": null,
+   "frame_count": null,
+   "frame_seq": null,
+   "is_keyframe": false,
+   "kind": "receiver",
+   "lane": null,
+   "queue_depth": 1,
+   "reason": "duplicate_ts",
+   "rx_seq": 2,
+   "source": "zeromq",
+   "t_sensor_ns": 10000000000
+  },
+  {
+   "decision": "dropped",
+   "depth_valid_frac": null,
+   "frame_count": null,
+   "frame_seq": null,
+   "is_keyframe": false,
+   "kind": "receiver",
+   "lane": null,
+   "queue_depth": 1,
+   "reason": "throttle",
+   "rx_seq": 3,
+   "source": "zeromq",
+   "t_sensor_ns": 10033000000
+  },
+  {
+   "decision": "dropped",
+   "depth_valid_frac": null,
+   "frame_count": null,
+   "frame_seq": null,
+   "is_keyframe": false,
+   "kind": "receiver",
+   "lane": null,
+   "queue_depth": 1,
+   "reason": "throttle",
+   "rx_seq": 4,
+   "source": "zeromq",
+   "t_sensor_ns": 10066000000
+  },
+  {
+   "decision": "dropped",
+   "depth_valid_frac": null,
+   "frame_count": null,
+   "frame_seq": null,
+   "is_keyframe": false,
+   "kind": "receiver",
+   "lane": null,
+   "queue_depth": 1,
+   "reason": "throttle",
+   "rx_seq": 5,
+   "source": "zeromq",
+   "t_sensor_ns": 10099000000
+  },
+  {
+   "decision": "dropped",
+   "depth_valid_frac": null,
+   "frame_count": null,
+   "frame_seq": null,
+   "is_keyframe": false,
+   "kind": "receiver",
+   "lane": null,
+   "queue_depth": 1,
+   "reason": "throttle",
+   "rx_seq": 6,
+   "source": "zeromq",
+   "t_sensor_ns": 10132000000
+  },
+  {
+   "decision": "dropped",
+   "depth_valid_frac": null,
+   "frame_count": null,
+   "frame_seq": null,
+   "is_keyframe": false,
+   "kind": "receiver",
+   "lane": null,
+   "queue_depth": 1,
+   "reason": "throttle",
+   "rx_seq": 7,
+   "source": "zeromq",
+   "t_sensor_ns": 10165000000
+  },
+  {
+   "decision": "dropped",
+   "depth_valid_frac": null,
+   "frame_count": null,
+   "frame_seq": null,
+   "is_keyframe": false,
+   "kind": "receiver",
+   "lane": null,
+   "queue_depth": 1,
+   "reason": "no_camera_frame",
+   "rx_seq": 8,
+   "source": "zeromq",
+   "t_sensor_ns": 10550000000
+  },
+  {
+   "decision": "dropped",
+   "depth_valid_frac": null,
+   "frame_count": null,
+   "frame_seq": null,
+   "is_keyframe": true,
+   "kind": "receiver",
+   "lane": null,
+   "queue_depth": 1,
+   "reason": "no_camera_frame",
+   "rx_seq": 9,
+   "source": "zeromq",
+   "t_sensor_ns": 10600000000
+  },
+  {
+   "decision": "enqueued",
+   "depth_valid_frac": null,
+   "frame_count": null,
+   "frame_seq": null,
+   "is_keyframe": true,
+   "kind": "receiver",
+   "lane": null,
+   "queue_depth": 2,
+   "reason": "",
+   "rx_seq": 10,
+   "source": "zeromq",
+   "t_sensor_ns": 10600000000
+  },
+  {
+   "decision": "dropped",
+   "depth_valid_frac": null,
+   "frame_count": null,
+   "frame_seq": null,
+   "is_keyframe": false,
+   "kind": "receiver",
+   "lane": null,
+   "queue_depth": 2,
+   "reason": "duplicate_ts",
+   "rx_seq": 11,
+   "source": "zeromq",
+   "t_sensor_ns": 10600000000
+  },
+  {
+   "decision": "enqueued",
+   "depth_valid_frac": null,
+   "frame_count": null,
+   "frame_seq": null,
+   "is_keyframe": true,
+   "kind": "receiver",
+   "lane": null,
+   "queue_depth": 3,
+   "reason": "",
+   "rx_seq": 12,
+   "source": "zeromq",
+   "t_sensor_ns": 10600000000
+  },
+  {
+   "decision": "dropped",
+   "depth_valid_frac": null,
+   "frame_count": null,
+   "frame_seq": null,
+   "is_keyframe": false,
+   "kind": "receiver",
+   "lane": null,
+   "queue_depth": 3,
+   "reason": "queue_full",
+   "rx_seq": 13,
+   "source": "zeromq",
+   "t_sensor_ns": 11200000000
+  },
+  {
+   "decision": "dropped",
+   "depth_valid_frac": null,
+   "frame_count": null,
+   "frame_seq": null,
+   "is_keyframe": false,
+   "kind": "receiver",
+   "lane": null,
+   "queue_depth": 3,
+   "reason": "malformed",
+   "rx_seq": null,
+   "source": "zeromq",
+   "t_sensor_ns": null
+  },
+  {
+   "decision": "dropped",
+   "depth_valid_frac": null,
+   "frame_count": null,
+   "frame_seq": null,
+   "is_keyframe": false,
+   "kind": "receiver",
+   "lane": null,
+   "queue_depth": 3,
+   "reason": "no_camera_frame",
+   "rx_seq": 14,
+   "source": "zeromq",
+   "t_sensor_ns": 1000000000
+  },
+  {
+   "decision": "dropped",
+   "depth_valid_frac": null,
+   "frame_count": null,
+   "frame_seq": null,
+   "is_keyframe": false,
+   "kind": "receiver",
+   "lane": null,
+   "queue_depth": 3,
+   "reason": "no_camera_frame",
+   "rx_seq": 15,
+   "source": "zeromq",
+   "t_sensor_ns": 1033000000
+  }
+ ],
+ "state": {
+  "frame_epoch": 1,
+  "kf_stamps_inherited": 1,
+  "last_pose_ts_ns": 1033000000
+ }
+}

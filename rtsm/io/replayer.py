@@ -4,6 +4,12 @@ through the RTSM pipeline at the original recording rate.
 
 Usage:
     uv run rtsm-run --replay path/to/recording
+
+Since P3 task 0.5 the replayer is a transport adapter like the live
+receiver: it reads the recording's binary messages and text messages and
+drives the SAME Lens framing + ingest front-end (rtsm/io/ingest_frontend.py)
+on the real ingest queue, tagged ``source="replay"``. The decoder-only
+``WebSocketReceiver`` instance with a dummy queue is gone.
 """
 
 from __future__ import annotations
@@ -16,8 +22,8 @@ import time
 from typing import List, Optional
 
 from rtsm.io.ingest_queue import IngestQueue
-from rtsm.io.websocket import WebSocketReceiver
-from rtsm.evaluation.event_log import RX_DROPPED, RX_ENQUEUED, RX_QUEUE_FULL
+from rtsm.io.ingest_frontend import WEBSOCKET_POLICY, IngestFrontEnd
+from rtsm.io.websocket import handle_lens_text_message, parse_lens_message
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +36,8 @@ class ReplayReceiver:
     Frames are fed at the original recording rate (real-time) so that
     TTL caches and throttles in the pipeline behave identically.
     """
+
+    name = "replay"
 
     def __init__(
         self,
@@ -51,11 +59,10 @@ class ReplayReceiver:
         throttle_clock: str = "wall",
         pose_sink: Optional[callable] = None,
         ledger_sink: Optional[callable] = None,
+        on_frame_correction: Optional[callable] = None,
     ) -> None:
         self._recording_dir = os.path.abspath(recording_dir)
         self._ingest_q = ingest_queue
-        self._on_keyframe = on_keyframe
-        self._on_camera_frame = on_camera_frame
 
         # Validate recording directory
         bin_path = os.path.join(self._recording_dir, "messages.bin")
@@ -69,37 +76,23 @@ class ReplayReceiver:
         self._idx_path = idx_path
         self._txt_path = os.path.join(self._recording_dir, "text_messages.jsonl")
 
-        # Create a WebSocketReceiver as a decoder-only instance (never started).
-        # We reuse _parse_binary_message and _handle_text_message directly.
         self._latency_analytics = latency_analytics
-        self._decoder = WebSocketReceiver(
-            ingest_queue=IngestQueue(1),  # dummy, never used
-            require_tracking_normal=require_tracking_normal,
-            keyframe_every_n=keyframe_every_n,
-            nonkf_min_interval_s=nonkf_min_interval_s,
-            confidence_threshold=confidence_threshold,
-            apply_camera_flip=apply_camera_flip,
-            on_keyframe=None,  # we handle callbacks ourselves
-            on_pose_corrections=on_pose_corrections,
-            on_pose_corrections_batch=on_pose_corrections_batch,
-            latency_analytics=latency_analytics,  # passed to decoder for frame_received/tracking/throttle hooks
-            # Frame-flow trace: the decoder emits the parse-side decisions
-            # (malformed / parse_error / tracking_state / throttle) tagged
-            # source="replay"; the enqueue decisions are emitted below. Depth
-            # is read from the REAL ingest queue, not the decoder's dummy.
-            event_sink=event_sink,
-            event_source="replay",
-            # The real ingest queue: the decoder's admit-before-decode check and
-            # its trace depth must see the queue the frames actually go to.
-            admission_queue=ingest_queue,
-            # ingest.clock: "sensor" makes the non-KF throttle compare recorded
-            # header timestamps, so the admitted set is the same at any speed.
-            throttle_clock=throttle_clock,
-            # Receive-time robot pose under replay too (every tracking-normal
-            # frame), so replay-based pose-freshness checks mean something.
-            pose_sink=pose_sink,
-            # P2 pose ledger (PoseEvent per recorded frame, source "replay").
-            ledger_sink=ledger_sink,
+        self._apply_camera_flip = apply_camera_flip
+        self._on_pose_corrections = on_pose_corrections
+        self._on_pose_corrections_batch = on_pose_corrections_batch
+        self._on_frame_correction = on_frame_correction
+        # The one ingest chain on the REAL queue: the admit-before-decode
+        # check, the trace depth, the throttle (ingest.clock: "sensor" makes
+        # the non-KF throttle compare recorded header timestamps, so the
+        # admitted set is the same at any speed), the receive-time robot pose
+        # and the P2 ledgers all see the queue the frames actually go to.
+        self._fe = IngestFrontEnd(
+            source="replay", policy=WEBSOCKET_POLICY, ingest_queue=ingest_queue,
+            throttle_clock=throttle_clock, keyframe_every_n=keyframe_every_n,
+            nonkf_min_interval_s=nonkf_min_interval_s, require_tracking_normal=require_tracking_normal,
+            confidence_threshold=confidence_threshold, pose_sink=pose_sink, event_sink=event_sink,
+            ledger_sink=ledger_sink, latency_analytics=latency_analytics,
+            on_camera_frame=on_camera_frame, on_keyframe=on_keyframe,
         )
 
         self._replay_speed = max(0.1, replay_speed)  # <1 = slower, >1 = faster
@@ -107,6 +100,10 @@ class ReplayReceiver:
         self._thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
         self._done = threading.Event()
+
+    @property
+    def frontend(self) -> IngestFrontEnd:
+        return self._fe
 
     def start(self) -> None:
         """Launch the replay loop in a daemon thread."""
@@ -131,6 +128,10 @@ class ReplayReceiver:
     def wait(self, timeout: Optional[float] = None) -> bool:
         """Block until replay finishes. Returns True if completed."""
         return self._done.wait(timeout=timeout)
+
+    def liveness(self) -> dict:
+        t = self._thread
+        return {"alive": bool(t is not None and t.is_alive()), **self._fe.liveness()}
 
     # ── Core replay loop ──
 
@@ -198,46 +199,29 @@ class ReplayReceiver:
                 if kind == "binary":
                     bin_f.seek(entry["offset"])
                     raw = bin_f.read(entry["length"])
+                    self._fe.last_rx_mono = time.monotonic()
 
                     try:
-                        pkt = self._decoder._parse_binary_message(raw)
+                        pkt = parse_lens_message(self._fe, raw, apply_camera_flip=self._apply_camera_flip,
+                                                 latency_analytics=self._latency_analytics)
                     except Exception as e:
                         # Same as the live stream loop: one bad frame (the
                         # parse_error trace line is emitted inside the
-                        # decoder, with the header ids) must not end the
+                        # front-end, with the header ids) must not end the
                         # replay.
                         logger.error(f"[replay] frame parse error: {e}")
                         continue
-                    if pkt is not None:
-                        if self._latency_analytics:
-                            self._latency_analytics.sample_queue_depth(self._ingest_q.qsize())
-                        ok = self._ingest_q.put(pkt, block=False)
-                        if ok:
-                            frames_enqueued += 1
-                            self._decoder._trace_rx(RX_ENQUEUED, "", pkt=pkt)
-                            # Viz camera feed only for ADMITTED frames (no encode
-                            # work for a frame the queue refused)
-                            if self._on_camera_frame is not None:
-                                try:
-                                    self._on_camera_frame(pkt)
-                                except Exception as e:
-                                    logger.error(f"[replay] on_camera_frame callback error: {e}")
-                            # (throttle stamp advanced at the decoder's admit decision)
-                            if pkt.is_keyframe and self._on_keyframe is not None:
-                                try:
-                                    self._on_keyframe(pkt)
-                                except Exception as e:
-                                    logger.error(f"[replay] on_keyframe callback error: {e}")
-                        else:
-                            if self._latency_analytics:
-                                self._latency_analytics.record_queue_drop()
-                            reason = getattr(getattr(pkt, "ingest", None), "drop_reason", None) or RX_QUEUE_FULL
-                            logger.warning(f"[replay] ingest queue refused frame ({reason}); dropping")
-                            self._decoder._trace_rx(RX_DROPPED, reason, pkt=pkt)
+                    if pkt is not None and self._fe.enqueue(pkt):
+                        frames_enqueued += 1
 
                 elif kind == "text":
                     try:
-                        self._decoder._handle_text_message(entry["payload"])
+                        handle_lens_text_message(
+                            entry["payload"], apply_camera_flip=self._apply_camera_flip,
+                            on_pose_corrections=self._on_pose_corrections,
+                            on_pose_corrections_batch=self._on_pose_corrections_batch,
+                            on_frame_correction=self._on_frame_correction, source="replay",
+                        )
                     except Exception as e:
                         logger.error(f"[replay] text message error: {e}")
 
