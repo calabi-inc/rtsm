@@ -433,3 +433,32 @@ unchanged end to end for this record. CPU suite after the gate: `tests/` 610 pas
 has one `SourceContext` site instead of three receiver sites) + one pre-existing `models`-marker failure
 (`test_clip_model_exists`: `model_store/clip` has held only `.keep` since 2025-08; CLIP loads from the Hugging Face
 cache, unrelated to this change); `examples/rc_car_agent/tests` 256 passed + the known flaky fake-car e2e.
+
+## P3 task 0 record (recording → MCAP converter + parity, 2026-09-25) — no gate directory; CPU test + this record
+
+Branch `feature/p3-task0-mcap-converter` (stacked on PR #45). `rtsm/evaluation/recording_mcap.py` +
+`scripts/recording_to_mcap.py` write a rosbag2 directory with MCAP storage from a Lens recording, decoding with the
+receiver's own code (`lens_raw_frame` + `rtsm.io.codecs`): `rgb8` = the receiver's NV12→BGR decode channel-swapped (raw,
+lossless), `16UC1` depth bytes verbatim, `mono8` confidence verbatim, `CameraInfo` per frame (ARKit intrinsics differ on
+every one of session1's 240 frames), `/tf map → camera_optical` with the ARKit flip baked in, `/arkit/frame_seq`
+(session1's frame ids have 166 gaps: 0…405 over 240 frames — without the topic no trace line could match the anchor's
+`frame_seq`), `/arkit/tracking_state`. `header.stamp` = sensor stamp; rosbag2 message time = the sender's wall stamp.
+
+**Parity (`tests/evaluation/test_recording_mcap.py`, 8 tests, CPU):** synthetic round trip bit-identical (RGB, depth
+bytes, confidence, rescaled intrinsics, stamps, gapped frame ids, tracking state, float32 poses); the channel-order trap
+(read-back equals the receiver's BGR, not its mirror); the flip baked once and only when asked (`--no-flip` == raw
+ARKit pose, `pose_convention: arkit` in custom data); `png_uint16` depth → explicit `UnsupportedEncoding`; `float32_m`
+depth; a truncated message skipped and listed; the `mcap` library cross-reads the file (profile `ros2`, five schemas);
+the CLI wrapper. **Real:** the first 20 frames of `recordings/session1` equal the `FramePacket`s the ingest front-end
+produces from `messages.bin` — RGB, depth incl. the NaN mask, confidence, intrinsics, pose (after the receiver's flip),
+stamps, seq — and the deployed confidence filter (threshold 2) masks both depths identically.
+
+**Full conversion (info):** 240/240 frames, 0 skipped, 15.1 s; 1 030 946 377 B in → 1 029 404 036 B out (zstd per message;
+`rgb8` is 2× the NV12 wire bytes, so zstd only wins back the doubling — the bag is the recording's size, 982 MB);
+read-back of all 240 frames 6.5 s; `seq` and `header.stamp` sequences equal the recording's, span 40.519404 s, all
+`normal`. The bag lives in `recordings/session1_bag/` (ignored; regenerable with one command).
+
+Deviation from the execution plan: the shipped fixture is **synthetic** (built by the test; a 20-frame real fixture would
+be ~170 MB raw); the real 20-frame parity runs whenever `recordings/session1` is on the box. Task 1 (readers as adapters
+on the task-0.5 seam) will re-run this parity through the product adapter and the G3 fidelity run
+(`rtsm eval recordings/session1 --as-deployed` → the anchor) gates the whole path.

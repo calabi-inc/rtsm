@@ -62,6 +62,29 @@ The recording is stored with git-lfs. After cloning, run `git lfs pull` if the b
 
 ---
 
+## Convert a recording to MCAP
+
+The eval tooling reads bags. `scripts/recording_to_mcap.py` turns a recording into a **rosbag2 directory with MCAP storage** (`metadata.yaml` + one `.mcap`), readable by `rosbags`, the `mcap` library, Foxglove and ROS 2:
+
+```bash
+pip install "rtsm[eval]"
+python scripts/recording_to_mcap.py recordings/session1 recordings/session1_bag
+```
+
+| Topic | Type | Content |
+|---|---|---|
+| `/camera/color/image_raw` | `sensor_msgs/Image` `rgb8` | the receiver's own decode of the wire image (NV12 / JPEG → BGR), channel-swapped — raw, lossless |
+| `/camera/depth/image_rect_raw` | `sensor_msgs/Image` `16UC1` (or `32FC1`) | the wire depth bytes verbatim (millimetres, 0 = invalid) |
+| `/camera/confidence/image_raw` | `sensor_msgs/Image` `mono8` | the ARKit confidence map (0/1/2), when the frame carries one |
+| `/camera/color/camera_info` | `sensor_msgs/CameraInfo` | intrinsics at RGB resolution, **per frame** (ARKit's vary) |
+| `/tf` | `tf2_msgs/TFMessage` | `map → camera_optical` at the image stamp, with the ARKit→OpenCV flip **baked in** |
+| `/arkit/frame_seq` | `std_msgs/UInt32` | the source frame id (session1's ids have gaps) |
+| `/arkit/tracking_state` | `std_msgs/String` | `normal` / `limited…` verbatim |
+
+`header.stamp` is the sensor stamp (`timestamp_ns`, the clock the sensor-clock throttle runs on); the rosbag2 message time is the sender's wall stamp. The bag's `custom_data` records the layout version, the session id and `arkit_flip_baked` — a bag with the flip baked in runs with `apply_camera_flip: false`. `--no-flip` keeps the raw ARKit pose and records `pose_convention: arkit`. A depth format the layout cannot carry is an explicit `UnsupportedEncoding` error, never a silent re-encode.
+
+**Parity is tested, not assumed:** `tests/evaluation/test_recording_mcap.py` converts a synthetic recording and, when `recordings/session1` is present, its first 20 frames, and checks that the bag's RGB, depth bytes, confidence map, intrinsics, stamps, frame ids and poses equal what the websocket receiver's own front-end produces from `messages.bin` — bit for bit, pose after the receiver's flip.
+
 ## Use Cases
 
 - **Benchmarking** — Compare segmentation backends on the same input frames

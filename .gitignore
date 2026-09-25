@@ -168,3 +168,6 @@ eval/baselines/**/*.jsonl
 # Local run logs (stdout/stderr captured with shell redirection during live
 # sessions and campaigns). Keep them under logs/, never at the repo root.
 logs/
+
+# Bags converted from recordings (scripts/recording_to_mcap.py): gigabytes, regenerable
+recordings/*_bag/
