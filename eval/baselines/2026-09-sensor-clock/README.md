@@ -453,8 +453,11 @@ the CLI wrapper. **Real:** the first 20 frames of `recordings/session1` equal th
 produces from `messages.bin` — RGB, depth incl. the NaN mask, confidence, intrinsics, pose (after the receiver's flip),
 stamps, seq — and the deployed confidence filter (threshold 2) masks both depths identically.
 
-**Full conversion (info):** 240/240 frames, 0 skipped, 15.1 s; 1 030 946 377 B in → 1 029 404 036 B out (zstd per message;
-`rgb8` is 2× the NV12 wire bytes, so zstd only wins back the doubling — the bag is the recording's size, 982 MB);
+**Full conversion (info):** 240/240 frames, 0 skipped, 15.1 s; 1 030 946 377 B in → 1 029 404 036 B out (zstd; `rgb8` is 2× the NV12
+wire bytes, so zstd only wins back the doubling — the bag is the recording's size, 982 MB). **Correction 2026-09-25 (task 1
+found it):** that run used rosbag2's per-MESSAGE zstd, which only rosbag2 readers can open — the `mcap` library failed on
+every image message of the standalone `.mcap`. The converter now uses MCAP-native chunk compression (`CompressionMode.STORAGE`);
+the bag was regenerated and decodes standalone; size and parity unchanged;
 read-back of all 240 frames 6.5 s; `seq` and `header.stamp` sequences equal the recording's, span 40.519404 s, all
 `normal`. The bag lives in `recordings/session1_bag/` (ignored; regenerable with one command).
 

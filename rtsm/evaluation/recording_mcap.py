@@ -222,7 +222,10 @@ def convert_recording_to_mcap(recording_dir: str | os.PathLike, out_dir: str | o
     t0 = time.perf_counter()
     w = Writer(out, version=9, storage_plugin=StoragePlugin.MCAP)
     if compression == "zstd":
-        w.set_compression(CompressionMode.MESSAGE, CompressionFormat.ZSTD)     # before open()
+        # STORAGE = MCAP-native zstd chunks: the .mcap stays readable on its own (mcap library, Foxglove,
+        # ROS 2). rosbag2's MESSAGE mode compresses every payload separately and only rosbag2 readers
+        # can open the result (verified 2026-09-25: the mcap library failed on every image message).
+        w.set_compression(CompressionMode.STORAGE, CompressionFormat.ZSTD)     # before open()
     elif compression not in (None, "none"):
         raise ValueError(f"unknown compression {compression!r} (zstd | none)")
     try:

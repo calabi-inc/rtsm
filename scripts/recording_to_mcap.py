@@ -24,7 +24,7 @@ def main(argv=None) -> int:
     ap.add_argument("out_dir", help="rosbag2 directory to create (metadata.yaml + <name>.mcap)")
     ap.add_argument("--max-frames", type=int, default=None)
     ap.add_argument("--no-flip", action="store_true", help="do NOT bake the ARKit->OpenCV flip into /tf")
-    ap.add_argument("--no-compression", action="store_true", help="write uncompressed MCAP chunks (default: zstd per message)")
+    ap.add_argument("--no-compression", action="store_true", help="write uncompressed MCAP chunks (default: zstd chunks, MCAP-native, readable standalone)")
     ap.add_argument("--overwrite", action="store_true")
     args = ap.parse_args(argv)
     try:
