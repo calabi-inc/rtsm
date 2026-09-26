@@ -126,10 +126,32 @@ def replay_source(cfg: dict, ctx: SourceContext, **options: Any):
     )
 
 
+def bag_source(cfg: dict, ctx: SourceContext, **options: Any):
+    """A ROS 1 bag / rosbag2 directory / bare MCAP (``rtsm/io/bag_source.py``).
+    ``io.bag.*`` supplies the defaults; runner options (``path``, ``speed``,
+    ``max_frames``) override them."""
+    from rtsm.io.bag_source import BagSource
+    bag_cfg = dict((cfg.get("io") or {}).get("bag") or {})
+    kw: Dict[str, Any] = {
+        "path": options.get("path") or bag_cfg.get("path"),
+        "speed": options.get("speed", bag_cfg.get("speed")),
+        "topics": dict(bag_cfg.get("topics") or {}),
+        "pair_tolerance_s": float(bag_cfg.get("pair_tolerance_s", 0.02)),
+        "tf_extrapolation_s": float(bag_cfg.get("tf_extrapolation_s", 0.05)),
+        "world_frame": bag_cfg.get("world_frame") or None,
+        "camera_frame": bag_cfg.get("camera_frame") or None,
+        "assume_aligned": bool(bag_cfg.get("assume_aligned", False)),
+        "typestore": str(bag_cfg.get("typestore") or "humble"),
+        "max_frames": options.get("max_frames"),
+    }
+    return BagSource(cfg, ctx, **kw)
+
+
 _BUILTIN: Dict[str, SourceFactory] = {
     "websocket": websocket_source,
     "zeromq": zeromq_source,
     "replay": replay_source,
+    "bag": bag_source,
 }
 _REGISTERED: Dict[str, SourceFactory] = {}
 

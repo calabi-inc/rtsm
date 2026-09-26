@@ -105,6 +105,23 @@ io:
   clearance:
     enable: false
 
+  # Bag source (receiver: bag, or `rtsm --bag PATH`): a ROS 1 .bag, a rosbag2
+  # directory (sqlite3 | mcap storage) or a bare .mcap, read through
+  # rtsm/io/bag_reader.py onto the same ingest front-end as the live receivers.
+  # Topics are discovered by name and type; `topics:` overrides any role. A bag
+  # v1 cannot read is refused above the GPU check with the reason (no depth /
+  # CameraInfo / pose source, depth not registered to RGB, RVL depth, ros2idl).
+  bag:
+    path: null                     # or --bag PATH
+    speed: null                    # null = as fast as the ingest queue accepts (eval); 1.0 = real time by header stamps
+    pair_tolerance_s: 0.02         # RGB <-> depth nearest-stamp pairing window (TUM's own tool uses 20 ms)
+    tf_extrapolation_s: 0.05       # a hop clamps to its nearest sample up to this far outside them; beyond = frame has no pose
+    world_frame: null              # default: the TF root that reaches the camera (map | world | odom preferred)
+    camera_frame: null             # default: the RGB CameraInfo frame_id
+    assume_aligned: false          # accept depth whose K differs from the RGB K (only if it IS registered to the RGB)
+    typestore: humble              # message definitions assumed when the bag embeds none (humble | iron | jazzy | foxy | noetic)
+    topics: {}                     # overrides: rgb, depth, rgb_info, depth_info, confidence, tf, tf_static, odom, tracking, seq
+
 # -------------------- Ingest (frame admission timing) --------------------
 ingest:
   # Which clock drives frame admission and memory timing: the receiver's

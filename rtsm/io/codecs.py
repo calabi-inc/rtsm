@@ -21,6 +21,7 @@ behaviour; that module re-exports them so existing imports work.
 from __future__ import annotations
 
 import logging
+import struct
 from typing import Any, Optional, Tuple
 
 import cv2
@@ -59,6 +60,10 @@ def decode_rgb(raw: Any, fmt: str, width: int, height: int) -> np.ndarray:
         if not isinstance(raw, np.ndarray):
             raise ValueError("raw_bgr expects an ndarray")
         return raw
+    if fmt.startswith("ros:"):                       # bag sources: "ros:<sensor_msgs/Image encoding>", row padding already stripped
+        return ros_image_to_bgr(fmt[4:], raw, width, height)
+    if fmt.startswith("rosc:"):                      # bag sources: "rosc:<CompressedImage format>"
+        return ros_compressed_to_bgr(fmt[5:], raw)
     if fmt in ("jpeg", "png"):
         buf = np.frombuffer(raw, dtype=np.uint8)
         img = cv2.imdecode(buf, cv2.IMREAD_COLOR)
@@ -281,3 +286,111 @@ def normalize_matrix_convention(T_wc: np.ndarray, convention: str) -> np.ndarray
     if convention == "arkit":
         return T_wc @ _ARKIT_TO_OPENCV
     raise UnsupportedEncoding(f"Unsupported pose convention: {convention!r}")
+
+
+# ───────────────────────────── ROS image / depth encodings (bag sources, P3 task 1) ─────────────────────────────
+# The channel-order rule (execution plan, P3): FramePacket.rgb is BGR; a reader converts keyed on the message
+# `encoding` field, never on pixel statistics. Depth stays in WIRE terms (uint16_mm / float32_m) so the bag path
+# decodes through the same `decode_depth` as the receivers.
+
+_ROS_COLOR_CHANNELS = {"rgb8": 3, "bgr8": 3, "8uc3": 3, "rgba8": 4, "bgra8": 4, "8uc4": 4, "mono8": 1, "8uc1": 1}
+_ROS_DEPTH_WIRE = {"16uc1": ("uint16_mm", 2, 0.001), "mono16": ("uint16_mm", 2, 0.001), "32fc1": ("float32_m", 4, 1.0)}
+
+
+def ros_image_to_bgr(encoding: str, data: Any, width: int, height: int, *, step: Optional[int] = None,
+                     is_bigendian: int = 0) -> np.ndarray:
+    """A raw ``sensor_msgs/Image`` colour payload -> (H, W, 3) uint8 BGR.
+    rgb8 / rgba8 are swapped, bgr8 / bgra8 / 8UC3 taken as they are, mono8 /
+    8UC1 replicated. Row padding (``step`` > width * channels) is dropped.
+    Raises UnsupportedEncoding for other encodings and for big-endian images."""
+    if int(is_bigendian or 0):
+        raise UnsupportedEncoding("big-endian images are not supported")
+    enc = str(encoding).lower()
+    ch = _ROS_COLOR_CHANNELS.get(enc)
+    if ch is None:
+        raise UnsupportedEncoding(f"Unsupported ROS image encoding: {encoding!r}")
+    w, h = int(width), int(height)
+    row = int(step) if step else w * ch
+    buf = np.frombuffer(data, dtype=np.uint8) if not isinstance(data, np.ndarray) else np.asarray(data, dtype=np.uint8).reshape(-1)
+    if row < w * ch or buf.size < row * h:
+        raise ValueError(f"image buffer too small: {buf.size} bytes for {w}x{h}x{ch} (step {row})")
+    img = buf[: row * h].reshape(h, row)[:, : w * ch].reshape(h, w, ch)
+    if enc == "rgb8":
+        return np.ascontiguousarray(img[..., ::-1])
+    if enc in ("bgr8", "8uc3"):
+        return np.ascontiguousarray(img)
+    if enc == "rgba8":
+        return cv2.cvtColor(np.ascontiguousarray(img), cv2.COLOR_RGBA2BGR)
+    if enc in ("bgra8", "8uc4"):
+        return cv2.cvtColor(np.ascontiguousarray(img), cv2.COLOR_BGRA2BGR)
+    return cv2.cvtColor(np.ascontiguousarray(img.reshape(h, w)), cv2.COLOR_GRAY2BGR)
+
+
+def ros_compressed_to_bgr(fmt: str, data: Any) -> np.ndarray:
+    """A ``sensor_msgs/CompressedImage`` colour payload -> BGR. ``format`` is
+    ``"jpeg"``, ``"png"`` or image_transport's ``"<orig>; <codec> compressed <order>"``
+    (e.g. ``"rgb8; jpeg compressed bgr8"``): the codec's own byte order is the
+    part after ``compressed`` (default bgr8, what cv2.imdecode returns); ``rgb8``
+    there means the compressed bytes carry RGB order and are swapped."""
+    f = str(fmt or "").lower()
+    if "compresseddepth" in f:
+        raise UnsupportedEncoding("compressedDepth is a depth payload (ros_compressed_depth)")
+    if not any(c in f for c in ("jpeg", "jpg", "png")):
+        raise UnsupportedEncoding(f"Unsupported CompressedImage format: {fmt!r}")
+    buf = np.frombuffer(data, dtype=np.uint8) if not isinstance(data, np.ndarray) else np.asarray(data, dtype=np.uint8).reshape(-1)
+    img = cv2.imdecode(buf, cv2.IMREAD_COLOR)
+    if img is None:
+        raise ValueError(f"cv2.imdecode failed for CompressedImage {fmt!r} ({buf.size} bytes)")
+    order = f.split("compressed", 1)[1].strip() if "compressed" in f else "bgr8"
+    if order.startswith("rgb"):
+        img = np.ascontiguousarray(img[..., ::-1])
+    return img
+
+
+def ros_depth_wire(encoding: str, data: Any, width: int, height: int, *, is_bigendian: int = 0) -> Tuple[Any, str, float]:
+    """A raw ``sensor_msgs/Image`` depth payload -> ``(bytes, wire_encoding, scale)``
+    for an ``EncodedImage``: 16UC1 / mono16 -> ``uint16_mm`` (0 = invalid, REP 118),
+    32FC1 -> ``float32_m`` (NaN or 0.0 = invalid -- both conventions exist in the
+    wild: TUM writes NaN, the RealSense D455 writes 0). Decoding then goes through
+    ``decode_depth`` like every receiver frame. Raises UnsupportedEncoding."""
+    if int(is_bigendian or 0):
+        raise UnsupportedEncoding("big-endian depth images are not supported")
+    enc = str(encoding).lower()
+    spec = _ROS_DEPTH_WIRE.get(enc)
+    if spec is None:
+        raise UnsupportedEncoding(f"Unsupported ROS depth encoding: {encoding!r} (16UC1 | mono16 | 32FC1)")
+    wire, bpp, scale = spec
+    raw = bytes(data) if not isinstance(data, np.ndarray) else np.asarray(data, dtype=np.uint8).tobytes()
+    need = int(width) * int(height) * bpp
+    if len(raw) < need:
+        raise ValueError(f"depth buffer too small: {len(raw)} bytes for {width}x{height}x{bpp}")
+    return raw[:need], wire, scale
+
+
+def ros_compressed_depth(fmt: str, data: Any) -> Tuple[Any, str, float]:
+    """``sensor_msgs/CompressedImage`` from compressed_depth_image_transport
+    (format ``"16UC1; compressedDepth png"`` / ``"32FC1; compressedDepth"``): a
+    12-byte header (int32 format, float32 depthQuantA, float32 depthQuantB) then a
+    16-bit PNG. 16UC1 -> uint16 millimetres verbatim; 32FC1 -> the quantised
+    inverse depth is turned back into metres (``A / (q - B)``, 0 = invalid) and
+    returned as ``float32_m``. ``rvl`` -> UnsupportedEncoding (explicit, as planned)."""
+    f = str(fmt or "").lower()
+    if "rvl" in f:
+        raise UnsupportedEncoding("compressedDepth rvl is not supported (png only)")
+    raw = bytes(data) if not isinstance(data, np.ndarray) else np.asarray(data, dtype=np.uint8).tobytes()
+    if len(raw) < 12:
+        raise ValueError("compressedDepth payload shorter than its 12-byte header")
+    _fmt_enum, quant_a, quant_b = struct.unpack("<iff", raw[:12])
+    png = np.frombuffer(raw[12:], dtype=np.uint8)
+    arr = cv2.imdecode(png, cv2.IMREAD_UNCHANGED)
+    if arr is None:
+        raise ValueError("compressedDepth PNG failed to decode")
+    if arr.dtype != np.uint16:
+        raise UnsupportedEncoding(f"compressedDepth PNG dtype {arr.dtype} unexpected (uint16)")
+    if f.startswith("32fc1"):
+        q = arr.astype(np.float32)
+        depth = np.zeros_like(q, dtype=np.float32)
+        valid = arr > 0
+        depth[valid] = np.float32(quant_a) / (q[valid] - np.float32(quant_b))
+        return depth.tobytes(), "float32_m", 1.0
+    return np.ascontiguousarray(arr).tobytes(), "uint16_mm", 0.001

@@ -325,7 +325,7 @@ def clean_registry():
 
 def test_registry_builtins_registration_and_errors(clean_registry):
     ctx = SourceContext(ingest_queue=IngestQueue(2))
-    assert {"websocket", "zeromq", "replay"} <= set(sources.available_sources())
+    assert {"websocket", "zeromq", "replay", "bag"} <= set(sources.available_sources())
     sources.register_source("fake", FakeSource)
     src = sources.make_source("FAKE", {"io": {}}, ctx, extra=1)
     assert isinstance(src, FakeSource) and isinstance(src, Source) and src.options == {"extra": 1}
@@ -335,7 +335,7 @@ def test_registry_builtins_registration_and_errors(clean_registry):
     sources.register_source("fake", FakeSource, replace=True)
     with pytest.raises(ValueError, match="built-in"):
         sources.register_source("websocket", FakeSource)
-    with pytest.raises(sources.UnknownSourceError, match="Available: fake, replay, websocket, zeromq"):
+    with pytest.raises(sources.UnknownSourceError, match="Available: bag, fake, replay, websocket, zeromq"):
         sources.make_source("rosbag", {}, ctx)
     assert issubclass(sources.UnknownSourceError, ValueError)
     sources.register_source("fake2", lambda cfg, ctx, **o: object())

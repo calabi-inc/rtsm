@@ -72,6 +72,37 @@ def test_unknown_ingest_source_exits_before_the_gpu_check(no_models, capsys):
     assert "nosuch" in err and "websocket" in err and "zeromq" in err and "replay" in err
 
 
+def _synthetic_bag(tmp_path, with_depth=True):
+    pytest.importorskip("rosbags")
+    from test_bag_reader import simple_bag_messages, write_bag
+    msgs = simple_bag_messages(3)
+    if not with_depth:
+        msgs = [m for m in msgs if "depth" not in m[0]]
+    return write_bag(tmp_path / ("bag" if with_depth else "nodepth"), msgs)
+
+
+def test_bag_is_probed_above_the_gpu_check(no_models, tmp_path, monkeypatch, capsys):
+    """P3 task 1: --bag PATH is validated (opened, topics resolved, pose source
+    found, registration checked) BEFORE the GPU check; a refusal exits through
+    parser.error with the reasons, a readable bag reaches the check."""
+    monkeypatch.setattr(run, "_GPU_AVAILABLE", False)
+    monkeypatch.setattr(run, "_GPU_IMPORT_ERROR", "simulated for the test")
+    good = _synthetic_bag(tmp_path, with_depth=True)
+    assert run.main(["--bag", str(good)]) is None
+    assert "GPU dependencies" in capsys.readouterr().out
+    bad = _synthetic_bag(tmp_path, with_depth=False)
+    with pytest.raises(SystemExit) as ex:
+        run.main(["--bag", str(bad)])
+    captured = capsys.readouterr()
+    assert ex.value.code == 2 and "bag refused" in captured.err and "no_depth_topic" in captured.err and "GPU dependencies" not in captured.out
+    with pytest.raises(SystemExit) as ex:
+        run.main(["--bag", str(tmp_path / "missing.bag")])
+    assert ex.value.code == 2 and "not a bag" in capsys.readouterr().err
+    with pytest.raises(SystemExit) as ex:
+        run.main(["--set", "io.receiver=bag"])
+    assert ex.value.code == 2 and "io.bag.path" in capsys.readouterr().err
+
+
 def test_deprecated_websocket_path_is_aliased_on_the_runner_path(no_models, tmp_path, caplog):
     with caplog.at_level(logging.WARNING, logger="rtsm.cfg"), warnings.catch_warnings(record=True) as w:
         warnings.simplefilter("always")

@@ -47,6 +47,7 @@ nav:
       - Analytics Dashboard: guides/analytics-dashboard.md
       - Diagnostics & Ledgers: guides/diagnostics.md
       - Ingest Sources: guides/ingest-sources.md
+      - Reading Bags: guides/bags.md
       - RTAB-Map Setup: guides/rtabmap-setup.md
       - RealSense Setup: guides/realsense-setup.md
   - Contributing: contributing.md
