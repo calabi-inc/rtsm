@@ -193,7 +193,7 @@ segmentation:
 
 ## I/O & Receiver
 
-RTSM supports two input receiver backends:
+RTSM ships two input receiver backends, both transport adapters on the one ingest front-end (a plug-in can register a third under the `rtsm.sources` entry-point group; see the [Ingest Sources guide](../guides/ingest-sources.md)):
 
 ```yaml
 io:

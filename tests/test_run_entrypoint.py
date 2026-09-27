@@ -61,6 +61,17 @@ def test_gpu_check_runs_after_validation_at_runtime(no_models, tmp_path, monkeyp
     assert ex.value.code == 2 and "ingest" in captured.err and "GPU dependencies" not in captured.out
 
 
+def test_unknown_ingest_source_exits_before_the_gpu_check(no_models, capsys):
+    """P3 task 0.5: io.receiver must name a registered source (built-in or an
+    `rtsm.sources` entry point); a typo exits with the known names above the
+    GPU check, no model touched. --replay is exempt (it always replays)."""
+    with pytest.raises(SystemExit) as ex:
+        run.main(["--set", "io.receiver=nosuch"])
+    assert ex.value.code == 2
+    err = capsys.readouterr().err
+    assert "nosuch" in err and "websocket" in err and "zeromq" in err and "replay" in err
+
+
 def test_deprecated_websocket_path_is_aliased_on_the_runner_path(no_models, tmp_path, caplog):
     with caplog.at_level(logging.WARNING, logger="rtsm.cfg"), warnings.catch_warnings(record=True) as w:
         warnings.simplefilter("always")

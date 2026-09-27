@@ -391,3 +391,45 @@ the raw "detection rate over in-frustum views" before visibility from the depth 
 `events.jsonl` 1.55 MB (on) vs 129 KB (off) for the 46 s replay ≈ 34 KB/s with every ledger on at this cadence.
 CPU suite: 841 passed, 1 failed (the RC-car fake-car e2e, pre-existing and flaky: it fails on main and passed on the
 stage-B run of the same tree).
+
+## P3 task 0.5 reproduction (ingest front-end extraction, 2026-09-24) — `p3-task05-frontend/` — **G3-0.5 HARD GATE PASS 5/5**
+
+Branch `feature/p3-ingest-frontend`: the ingest chain the P1 tasks made precise inside `rtsm/io/websocket.py` now
+lives once in `rtsm/io/ingest_frontend.py` (`IngestFrontEnd` + `FrontEndPolicy`; two shipped flavours, websocket and
+ZeroMQ), behind versioned contracts (`rtsm/io/contracts.py`, `CONTRACT_VERSION` 1: `RawFrame` / `FrameHeader`,
+`PoseSample`, `TrackingStatus`, `FrameCorrection`, `Source`, `SourceContext`) and an encoding-keyed codec layer
+(`rtsm/io/codecs.py`). The websocket, replay and ZeroMQ receivers are transport adapters producing `RawFrame` /
+`PoseSample` events (compatibility delegates keep every existing test reference alive); sources are built by name from
+one `SourceContext` (`rtsm/io/sources.py`: built-ins + the `rtsm.sources` entry-point group; `io.receiver` validated
+above the GPU check) and `run.py` / `demo.py` lost their receiver if/elif chains. Behaviour-preserving by construction:
+two golden traces (`tests/test_ingest_golden.py`, fixtures recorded from the pre-extraction receivers and committed
+FIRST, 8b11ac2 / eb199e9), the unit tests (`tests/test_ingest_frontend.py`, incl. the golden websocket stream pushed
+through a BARE front-end without the receiver — the source-independence proof) and this gate. `p3t05_gate.sh` = two
+headless dual replays of session1 through the NEW runner wiring (`SourceContext` → `make_source("replay")`), ledgers
+on / off, plus the CPU predicates; `gate.out` is verbatim.
+
+| run | multiset | dequeue / receiver vs B1 | kinds | `t_total` mean |
+|---|---|---|---|---|
+| F_on | 124/65 @53 `ad6f71a5b89c8506` | identical (86 / 240) | pose 240, obs 695, view 53 (+ trace) | 254.5 ms |
+| F_off | 124/65 @53 `ad6f71a5b89c8506` | identical (86 / 240) | trace only | 266.1 ms |
+
+Predicates: (1) anchor + sequences on both; (2) **full-line equality with the stage-C `C1_on` record** (the last run of
+the pre-extraction receiver, kept in the session scratchpad; the gate records SKIPPED when it is gone): all 240 receiver
+lines equal on every key but `timestamp` / `queue_depth` (decision, reason, frame_seq, t_sensor_ns, is_keyframe,
+frame_count, lane, rx_seq, depth_valid_frac, source), all 240 pose lines equal on every key but `timestamp`, obs 695 /
+view 53; (3) every receiver and pose line tagged `replay`, meta clock sensor / policy lossless, the off run carries no
+ledger kind, `/stats.robot_pose` 240 writes / 0 regressions / 0 rejects / clock `sender` / epoch 0; (4) `pose_health`:
+240 frames, span 40.5194 s, 5.898 Hz, 0 gaps / discontinuities / limited episodes / pose errors, writes_expected 240;
+(5) 291 CPU tests green inside the gate (both golden traces, the front-end unit tests, the ingest suites). Post-hoc (not
+in `gate.out`): per-frame obs / view / frame / dequeue counts equal to `C1_on`, obs outcomes 279 created / 408 matched /
+8 no_p_cam, in-frustum per frame p50 32 / max 63, `matched_without_scoring` 5 — the stage-B/C numbers unchanged.
+`t_total` is one run per arm (no overhead predicate: the front-end adds no per-frame work; the on/off difference is
+run-to-run noise, here in the "wrong" direction).
+
+Recorded lesson: the first invocation of `p3t05_gate.sh` aborted after both replays had completed ("line 39: label:
+unbound variable") because the script was edited while bash was executing it (bash reads a script by byte offset).
+The two replays were valid, the analysis block was dry-run on them (same verdict), and the script was then re-run
+unchanged end to end for this record. CPU suite after the gate: `tests/` 610 passed + one bytecode pin updated (`test_runner_analytics_wiring`: the runner now
+has one `SourceContext` site instead of three receiver sites) + one pre-existing `models`-marker failure
+(`test_clip_model_exists`: `model_store/clip` has held only `.keep` since 2025-08; CLIP loads from the Hugging Face
+cache, unrelated to this change); `examples/rc_car_agent/tests` 256 passed + the known flaky fake-car e2e.

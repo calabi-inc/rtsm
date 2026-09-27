@@ -6,7 +6,14 @@ Subscribes to:
 - RTABMap bridge (port 6000): rtabmap.tracking_pose, rtabmap.kf_pose topics
 - (Optional) RTABMap bridge: rtabmap.kf_packet, rtabmap.kf_pose_update for visualization
 
-Forms canonical FramePacket objects and enqueues them to the ingest queue.
+Since P3 task 0.5 (Gate 4.5 plan) this module is a TRANSPORT ADAPTER: it owns
+the sockets, the camera/pose pairing window and the visualization topics,
+delivers every tracking pose to the ingest front-end as a pose event and every
+paired frame as a ``RawFrame``; the front-end (rtsm/io/ingest_frontend.py, the
+ZeroMQ flavour of the one policy chain) does the dedup / throttle / admission /
+decode / enqueue / trace. Frame ids stay None (no ``ws_*`` frame ids on this
+path), keyframes are the SLAM node's (``kf_pose``), epochs are receiver-minted
+on a stamp regression.
 """
 
 from __future__ import annotations
@@ -33,13 +40,21 @@ from rtsm.evaluation.event_log import (
     RX_DROPPED, RX_DUPLICATE_TS, RX_ENQUEUED, RX_MALFORMED, RX_NO_CAMERA_FRAME, RX_PARSE_ERROR, RX_QUEUE_FULL,
     RX_THROTTLE, TS_NOT_AVAILABLE, PoseEvent, ReceiverEvent,
 )
+from rtsm.io import codecs
+from rtsm.io.contracts import (
+    CONVENTION_OPENCV, POSE_FMT_PREPARED, EncodedImage, FrameHeader, PoseSample, RawFrame, TrackingStatus,
+)
+from rtsm.io.ingest_frontend import POSE_EPOCH_REBASE_S, ZEROMQ_POLICY, IngestFrontEnd
 
 
 class ZeroMQSubscriber:
     """
     Subscribes to D435i camera and RTABMap bridge via dual ZMQ sockets.
-    Forms canonical FramePacket objects and enqueues them to the ingest queue.
+    Pairs camera frames with poses and hands them to the ingest front-end,
+    which forms canonical FramePacket objects and enqueues them.
     """
+
+    name = "zeromq"
 
     def __init__(
         self,
@@ -141,50 +156,82 @@ class ZeroMQSubscriber:
         self.poller.register(self.rtabmap_sock, zmq.POLLIN)
 
         # Frame window for buffering camera data (encoded bytes; decoded only
-        # after a pose is admitted — see _try_enqueue_frame / _decode_rgbd)
+        # after a pose is admitted -- the front-end's decode on admit)
         self.fw = FrameWindow(ttl_sec=float(frame_window_ttl_s), max_items=int(frame_window_max_items))
-        # Decode memo keyed by the MATCHED CAMERA stamp (not the pose stamp:
-        # two poses within slop of one frame decode it once; a pose whose
-        # nearest frame changes between calls does not get stale pixels).
-        self._decode_cache: "OrderedDict[int, tuple]" = OrderedDict()
-        self._decode_cache_max = 4
-        # Receiver-local running count of enqueue attempts (the only per-frame
-        # id ZeroMQ frames have; TimeBundle.seq stays None so frame ids do not
-        # become ws_*).
-        self._rx_seq: int = 0
 
-        # Track last enqueued timestamp to avoid duplicates
-        self._last_enq_ts_ns: Optional[int] = None
+        # The one ingest chain, ZeroMQ flavour: source keyframes, poses as
+        # separate events, decode after admission, repeat-stamp dedup,
+        # receiver-minted epochs, no tracking-state filter, no confidence map.
+        # The decode memo (4 entries keyed by the paired CAMERA stamp) lives
+        # on it too.
+        self._fe = IngestFrontEnd(
+            source="zeromq", policy=ZEROMQ_POLICY, ingest_queue=ingest_queue,
+            throttle_clock=throttle_clock, nonkf_min_interval_s=nonkf_min_interval_s,
+            require_tracking_normal=False, confidence_threshold=0,
+            pose_sink=pose_sink, event_sink=event_sink, ledger_sink=ledger_sink,
+            latency_analytics=latency_analytics, decode_cache_size=4,
+        )
 
         # Track latest pose for frame assembly
-        self._last_pose_ts_ns: Optional[int] = None
         self._last_pose_t_wc: Optional[np.ndarray] = None
         self._last_pose_q_xyzw: Optional[np.ndarray] = None
-
-        # Throttle non-keyframe enqueuing (pipeline can't keep up with 30Hz).
-        # Stamps advance on the ADMIT decision, not on enqueue. "wall" compares
-        # process time, "sensor" compares the pose timestamps (ingest.clock).
-        self._throttle_clock = "sensor" if str(throttle_clock).lower() == "sensor" else "wall"
-        self._last_nonkf_enq_mono: float = 0.0
-        self._last_nonkf_admit_sensor_ns: Optional[int] = None
-        # Frame-flow trace sink (ReceiverEvent per decision); None = off.
-        self._event_sink = event_sink
-        self._pose_sink = pose_sink
-        self._ledger_sink = ledger_sink
         self._kf_stamps_inherited: int = 0   # kf_pose messages that arrived without a stamp (counted in _handle_kf_pose)
         self._last_enq_cam_ts: Optional[int] = None   # camera stamp the last admitted frame was paired with
-        # Receiver-minted session epoch (ZeroMQ has no hello/session_id): a
-        # tracking stamp that jumps back by more than POSE_EPOCH_REBASE_S is a
-        # restarted source -> new epoch on the pose mailbox, on every
-        # FramePacket (SensorClock re-bases on it) and in liveness().
-        self._frame_epoch: int = 0
-        self._nonkf_min_interval_s: float = float(nonkf_min_interval_s)  # ingest.nonkf_min_interval_s
 
-        # Frame-flow liveness stamps (read by the watchdog). The subscriber
-        # thread is created externally; run.py assigns it to self._thread.
-        self.last_rx_mono: Optional[float] = None
-        self.last_enqueue_mono: Optional[float] = None
+        # The subscriber thread is created externally; run.py assigns it to self._thread.
         self._thread: Optional[Any] = None
+
+    # ── Compatibility delegates: the chain's state lives on the front-end ──
+
+    @property
+    def frontend(self) -> IngestFrontEnd:
+        return self._fe
+
+    def _fe_prop(name):  # noqa: N805 -- tiny descriptor factory, deleted below
+        return property(lambda self: getattr(self._fe, name), lambda self, v: setattr(self._fe, name, v))
+
+    _frame_epoch = _fe_prop("frame_epoch")
+    _rx_seq = _fe_prop("rx_seq")
+    _last_enq_ts_ns = _fe_prop("last_enq_ts_ns")
+    _last_pose_ts_ns = _fe_prop("last_pose_ts_ns")
+    _event_sink = _fe_prop("event_sink")
+    _ledger_sink = _fe_prop("ledger_sink")
+    _pose_sink = _fe_prop("pose_sink")
+    _decode_cache = _fe_prop("_decode_cache")
+    _decode_cache_max = _fe_prop("_decode_cache_max")
+    last_rx_mono = _fe_prop("last_rx_mono")
+    last_enqueue_mono = _fe_prop("last_enqueue_mono")
+    del _fe_prop
+
+    POSE_EPOCH_REBASE_S = POSE_EPOCH_REBASE_S
+
+    @property
+    def _throttle_clock(self) -> str:
+        return self._fe.throttle.clock
+
+    @property
+    def _nonkf_min_interval_s(self) -> float:
+        return self._fe.throttle.interval_s
+
+    @_nonkf_min_interval_s.setter
+    def _nonkf_min_interval_s(self, v: float) -> None:
+        self._fe.throttle.interval_s = float(v)
+
+    @property
+    def _last_nonkf_enq_mono(self) -> float:
+        return self._fe.throttle.last_admit_mono
+
+    @_last_nonkf_enq_mono.setter
+    def _last_nonkf_enq_mono(self, v: float) -> None:
+        self._fe.throttle.last_admit_mono = float(v)
+
+    @property
+    def _last_nonkf_admit_sensor_ns(self) -> Optional[int]:
+        return self._fe.throttle.last_admit_sensor_ns
+
+    @_last_nonkf_admit_sensor_ns.setter
+    def _last_nonkf_admit_sensor_ns(self, v: Optional[int]) -> None:
+        self._fe.throttle.last_admit_sensor_ns = v
 
     def close(self):
         """Clean up ZMQ resources."""
@@ -200,6 +247,8 @@ class ZeroMQSubscriber:
             self.ctx.term()
         except Exception:
             pass
+
+    # ── Camera ──
 
     def _handle_camera_rgbd(self, parts: List[bytes]) -> None:
         """
@@ -239,10 +288,8 @@ class ZeroMQSubscriber:
             )
 
             # Buffer the ENCODED frame (admit-before-decode): JPEG bytes and
-            # (PNG bytes, depth units). Decoding happens in _try_enqueue_frame
-            # once a pose has paired with this frame AND the ingest queue has
-            # room — a congested pipeline no longer costs a decode per 30 Hz
-            # camera message that is never admitted.
+            # (PNG bytes, depth units). Decoding happens in the front-end once
+            # a pose has paired with this frame AND the ingest queue has room.
             jpg_bytes = bytes(parts[2])
             png_bytes = bytes(parts[3])
             if not jpg_bytes or not png_bytes:
@@ -253,6 +300,8 @@ class ZeroMQSubscriber:
 
         except Exception as e:
             logger.error(f"[zeromq] camera.rgbd: parse error: {e}")
+
+    # ── Poses ──
 
     def _parse_rtabmap_pose(self, json_data: dict) -> tuple[int, np.ndarray, np.ndarray]:
         """Parse an RTABMap pose (see _parse_rtabmap_pose_ex); 3-tuple form."""
@@ -307,13 +356,9 @@ class ZeroMQSubscriber:
                 # the pose mailbox (kf_pose does not write the pose).
                 ts_ns = int(time.time_ns())
 
-        # Parse pose [x, y, z, roll, pitch, yaw]
+        # Parse pose [x, y, z, roll, pitch, yaw] (codec layer; pose_scale applied)
         T_wc = json_data["T_wc"]
-        x, y, z = float(T_wc[0]), float(T_wc[1]), float(T_wc[2])
-        roll, pitch, yaw = float(T_wc[3]), float(T_wc[4]), float(T_wc[5])
-
-        # Apply pose scale
-        t_wc = np.array([x, y, z], dtype=np.float32) * self._pose_scale
+        t_wc, q_xyzw = codecs.parse_rtabmap_euler(T_wc, self._pose_scale)
 
         # Debug: log RAW pose from RTABMap (periodically to avoid spam)
         if not hasattr(self, '_pose_log_count'):
@@ -321,10 +366,7 @@ class ZeroMQSubscriber:
         self._pose_log_count += 1
         if self._pose_log_count % 30 == 1:  # Log every 30th pose (~1 per second at 30Hz)
             logger.debug(f"[zmq] RAW T_wc from rtabmap: {T_wc}")
-            logger.debug(f"[zmq] parsed: xyz=[{x:.4f},{y:.4f},{z:.4f}] rpy=[{roll:.3f},{pitch:.3f},{yaw:.3f}]")
-
-        # Convert Euler to quaternion
-        q_xyzw = euler_to_quat_xyzw(roll, pitch, yaw)
+            logger.debug(f"[zmq] parsed: xyz={t_wc.tolist()} rpy=[{float(T_wc[3]):.3f},{float(T_wc[4]):.3f},{float(T_wc[5]):.3f}]")
 
         return ts_ns, t_wc, q_xyzw, stamped
 
@@ -345,27 +387,17 @@ class ZeroMQSubscriber:
             json_data = json.loads(parts[1].decode("utf-8"))
             ts_ns, t_wc, q_xyzw, _stamped = self._parse_rtabmap_pose_ex(json_data)
 
-            # Restarted source? (bag loop, bridge restart): stamp went back by
-            # more than POSE_EPOCH_REBASE_S -> new receiver-minted epoch. A
-            # non-positive stamp is "no stamp" (as for SensorClock and the
-            # mailbox) and neither bumps the epoch nor becomes the reference.
-            last = self._last_pose_ts_ns
-            if ts_ns > 0:
-                if last is not None and ts_ns < int(last) - int(self.POSE_EPOCH_REBASE_S * 1e9):
-                    self._frame_epoch += 1
-                    logger.warning(
-                        "[zeromq] tracking stamp jumped back %.1f s (%d -> %d): new frame_epoch %d",
-                        (int(last) - ts_ns) / 1e9, int(last), ts_ns, self._frame_epoch,
-                    )
-                self._last_pose_ts_ns = ts_ns
+            # Receive-time pose event: the receiver-minted epoch (a stamp that
+            # goes back by more than POSE_EPOCH_REBASE_S = restarted source),
+            # the pose mailbox write at input rate, the P2 pose ledger line.
+            self._fe.pose_event(PoseSample(
+                t_sensor_ns=int(ts_ns), t_wall_utc_s=None, t_wc=t_wc, q_wc_xyzw=q_xyzw,
+                tracking=TrackingStatus.from_rtabmap(), tracking_raw=TS_NOT_AVAILABLE,
+            ))
 
             # Store latest pose
             self._last_pose_t_wc = t_wc
             self._last_pose_q_xyzw = q_xyzw
-
-            # Receive-time robot pose (input rate, independent of admission)
-            self._emit_pose(t_wc, q_xyzw, ts_ns)
-            self._trace_pose(t_wc, q_xyzw, ts_ns)      # P2 pose ledger (tracking poses only)
 
             # Try to assemble non-keyframe
             self._try_enqueue_frame(ts_ns, t_wc, q_xyzw, is_keyframe=False)
@@ -410,6 +442,8 @@ class ZeroMQSubscriber:
         except Exception as e:
             logger.error(f"[zeromq] kf_pose: parse error: {e}")
             self._trace_rx(RX_DROPPED, RX_MALFORMED, None, True)
+
+    # ── Visualization topics (unchanged) ──
 
     def _handle_kf_packet(self, parts: List[bytes]) -> None:
         """
@@ -570,6 +604,8 @@ class ZeroMQSubscriber:
         T[2, 3] = z
         return T
 
+    # ── Frame assembly: pairing (transport) + the front-end (policy) ──
+
     def _try_enqueue_frame(
         self,
         ts_ns: int,
@@ -578,262 +614,112 @@ class ZeroMQSubscriber:
         is_keyframe: bool,
     ) -> None:
         """
-        Try to assemble and enqueue a FramePacket.
-
-        Looks up RGB/depth/intrinsics from FrameWindow by timestamp.
+        One ATTEMPT to assemble and enqueue a frame for a pose. The rx_seq is
+        minted per attempt (the ZeroMQ join key). Order, as before: repeat
+        stamp -> throttle due (no stamp yet) -> pairing -> [front-end: stamp,
+        refusal before decode, decode on admit (memoised per camera stamp),
+        packet] -> enqueue.
         """
         if self.ingest_q is None:
             return
-        self._rx_seq += 1
-        rx_seq = self._rx_seq
-
+        rx_seq = self._fe.next_rx_seq()
         # Skip duplicates (except keyframes always get enqueued)
-        if not is_keyframe and self._last_enq_ts_ns == ts_ns:
-            self._trace_rx(RX_DROPPED, RX_DUPLICATE_TS, ts_ns, is_keyframe, rx_seq=rx_seq)
+        if not is_keyframe and self._fe.is_repeat_stamp(ts_ns):
+            self._fe.reject(RX_DUPLICATE_TS, ts=ts_ns, is_keyframe=False, rx_seq=rx_seq, consume_seq=False)
             return
-
         # Throttle non-keyframes to avoid overwhelming the pipeline. Check
-        # first (cheap), assemble, then STAMP: a pose whose camera frame has
-        # not arrived yet is not an admission and must not burn the window —
-        # the next pose ~33 ms later retries. A full queue after the stamp
-        # still thins (the stamp does not depend on put() succeeding).
-        if not is_keyframe and not self._nonkf_due(ts_ns):
-            self._trace_rx(RX_DROPPED, RX_THROTTLE, ts_ns, is_keyframe, rx_seq=rx_seq)
+        # first (cheap), assemble, then STAMP (inside the front-end): a pose
+        # whose camera frame has not arrived yet is not an admission and must
+        # not burn the window -- the next pose ~33 ms later retries. A full
+        # queue after the stamp still thins.
+        if not is_keyframe and not self._fe.throttle_due(ts_ns):
+            self._fe.reject(RX_THROTTLE, ts=ts_ns, is_keyframe=False, rx_seq=rx_seq, consume_seq=False)
             return  # Skip, too soon since last non-KF
-
         # Assemble frame data from window (encoded bytes, not decoded arrays)
         rgb_raw, depth_raw, intr = self.fw.assemble_pair(ts_ns)
         if rgb_raw is None:
             # No matching camera frame yet
-            self._trace_rx(RX_DROPPED, RX_NO_CAMERA_FRAME, ts_ns, is_keyframe, rx_seq=rx_seq)
+            self._fe.reject(RX_NO_CAMERA_FRAME, ts=ts_ns, is_keyframe=is_keyframe, rx_seq=rx_seq, consume_seq=False)
             return
-
-        # Paired: STAMP the non-KF now, before the queue check, so a refused
-        # frame still burns the throttle window -- the same attempt-based
-        # semantics as the websocket path (step 6 before 6b) and as main.
-        # Otherwise every 30 Hz pose would probe a full queue, log a warning
-        # and count a queue drop: ~15x the websocket receiver's queue_drops
-        # for the same congestion.
-        if not is_keyframe:
-            self._stamp_nonkf(ts_ns)
-
-        # Queue admission BEFORE the decode (admit-before-decode): ask the
-        # queue whether it would refuse this frame (legacy: full; lanes: a
-        # SOURCE keyframe meeting a full keyframe lane under overflow=reject),
-        # so a frame about to be dropped costs no JPEG + PNG decode.
-        kf_origin = KF_SOURCE if is_keyframe else None
-        refusal = self.ingest_q.refusal(is_keyframe, kf_origin)
-        if refusal is not None:
-            if self._latency_analytics:
-                self._latency_analytics.sample_queue_depth(self.ingest_q.qsize())
-                self._latency_analytics.record_queue_drop()
-            frame_type = "keyframe" if is_keyframe else "non-KF"
-            logger.warning(f"[zeromq] ingest queue refused {frame_type} before decode ({refusal})")
-            self._trace_rx(RX_DROPPED, refusal, ts_ns, is_keyframe, rx_seq=rx_seq)
-            return
-
         # Memo key = the camera stamp the pair came from (duck-typed windows
         # without match_stamp fall back to the pose stamp).
         match = getattr(self.fw, "match_stamp", None)
         cam_ts = match(ts_ns) if match is not None else None
-        decoded = self._decode_rgbd(cam_ts if cam_ts is not None else ts_ns, rgb_raw, depth_raw)
-        if decoded is None:
-            self._trace_rx(RX_DROPPED, RX_PARSE_ERROR, ts_ns, is_keyframe, rx_seq=rx_seq)
-            return
-        rgb, depth = decoded
-
-        # Build pose
-        pose = PoseStamped(
-            stamp_ns=ts_ns,
-            frame_id="world",
-            t_wc=t_wc,
-            q_wc_xyzw=q_xyzw,
-        )
-
-        # Build time bundle
-        tb = TimeBundle(
-            t_mono_s=time.monotonic(),
-            t_wall_utc_s=time.time(),
-            t_sensor_ns=ts_ns,
-            seq=None,
-        )
-
-        # Build frame packet
-        fp = FramePacket(
-            time=tb,
-            rgb=rgb,
-            depth_m=depth,
-            pose=pose,
-            intr=intr,
-            is_keyframe=is_keyframe,
-            frame_epoch=self._frame_epoch,
-            ingest=IngestMeta(keyframe_origin=kf_origin, rx_seq=rx_seq),
-        )
-
-        # Enqueue
-        if self._latency_analytics:
-            self._latency_analytics.sample_queue_depth(self.ingest_q.qsize())
-        ok = self.ingest_q.put(fp, block=False)
-        if ok:
-            self.last_enqueue_mono = time.monotonic()
-            self._last_enq_ts_ns = ts_ns
-            self._last_enq_cam_ts = cam_ts
-            frame_type = "KF" if is_keyframe else "frame"
-            logger.debug(f"[zmq] enqueued {frame_type} -> queue={self.ingest_q.qsize()}")
-            self._trace_rx(RX_ENQUEUED, "", ts_ns, is_keyframe, rx_seq=rx_seq,
-                           lane=getattr(fp.ingest, "lane", None))
+        width = int(getattr(intr, "width", 0) or 0)
+        height = int(getattr(intr, "height", 0) or 0)
+        rgb = (EncodedImage(rgb_raw, "raw_bgr", width, height) if isinstance(rgb_raw, np.ndarray)
+               else EncodedImage(rgb_raw, "jpeg", width, height))
+        if depth_raw is None:
+            depth = None
+        elif isinstance(depth_raw, np.ndarray):
+            depth = EncodedImage(depth_raw, "raw_depth_m", width, height)
         else:
-            if self._latency_analytics:
-                self._latency_analytics.record_queue_drop()
-            reason = getattr(fp.ingest, "drop_reason", None) or RX_QUEUE_FULL
-            frame_type = "keyframe" if is_keyframe else "non-KF"
-            logger.warning(f"[zeromq] ingest queue refused {frame_type} ({reason}); dropping")
-            self._trace_rx(RX_DROPPED, reason, ts_ns, is_keyframe, rx_seq=rx_seq)
-
-    # A tracking stamp that goes back by more than this within the stream is a
-    # restarted source (bag loop, bridge restart) -> new receiver-minted epoch.
-    # Same constant as SensorClock.rebase_after_s so the clock and the mailbox
-    # agree on what a restart is.
-    POSE_EPOCH_REBASE_S = 5.0
-
-    def _emit_pose(self, t_wc: np.ndarray, q_xyzw: np.ndarray, ts_ns: int) -> None:
-        """Receive-time pose write (tracking poses only). `timestamp` is this
-        process's wall clock (RTAB-Map's stamp clock is not known to be unix),
-        tagged pose_clock="server"; the mailbox key is (receiver-minted epoch,
-        stamp). Never raises into the receive path."""
-        if self._pose_sink is None:
-            return
+            png_bytes, depth_units = depth_raw
+            # RTAB-Map bridge convention: zeros are KEPT (this receiver never masked them)
+            depth = EncodedImage(png_bytes, "png_uint16_raw", width, height, float(depth_units))
+        raw = RawFrame(header=FrameHeader(
+            source="zeromq", seq=None, t_sensor_ns=int(ts_ns), t_wall_utc_s=None,
+            tracking_state=TS_NOT_AVAILABLE, keyframe_hint=bool(is_keyframe),
+            rgb=rgb, depth=depth, intrinsics=intr,
+            pose_raw=(t_wc, q_xyzw), pose_format=POSE_FMT_PREPARED, pose_convention=CONVENTION_OPENCV,
+            decode_key=(cam_ts if cam_ts is not None else ts_ns),
+            pose_frame_id="world", keep_encoded_rgb=False,
+        ))
         try:
-            self._pose_sink(t_wc, q_xyzw, time.time(), self._frame_epoch,
-                            sensor_ts_ns=int(ts_ns), pose_clock="server")
-        except Exception as e:
-            logger.error(f"[zeromq] pose_sink callback error: {e}")
-
-    def _trace_pose(self, t_wc: np.ndarray, q_xyzw: np.ndarray, ts_ns: int) -> None:
-        """P2 pose ledger: one PoseEvent per rtabmap.tracking_pose (never for
-        kf_pose, which does not write the mailbox either). ZeroMQ has no
-        tracking state and no source seq: tracking_state is "not_available"
-        and (source, t_sensor_ns) is the join key to the receiver lines.
-        Never raises into the receive path."""
-        sink = self._ledger_sink
-        if sink is None:
-            return
-        try:
-            stamp = int(ts_ns) if (ts_ns is not None and int(ts_ns) > 0) else None
-            sink(PoseEvent(
-                timestamp=time.monotonic(),
-                source="zeromq",
-                rx_seq=None,
-                frame_seq=None,
-                t_sensor_ns=stamp,
-                t_wall_utc_s=time.time(),
-                pose_clock="server",
-                epoch=int(self._frame_epoch),
-                tracking_state=TS_NOT_AVAILABLE,
-                mailbox_write=(self._pose_sink is not None),
-                t_wc=[float(v) for v in t_wc],
-                q_wc_xyzw=[float(v) for v in q_xyzw],
-            ))
-        except Exception:
-            logger.debug("[zeromq] pose ledger write failed", exc_info=True)
-
-    def _decode_rgbd(self, ts_ns: int, rgb_raw: Any, depth_raw: Any):
-        """Decode a paired camera frame after admission; memoised per CAMERA
-        stamp (the stamp assemble_pair matched, see FrameWindow.match_stamp).
-
-        Accepts already-decoded arrays too (tests, or a window filled by
-        another producer). Returns (rgb_bgr, depth_m) or None on a decode
-        failure.
-        """
-        hit = self._decode_cache.get(ts_ns)
-        if hit is not None:
-            self._decode_cache.move_to_end(ts_ns)
-            return hit
-        try:
-            if isinstance(rgb_raw, np.ndarray):
-                rgb = rgb_raw
-            else:
-                rgb = cv2.imdecode(np.frombuffer(rgb_raw, dtype=np.uint8), cv2.IMREAD_COLOR)
-                if rgb is None:
-                    logger.warning("[zeromq] camera.rgbd: failed to decode JPEG")
-                    return None
-            if isinstance(depth_raw, np.ndarray) or depth_raw is None:
-                depth_m = depth_raw
-            else:
-                png_bytes, depth_units = depth_raw
-                depth_u16 = cv2.imdecode(np.frombuffer(png_bytes, dtype=np.uint8), cv2.IMREAD_UNCHANGED)
-                if depth_u16 is None:
-                    logger.warning("[zeromq] camera.rgbd: failed to decode PNG depth")
-                    return None
-                depth_m = depth_u16.astype(np.float32) * float(depth_units)
-        except Exception as e:  # noqa: BLE001 — a bad frame must not kill the subscriber
+            pkt = self._fe.admit(raw, rx_seq=rx_seq)
+        except Exception as e:  # noqa: BLE001 -- a bad frame must not kill the subscriber (parse_error line written)
             logger.warning(f"[zeromq] camera.rgbd: decode error: {e}")
-            return None
-        self._decode_cache[ts_ns] = (rgb, depth_m)
-        while len(self._decode_cache) > self._decode_cache_max:
-            self._decode_cache.popitem(last=False)
-        return rgb, depth_m
+            return
+        if pkt is None:
+            return                                   # refused before decode (traced)
+        if self._fe.enqueue(pkt):
+            self._last_enq_cam_ts = cam_ts
+
+    # ── Throttle delegates (the algorithm is NonKfThrottle) ──
 
     def _sensor_throttle_active(self, ts_ns: Optional[int]) -> bool:
-        return self._throttle_clock == "sensor" and ts_ns is not None and int(ts_ns) > 0
+        return self._fe.throttle.sensor_active(ts_ns)
 
     def _nonkf_due(self, ts_ns: Optional[int]) -> bool:
-        """Min-interval throttle check for a non-keyframe (no side effects).
-        sensor mode compares pose timestamps (negative delta = restarted
-        clock -> due); wall mode compares process time."""
-        interval = self._nonkf_min_interval_s
-        if self._sensor_throttle_active(ts_ns):
-            last = self._last_nonkf_admit_sensor_ns
-            return not (last is not None and 0 <= (int(ts_ns) - last) < int(interval * 1e9))
-        return (time.monotonic() - self._last_nonkf_enq_mono) >= interval
+        """Min-interval throttle check for a non-keyframe (no side effects)."""
+        return self._fe.throttle.due(ts_ns)
 
     def _stamp_nonkf(self, ts_ns: Optional[int]) -> None:
-        """Record a non-keyframe ATTEMPT (called once the frame is paired,
-        before the queue check and the decode): a refused frame still burns
-        the window, exactly as on the websocket path."""
-        if self._sensor_throttle_active(ts_ns):
-            self._last_nonkf_admit_sensor_ns = int(ts_ns)
-        else:
-            self._last_nonkf_enq_mono = time.monotonic()
+        """Record a non-keyframe ATTEMPT."""
+        self._fe.throttle.stamp(ts_ns)
+
+    # ── Frame-flow trace (delegate) ──
 
     def _trace_rx(self, decision: str, reason: str, ts_ns: Optional[int], is_keyframe: bool, *,
                   rx_seq: Optional[int] = None, lane: Optional[str] = None) -> None:
         """Frame-flow trace: one ReceiverEvent per receiver decision (no-op when
         no sink is set). ZeroMQ has no source seq; (t_sensor_ns, is_keyframe)
-        is the join key, plus rx_seq (receiver-local attempt count) since P1
-        task 3. Never raises into the receive path."""
-        sink = self._event_sink
-        if sink is None:
-            return
-        try:
-            q = self.ingest_q
-            sink(ReceiverEvent(
-                timestamp=time.monotonic(),
-                source="zeromq",
-                decision=decision,
-                reason=reason,
-                frame_seq=None,
-                t_sensor_ns=(int(ts_ns) if ts_ns is not None else None),
-                is_keyframe=bool(is_keyframe),
-                frame_count=None,
-                queue_depth=(int(q.qsize()) if q is not None else None),
-                lane=lane,
-                rx_seq=rx_seq,
-            ))
-        except Exception:
-            logger.debug("[zeromq] frame-flow trace failed", exc_info=True)
+        is the join key, plus rx_seq (receiver-local attempt count)."""
+        self._fe.trace(decision, reason, ts=ts_ns, is_kf=bool(is_keyframe), rx_seq=rx_seq, lane=lane)
 
     def liveness(self) -> dict:
         """Frame-flow liveness snapshot for the watchdog."""
         t = self._thread
         return {
             "alive": bool(t is not None and t.is_alive()),
-            "last_rx_mono": self.last_rx_mono,
-            "last_enqueue_mono": self.last_enqueue_mono,
+            "last_rx_mono": self._fe.last_rx_mono,
+            "last_enqueue_mono": self._fe.last_enqueue_mono,
             "tracking_drops": 0,  # no tracking-state concept on the ZMQ path
-            "frame_epoch": self._frame_epoch,
+            "frame_epoch": self._fe.frame_epoch,
             "kf_stamps_inherited": self._kf_stamps_inherited,   # bridge-side gap: kf_pose without stamp_ms
         }
+
+    def start(self) -> None:
+        """Start the subscriber loop in a daemon thread (the runners used to do this by hand)."""
+        import threading
+        if self._thread is not None and getattr(self._thread, "is_alive", lambda: False)():
+            return
+        self._thread = threading.Thread(target=self.run_forever, daemon=True, name="zeromq-subscriber")
+        self._thread.start()
+
+    def stop(self) -> None:
+        """Best-effort: close the sockets; the daemon loop exits with the process."""
+        self.close()
 
     def run_forever(self) -> None:
         """Main loop: poll both sockets and dispatch messages."""
@@ -858,7 +744,7 @@ class ZeroMQSubscriber:
 
                 # Handle camera messages
                 if self.camera_sock in socks:
-                    self.last_rx_mono = time.monotonic()
+                    self._fe.last_rx_mono = time.monotonic()
                     parts = self.camera_sock.recv_multipart()
                     topic = parts[0].decode(errors="ignore")
                     if topic == "camera.rgbd":
@@ -866,7 +752,7 @@ class ZeroMQSubscriber:
 
                 # Handle RTABMap messages
                 if self.rtabmap_sock in socks:
-                    self.last_rx_mono = time.monotonic()
+                    self._fe.last_rx_mono = time.monotonic()
                     parts = self.rtabmap_sock.recv_multipart()
                     topic = parts[0].decode(errors="ignore")
                     if topic == "rtabmap.tracking_pose":
@@ -882,21 +768,3 @@ class ZeroMQSubscriber:
             logger.info("[zeromq] Shutting down...")
         finally:
             self.close()
-
-
-# Smoke test
-if __name__ == "__main__":
-    import argparse
-
-    logging.basicConfig(level=logging.DEBUG)
-
-    p = argparse.ArgumentParser(description="ZeroMQ dual-socket subscriber for RTSM")
-    p.add_argument("--camera", default="tcp://127.0.0.1:5555", help="Camera endpoint")
-    p.add_argument("--rtabmap", default="tcp://127.0.0.1:6000", help="RTABMap endpoint")
-    args = p.parse_args()
-
-    sub = ZeroMQSubscriber(
-        camera_endpoint=args.camera,
-        rtabmap_endpoint=args.rtabmap,
-    )
-    sub.run_forever()

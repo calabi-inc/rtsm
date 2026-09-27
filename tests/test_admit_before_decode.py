@@ -19,6 +19,8 @@ from rtsm.io.ingest_queue import IngestQueue
 from rtsm.io.websocket import WebSocketReceiver
 
 
+
+import rtsm.io.codecs as codecs_mod   # the decode functions live here since P3 task 0.5
 def _ws_frame(frame_id: int, timestamp_ns: int, confidence: np.ndarray | None = None, **overrides) -> bytes:
     rgb = np.zeros((16, 16, 3), dtype=np.uint8)
     _, jpeg = cv2.imencode(".jpg", rgb)
@@ -46,13 +48,13 @@ def _ws_frame(frame_id: int, timestamp_ns: int, confidence: np.ndarray | None = 
 @pytest.fixture
 def count_rgb_decodes(monkeypatch):
     calls = {"n": 0}
-    real = ws_mod.decode_rgb
+    real = codecs_mod.decode_rgb
 
     def counting(*a, **kw):
         calls["n"] += 1
         return real(*a, **kw)
 
-    monkeypatch.setattr(ws_mod, "decode_rgb", counting)
+    monkeypatch.setattr(codecs_mod, "decode_rgb", counting)
     return calls
 
 
@@ -91,12 +93,12 @@ class TestWebSocketAdmitBeforeDecode:
 
     def test_no_trace_sink_means_no_depth_stat_work(self, monkeypatch):
         calls = {"n": 0}
-        real = ws_mod.depth_valid_fraction
+        real = codecs_mod.depth_valid_fraction
 
         def counting(d):
             calls["n"] += 1
             return real(d)
-        monkeypatch.setattr(ws_mod, "depth_valid_fraction", counting)
+        monkeypatch.setattr(codecs_mod, "depth_valid_fraction", counting)
 
         recv = WebSocketReceiver(ingest_queue=IngestQueue(maxsize=8), keyframe_every_n=1000, nonkf_min_interval_s=0.0)
         pkt = recv._parse_binary_message(_ws_frame(1, 1_000))
@@ -181,14 +183,14 @@ class TestReplayerAdmission:
 
         rec_dir = self._record(tmp_path, 3)
         calls = {"n": 0}
-        real = ws_mod.decode_depth
+        real = codecs_mod.decode_depth
 
         def flaky(*a, **kw):
             calls["n"] += 1
             if calls["n"] == 2:
                 raise ValueError("corrupt depth payload")
             return real(*a, **kw)
-        monkeypatch.setattr(ws_mod, "decode_depth", flaky)
+        monkeypatch.setattr(codecs_mod, "decode_depth", flaky)
 
         events = []
         rr = ReplayReceiver(recording_dir=str(rec_dir), ingest_queue=IngestQueue(maxsize=8), keyframe_every_n=30,

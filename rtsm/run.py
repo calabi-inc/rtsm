@@ -26,8 +26,9 @@ from rtsm.core.ingest_gate import IngestGate
 from rtsm.stores.sweep_cache import SweepCache
 from rtsm.io.ingest_queue import IngestQueue
 from rtsm.io.ingest_lanes import LaneConfig, lane_drop_handler, make_ingest_queue
-from rtsm.io.zeromq import ZeroMQSubscriber
 from rtsm.io.websocket import WebSocketReceiver
+from rtsm.io.contracts import SourceContext
+from rtsm.io.sources import UnknownSourceError, available_sources, make_source
 from rtsm.utils.net import print_server_addresses, get_local_ipv4_addresses
 from rtsm.utils.static_dir import find_static_dir
 from rtsm.stores.sweep_policy import SweepPolicy
@@ -128,6 +129,15 @@ def main(argv: "list[str] | None" = None):
     except ValueError as exc:
         parser.error(str(exc))
     logger.info("Ingest policy: %s (ingest.policy=%s)", lane_cfg.policy, lane_cfg.configured_policy)
+    # The ingest source name (io.receiver) is validated here too (P3 task
+    # 0.5): a name nobody registered (built-in or `rtsm.sources` entry point)
+    # exits with the known names before the GPU check, long before a model
+    # loads. --replay always uses the replay source.
+    if not args.replay:
+        _rt = str((cfg.get("io") or {}).get("receiver", "zeromq")).lower()
+        _known = available_sources()
+        if _rt not in _known:
+            parser.error(f"Unknown ingest source {_rt!r} (io.receiver). Available: {', '.join(sorted(_known))}.")
 
     # After the ingest validation on purpose: a bad config exits through
     # parser.error on any machine (CPU test), before this check can return.
@@ -313,108 +323,71 @@ def main(argv: "list[str] | None" = None):
     # trace lines with source "lanes" + the analytics counters.
     ingest_q.set_on_drop(lane_drop_handler(event_sink, latency_analytics, ingest_q))
 
-    # Will be set to FrameWindow or None depending on receiver
-    frame_window_for_reset = None
-
+    # ── The ingest source (P3 task 0.5) ──
+    # Every source is a transport adapter on the ONE ingest front-end
+    # (rtsm/io/ingest_frontend.py); the registry (rtsm/io/sources.py) builds
+    # it from one context. `io.receiver` names a built-in (websocket |
+    # zeromq) or a plug-in registered under the `rtsm.sources` entry-point
+    # group; --replay selects the replay source regardless.
+    if args.record and not args.replay and receiver_type == "websocket":
+        from rtsm.io.recorder import SessionRecorder
+        recorder = SessionRecorder(output_dir=args.record, config_snapshot=cfg)
+    source_ctx = SourceContext(
+        ingest_queue=ingest_q,
+        clock_mode=clock_mode,
+        keyframe_every_n=lane_cfg.keyframe_every_n,
+        nonkf_min_interval_s=lane_cfg.nonkf_min_interval_s,
+        require_tracking_normal=bool(ws_cfg.get("require_tracking_normal", True)),
+        confidence_threshold=int(ws_cfg.get("confidence_threshold", 1)),
+        apply_camera_flip=bool(vis_cfg.get("apply_camera_flip", False)),
+        # Receive-time robot pose passthrough: agents polling robot_pose get
+        # input-rate freshness (~5 Hz) instead of the pipeline's sweep-gated
+        # processing rate (~1 Hz). Under replay too, so replay-based
+        # pose-freshness checks mean something.
+        pose_sink=wm.update_robot_pose,
+        # Receive-time depth clearance (wall guard for blind agent motion),
+        # same freshness rationale. Opt-in via io.clearance.enable (see
+        # clearance_enabled above); None makes the receiver skip the depth
+        # statistic entirely. Live websocket only (the replayer takes none).
+        clearance_sink=wm.set_forward_clearance if clearance_enabled else None,
+        event_sink=event_sink,
+        ledger_sink=ledger_sink,
+        latency_analytics=latency_analytics,
+        on_camera_frame=vis_server.broadcast_camera_frame if vis_server else None,
+        on_keyframe=vis_server.handle_frame_packet if vis_server else None,
+        on_pose_corrections=vis_server.handle_kf_pose_update if vis_server else None,
+        on_pose_corrections_batch=vis_server.handle_pose_corrections_batch if vis_server else None,
+        on_kf_packet=vis_server.handle_kf_packet if vis_server else None,
+        on_kf_pose_update=vis_server.handle_kf_pose_update if vis_server else None,
+        on_raw_message=recorder.on_message if recorder else None,
+        on_handshake_done=recorder.on_handshake if recorder else None,
+    )
+    source_name = "replay" if args.replay else receiver_type
+    try:
+        source = make_source(
+            source_name, cfg, source_ctx,
+            recording_dir=args.replay, replay_speed=args.replay_speed,
+            pair_window_s=lane_cfg.pair_window_s,             # ingest.* (P1 task 6)
+            pair_window_frames=lane_cfg.pair_window_frames,
+        )
+    except UnknownSourceError as exc:
+        raise ValueError(str(exc)) from exc
+    source.start()
+    replay_receiver = source if args.replay else None
+    # FrameWindow (ZeroMQ) or None: the /reset handler clears the pairing window
+    frame_window_for_reset = getattr(source, "fw", None)
     if args.replay:
-        # Replay mode: feed recorded session through the pipeline
-        from rtsm.io.replayer import ReplayReceiver
-        replay_receiver = ReplayReceiver(
-            recording_dir=args.replay,
-            ingest_queue=ingest_q,
-            require_tracking_normal=bool(ws_cfg.get("require_tracking_normal", True)),
-            keyframe_every_n=lane_cfg.keyframe_every_n,
-            nonkf_min_interval_s=lane_cfg.nonkf_min_interval_s,
-            confidence_threshold=int(ws_cfg.get("confidence_threshold", 1)),
-            apply_camera_flip=bool(vis_cfg.get("apply_camera_flip", False)),
-            on_keyframe=vis_server.handle_frame_packet if vis_server else None,
-            on_camera_frame=vis_server.broadcast_camera_frame if vis_server else None,
-            on_pose_corrections=vis_server.handle_kf_pose_update if vis_server else None,
-            on_pose_corrections_batch=vis_server.handle_pose_corrections_batch if vis_server else None,
-            latency_analytics=latency_analytics,
-            replay_speed=args.replay_speed,
-            # Receive-time robot pose under replay too (every tracking-normal
-            # frame), so replay-based pose-freshness checks mean something.
-            pose_sink=wm.update_robot_pose,
-            event_sink=event_sink,
-            ledger_sink=ledger_sink,
-            throttle_clock=clock_mode,
-        )
-        replay_receiver.start()
         logger.info(f"Replay receiver started from {args.replay} (speed={args.replay_speed}x)")
-
-    elif receiver_type == "websocket":
-        # Optional: attach recorder if --record is set
-        if args.record:
-            from rtsm.io.recorder import SessionRecorder
-            recorder = SessionRecorder(output_dir=args.record, config_snapshot=cfg)
-
-        ws_receiver = WebSocketReceiver(
-            ingest_queue=ingest_q,
-            host=str(ws_cfg.get("host", "0.0.0.0")),
-            port=int(ws_cfg.get("port", 8765)),
-            require_tracking_normal=bool(ws_cfg.get("require_tracking_normal", True)),
-            keyframe_every_n=lane_cfg.keyframe_every_n,
-            nonkf_min_interval_s=lane_cfg.nonkf_min_interval_s,
-            confidence_threshold=int(ws_cfg.get("confidence_threshold", 1)),
-            apply_camera_flip=bool(vis_cfg.get("apply_camera_flip", False)),
-            on_keyframe=vis_server.handle_frame_packet if vis_server else None,
-            on_camera_frame=vis_server.broadcast_camera_frame if vis_server else None,
-            on_pose_corrections=vis_server.handle_kf_pose_update if vis_server else None,
-            on_pose_corrections_batch=vis_server.handle_pose_corrections_batch if vis_server else None,
-            on_raw_message=recorder.on_message if recorder else None,
-            on_handshake_done=recorder.on_handshake if recorder else None,
-            # Receive-time robot pose passthrough: agents polling robot_pose
-            # get input-rate freshness (~5 Hz) instead of the pipeline's
-            # sweep-gated processing rate (~1 Hz).
-            pose_sink=wm.update_robot_pose,
-            # Receive-time depth clearance (wall guard for blind agent
-            # motion) — same freshness rationale as pose_sink. Opt-in via
-            # io.clearance.enable (see clearance_enabled above); None makes
-            # the receiver skip the depth statistic entirely.
-            clearance_sink=wm.set_forward_clearance if clearance_enabled else None,
-            event_sink=event_sink,
-            ledger_sink=ledger_sink,
-            throttle_clock=clock_mode,
-            latency_analytics=latency_analytics,
-        )
-        ws_receiver.start()
+    elif source.name == "websocket":
         ws_port = int(ws_cfg.get("port", 8765))
         print_server_addresses(ws_port)
         logger.info(f"WebSocket receiver started on ws://{display_host}:{ws_port}/stream")
         if recorder:
             logger.info(f"Recording to {args.record}")
-
-    elif receiver_type == "zeromq":
-        sub = ZeroMQSubscriber(
-            camera_endpoint=io_cfg.get("camera_endpoint", "tcp://127.0.0.1:5555"),
-            rtabmap_endpoint=io_cfg.get("rtabmap_endpoint", "tcp://127.0.0.1:6000"),
-            ingest_queue=ingest_q,
-            depth_m_per_unit=float(units_cfg.get("depth_m_per_unit", 0.001)),
-            pose_m_per_unit=float(units_cfg.get("pose_m_per_unit", 1.0)),
-            on_kf_packet=vis_server.handle_kf_packet if vis_server else None,
-            on_kf_pose_update=vis_server.handle_kf_pose_update if vis_server else None,
-            # Receive-time robot pose at input rate (pose mailbox); the
-            # dequeue-time write alone left /stats.robot_pose at ~1 Hz on ZMQ.
-            pose_sink=wm.update_robot_pose,
-            event_sink=event_sink,
-            ledger_sink=ledger_sink,
-            throttle_clock=clock_mode,
-            nonkf_min_interval_s=lane_cfg.nonkf_min_interval_s,      # ingest.* (P1 task 6; was hardcoded 0.5)
-            frame_window_ttl_s=lane_cfg.pair_window_s,
-            frame_window_max_items=lane_cfg.pair_window_frames,
-            latency_analytics=latency_analytics,
-        )
-        t = threading.Thread(target=sub.run_forever, daemon=True)
-        sub._thread = t  # watchdog reads thread liveness via sub.liveness()
-        t.start()
-        logger.info(f"ZeroMQ dual-socket subscriber started (camera + RTABMap)")
-        frame_window_for_reset = sub.fw
-
+    elif source.name == "zeromq":
+        logger.info("ZeroMQ dual-socket subscriber started (camera + RTABMap)")
     else:
-        raise ValueError(
-            f"Unknown io.receiver: {receiver_type!r}. Choose 'zeromq' or 'websocket'."
-        )
+        logger.info(f"Ingest source {source.name!r} started")
 
     # Visualization tasks start via API server lifespan (start_tasks())
     if vis_server:
@@ -445,11 +418,7 @@ def main(argv: "list[str] | None" = None):
     watchdog = None
     wd_cfg = cfg.get("health", {}).get("watchdog", {})
     if bool(wd_cfg.get("enable", True)) and not args.replay:
-        receiver_liveness = None
-        if receiver_type == "websocket":
-            receiver_liveness = ws_receiver.liveness
-        elif receiver_type == "zeromq":
-            receiver_liveness = sub.liveness
+        receiver_liveness = getattr(source, "liveness", None)
         if receiver_liveness is not None:
             from rtsm.core.watchdog import Watchdog
             watchdog = Watchdog(
@@ -522,10 +491,12 @@ def main(argv: "list[str] | None" = None):
         print(f"  Receiver: WebSocket (ws://{display_host}:{ws_port}/stream)")
         if recorder:
             print(f"  Recording: {args.record}")
-    else:
+    elif receiver_type == "zeromq":
         print(f"  Receiver: ZeroMQ")
         print(f"  Camera:  {io_cfg.get('camera_endpoint', 'tcp://127.0.0.1:5555')}")
         print(f"  RTABMap: {io_cfg.get('rtabmap_endpoint', 'tcp://127.0.0.1:6000')}")
+    else:
+        print(f"  Receiver: {source.name}")
     print(f"  API:     http://{display_host}:{port}")
     if static_dir:
         print(f"  Web UI:  http://{display_host}:{port}")
