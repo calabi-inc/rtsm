@@ -17,7 +17,7 @@ transport bytes ──adapter──▶ RawFrame / PoseSample ──front-end─�
 | Codecs | `rtsm/io/codecs.py` | Pixels and poses: JPEG / PNG / BGRA / NV12 RGB, `uint16_mm` / `float32_m` / PNG depth, confidence maps, intrinsics rescaling, ARKit and RTAB-Map pose formats, the ARKit→OpenCV convention flip. |
 | Front-end | `rtsm/io/ingest_frontend.py` | The chain: tracking filter → pose parse → receive-time pose mailbox → depth decode + pose ledger → keyframe rule → non-keyframe throttle → lane admission (admit-before-decode) → decode on admit (memoised) → clearance / confidence filter → `FramePacket` → enqueue → callbacks → frame-flow trace. |
 | Policy | `FrontEndPolicy` (same module) | The per-source flavour of the chain. Two ship: `WEBSOCKET_POLICY` (minted keyframes, pose rides with the frame, depth decoded before admission) and `ZEROMQ_POLICY` (SLAM keyframes, poses as separate events, decode after admission, repeat-stamp dedup, receiver-minted epochs). |
-| Registry | `rtsm/io/sources.py` | `make_source(name, cfg, ctx, **options)` builds a source by name from one `SourceContext`. Built-ins `websocket`, `zeromq`, `replay`; plug-ins via the `rtsm.sources` entry-point group. |
+| Registry | `rtsm/io/sources.py` | `make_source(name, cfg, ctx, **options)` builds a source by name from one `SourceContext`. Built-ins `websocket`, `zeromq`, `replay`, `bag` (see [Reading Bags](bags.md)); plug-ins via the `rtsm.sources` entry-point group. |
 
 `io.receiver` in the config names the source (`websocket` or `zeromq`, or a plug-in name); `--replay <dir>` selects the replay source regardless. See [Configuration → I/O & Receiver](../getting-started/configuration.md#io--receiver).
 

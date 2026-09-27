@@ -465,3 +465,33 @@ Deviation from the execution plan: the shipped fixture is **synthetic** (built b
 be ~170 MB raw); the real 20-frame parity runs whenever `recordings/session1` is on the box. Task 1 (readers as adapters
 on the task-0.5 seam) will re-run this parity through the product adapter and the G3 fidelity run
 (`rtsm eval recordings/session1 --as-deployed` → the anchor) gates the whole path.
+
+## P3 task 1 reproduction (the bag reader as an ingest source, 2026-09-25) — `p3-task1-bag-reader/` — **G3-1 HARD GATE PASS 4/4 (CPU)**
+
+Branch `feature/p3-task1-bag-reader` (stacked on task 0 / PR #45). One source, `bag` (`rtsm/io/bag_source.py` on the
+task-0.5 front-end), reads ROS 1 `.bag`, rosbag2 (sqlite3 | mcap) and bare `.mcap` through `rtsm/io/bag_reader.py`:
+topic discovery with overrides, a first pass that builds the pose source (`rtsm/io/tf_buffer.py`: TF + TF static or
+odometry, chain discovery, lerp + shortest-arc slerp per moving hop, an extrapolation limit that does not apply to
+constant hops) and checks depth registration, a second pass that pairs RGB with depth by header stamp and yields
+still-encoded `RawFrame`s in the OpenCV convention. Refusals name the reason above the GPU check (`rtsm --bag PATH`
+probes first). `p3t1_gate.sh` is CPU-only; `gate.out` is verbatim (second run; the first is described below).
+
+| predicate | result |
+|---|---|
+| 1. replay parity — `recordings/session1_bag` through `BagSource` vs the B1 record and the replay path | 240 receiver decisions equal (86 enqueued / 154 throttle); 86 packets bit-identical (rgb, depth after the confidence filter, confidence, intrinsics, pose, stamps, seq, origin, rx_seq, depth_valid_frac) |
+| 2. TUM fr1/desk end to end, discovery alone | 613 RGB seen, 586 paired (27 unpaired RGB, 9 unpaired depth), 0 without pose, pair dt ≤ 19.94 ms, the 4-hop chain from `/world`, K match 0.00 %; as-deployed ingest 59 enqueued (20 KF + 39 non-KF) / 527 throttled; 53 s |
+| 2. TUM fr3/long_office_household (`bgr8`) | 2 585 seen, 2 488 paired (97 / 21 unpaired), 0 without pose, pair dt ≤ 8.24 ms; 254 enqueued (83 KF + 171) / 2 234 throttled; 225 s (bz2 decompressed twice) |
+| 3. refusals | r2b_cafe → `no_pose_source` + `unaligned_depth` (depth K 2.1 % off the RGB K); with `assume_aligned` → `no_pose_source`; r2b_hope → `no_depth_topic` + `no_camera_info` |
+| 4/5. startup + unit suites | `--bag` refused above the GPU check with the reasons, a readable bag reaches the check; 92 tests (tf_buffer analytic poses, ROS codecs, synthetic bags for every encoding / pairing / TF / odometry / bare MCAP / sqlite3 / ros2idl / refusal, bag source, front-end, golden traces, entrypoint, converter) |
+
+**The first run FAILED, honestly and usefully:** fr3 had `pose_missing 1` — its first image precedes the first sample of
+TUM's calibration chain by 76 ms, because TUM re-publishes constant transforms on `/tf` as timed samples. The reader
+now treats a timed hop whose samples never change as constant (no extrapolation limit; moving hops keep it), pinned by
+a unit test; the predicate stayed strict (0 frames without pose) and the second run passed. Core CPU suite: 664 passed.
+
+Findings that changed the design: `mcap-ros2-support`'s dynamic parser cannot decode rosbags-written messages and is
+not on the decode path (the mcap container + the stock rosbags typestore is); the depth-registration rule is K-based
+because TUM's depth CameraInfo names the depth optical frame although its images are registered; a single-hop exact
+sample is returned as stored so our own layout round-trips the receiver's pose bit for bit; bz2 ROS 1 bags decompress
+twice (two passes over chunks that mix topics). Not in this task: the G1-B anchor through the runner (task 2, GPU) —
+the parity predicate makes it a formality.

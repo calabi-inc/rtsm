@@ -193,7 +193,7 @@ segmentation:
 
 ## I/O & Receiver
 
-RTSM ships two input receiver backends, both transport adapters on the one ingest front-end (a plug-in can register a third under the `rtsm.sources` entry-point group; see the [Ingest Sources guide](../guides/ingest-sources.md)):
+RTSM ships two input receiver backends, both transport adapters on the one ingest front-end (a plug-in can register a third under the `rtsm.sources` entry-point group; see the [Ingest Sources guide](../guides/ingest-sources.md)), plus the **bag source** for recorded data (`rtsm --bag PATH`; ROS 1 bags, rosbag2, MCAP — see [Reading Bags](../guides/bags.md)):
 
 ```yaml
 io:

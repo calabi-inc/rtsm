@@ -73,6 +73,11 @@ def main(argv: "list[str] | None" = None):
                         help="Replay a recorded session from DIR at original rate")
     parser.add_argument("--record", type=str, default=None, metavar="DIR",
                         help="Record raw WebSocket session to DIR")
+    parser.add_argument("--bag", type=str, default=None, metavar="PATH",
+                        help="Read a ROS 1 .bag, a rosbag2 directory (sqlite3 | mcap) or a bare .mcap through the bag source "
+                             "(sets io.receiver=bag; the ingest clock and policy resolve as under --replay)")
+    parser.add_argument("--bag-speed", type=float, default=None, metavar="X",
+                        help="Pace bag frames by their header stamps at X times real time (default: as fast as the ingest queue accepts)")
     parser.add_argument("--replay-speed", type=float, default=1.0,
                         help="Replay speed multiplier (<1 = slower, e.g. 0.5 = half speed)")
     parser.add_argument("--record-only", action="store_true",
@@ -113,7 +118,7 @@ def main(argv: "list[str] | None" = None):
     # through the config-error path like every other config mistake.
     try:
         clock_mode = resolve_clock_mode((cfg.get("ingest") or {}).get("clock", "auto"),
-                                        replay=bool(args.replay))
+                                        replay=bool(args.replay or args.bag))
     except ValueError as exc:
         parser.error(str(exc))
     clock = make_clock(clock_mode)
@@ -123,7 +128,7 @@ def main(argv: "list[str] | None" = None):
     # here too, so a typo fails before any model loads; lossless is refused
     # for live receivers (its producer-paced put would block the receive loop).
     try:
-        lane_cfg = LaneConfig.from_cfg(cfg, replay=bool(args.replay))
+        lane_cfg = LaneConfig.from_cfg(cfg, replay=bool(args.replay or args.bag))
         resolve_pose_stale_after_s(cfg)     # robot_pose.stale_after_s: finite, > 0
         ledger_cfg = resolve_ledger_config(cfg)      # diagnostics.ledgers / ledger_format (P2)
     except ValueError as exc:
@@ -133,11 +138,32 @@ def main(argv: "list[str] | None" = None):
     # 0.5): a name nobody registered (built-in or `rtsm.sources` entry point)
     # exits with the known names before the GPU check, long before a model
     # loads. --replay always uses the replay source.
+    if args.bag:
+        cfg.setdefault("io", {})["receiver"] = "bag"
+        cfg["io"].setdefault("bag", {})["path"] = args.bag
     if not args.replay:
         _rt = str((cfg.get("io") or {}).get("receiver", "zeromq")).lower()
         _known = available_sources()
         if _rt not in _known:
             parser.error(f"Unknown ingest source {_rt!r} (io.receiver). Available: {', '.join(sorted(_known))}.")
+        if _rt == "bag":
+            # The bag is probed here (topics, pose source, registration): a refusal costs seconds, not a model load.
+            _bag_cfg = dict((cfg.get("io") or {}).get("bag") or {})
+            if not _bag_cfg.get("path"):
+                parser.error("io.receiver=bag needs io.bag.path (or --bag PATH)")
+            try:
+                from rtsm.io.bag_reader import probe_bag
+                _probe = probe_bag(_bag_cfg["path"], topics=dict(_bag_cfg.get("topics") or {}),
+                                   tf_extrapolation_s=float(_bag_cfg.get("tf_extrapolation_s", 0.05)),
+                                   world_frame=_bag_cfg.get("world_frame") or None, camera_frame=_bag_cfg.get("camera_frame") or None,
+                                   assume_aligned=bool(_bag_cfg.get("assume_aligned", False)), typestore=str(_bag_cfg.get("typestore") or "humble"))
+            except (FileNotFoundError, ValueError, RuntimeError) as exc:
+                parser.error(f"--bag: {exc}")
+            if _probe.refusal:
+                parser.error("bag refused: " + "; ".join(f"{c}: {d}" for c, d in _probe.refusal))
+            logger.info("Bag %s: %s | topics %s | pose %s %s -> %s | %s", _bag_cfg["path"], _probe.bag,
+                        {k: v for k, v in _probe.topics.items() if k != "rules" and v}, _probe.pose_kind, _probe.world_frame,
+                        _probe.camera_frame, _probe.registration)
 
     # After the ingest validation on purpose: a bad config exits through
     # parser.error on any machine (CPU test), before this check can return.
@@ -300,7 +326,7 @@ def main(argv: "list[str] | None" = None):
     # when it does. Flag off => the receiver never computes depth statistics
     # and /stats is identical to a build without the feature.
     clearance_enabled = bool(getattr(wm, "clearance_enabled", False))
-    if clearance_enabled and (args.replay or receiver_type != "websocket"):
+    if clearance_enabled and (args.replay or args.bag or receiver_type != "websocket"):
         logger.warning(
             "io.clearance.enable=true but no receive-time clearance source: "
             "only the live websocket receiver computes it (replay=%s, receiver=%s); "
@@ -367,17 +393,21 @@ def main(argv: "list[str] | None" = None):
         source = make_source(
             source_name, cfg, source_ctx,
             recording_dir=args.replay, replay_speed=args.replay_speed,
+            path=(args.bag or None), speed=args.bag_speed,
             pair_window_s=lane_cfg.pair_window_s,             # ingest.* (P1 task 6)
             pair_window_frames=lane_cfg.pair_window_frames,
         )
     except UnknownSourceError as exc:
         raise ValueError(str(exc)) from exc
     source.start()
-    replay_receiver = source if args.replay else None
+    replay_like = bool(args.replay or source.name == "bag")
+    replay_receiver = source if replay_like else None
     # FrameWindow (ZeroMQ) or None: the /reset handler clears the pairing window
     frame_window_for_reset = getattr(source, "fw", None)
     if args.replay:
         logger.info(f"Replay receiver started from {args.replay} (speed={args.replay_speed}x)")
+    elif source.name == "bag":
+        logger.info(f"Bag source started: {getattr(source, 'path', '?')} (speed={args.bag_speed or 'as fast as accepted'})")
     elif source.name == "websocket":
         ws_port = int(ws_cfg.get("port", 8765))
         print_server_addresses(ws_port)
@@ -417,7 +447,7 @@ def main(argv: "list[str] | None" = None):
     # (a finished replay looks exactly like starvation).
     watchdog = None
     wd_cfg = cfg.get("health", {}).get("watchdog", {})
-    if bool(wd_cfg.get("enable", True)) and not args.replay:
+    if bool(wd_cfg.get("enable", True)) and not replay_like:
         receiver_liveness = getattr(source, "liveness", None)
         if receiver_liveness is not None:
             from rtsm.core.watchdog import Watchdog
@@ -486,6 +516,8 @@ def main(argv: "list[str] | None" = None):
     print("  RTSM is running! Waiting for data...")
     if args.replay:
         print(f"  Receiver: Replay ({args.replay})")
+    elif source.name == "bag":
+        print(f"  Receiver: Bag ({getattr(source, 'path', '?')})")
     elif receiver_type == "websocket":
         ws_port = int(io_cfg.get("websocket", {}).get("port", 8765))
         print(f"  Receiver: WebSocket (ws://{display_host}:{ws_port}/stream)")
@@ -516,7 +548,7 @@ def main(argv: "list[str] | None" = None):
     # Force-flush all confirmed objects to FAISS after replay completes.
     # Without this, most confirmed objects aren't upserted because the
     # flush timer can't keep up with the replay speed.
-    if args.replay and vectors is not None:
+    if replay_like and vectors is not None:
         def _flush_after_replay():
             replay_receiver.wait()
             import time as _time
