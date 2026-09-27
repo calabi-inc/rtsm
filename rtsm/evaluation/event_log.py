@@ -224,6 +224,7 @@ class DequeueEvent:
     outcome: str                     # processed | gate_rejected | frame_rejected | dropped
     reason: str                      # gate reason, or one of the DQ_REASON_* labels
     clock_s: Optional[float] = None  # ingest clock (rtsm/core/clock.py) after advancing to this frame
+    gate_shadow: Optional[str] = None  # eval.gate_mode=shadow: the reason the sweep gate WOULD have rejected this processed frame
     kind: str = "dequeue"
 
 

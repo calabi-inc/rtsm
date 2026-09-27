@@ -48,6 +48,7 @@ class ReplayReceiver:
         keyframe_every_n: int = 30,
         nonkf_min_interval_s: float = 0.5,
         confidence_threshold: int = 1,
+        keyframe_interval_s: Optional[float] = None,
         apply_camera_flip: bool = False,
         on_keyframe: Optional[callable] = None,
         on_camera_frame: Optional[callable] = None,
@@ -88,7 +89,7 @@ class ReplayReceiver:
         # and the P2 ledgers all see the queue the frames actually go to.
         self._fe = IngestFrontEnd(
             source="replay", policy=WEBSOCKET_POLICY, ingest_queue=ingest_queue,
-            throttle_clock=throttle_clock, keyframe_every_n=keyframe_every_n,
+            throttle_clock=throttle_clock, keyframe_every_n=keyframe_every_n, keyframe_interval_s=keyframe_interval_s,
             nonkf_min_interval_s=nonkf_min_interval_s, require_tracking_normal=require_tracking_normal,
             confidence_threshold=confidence_threshold, pose_sink=pose_sink, event_sink=event_sink,
             ledger_sink=ledger_sink, latency_analytics=latency_analytics,

@@ -151,6 +151,7 @@ class IngestFrontEnd:
         keyframe_every_n: int = 30,
         nonkf_min_interval_s: float = 0.5,
         require_tracking_normal: bool = True,
+        keyframe_interval_s: Optional[float] = None,
         confidence_threshold: int = 1,
         pose_sink: Optional[Callable[..., Any]] = None,
         clearance_sink: Optional[Callable[..., Any]] = None,
@@ -167,6 +168,12 @@ class IngestFrontEnd:
         self.admission_queue = admission_queue if admission_queue is not None else ingest_queue
         self.throttle = NonKfThrottle(throttle_clock, nonkf_min_interval_s)
         self.keyframe_every_n = max(1, int(keyframe_every_n))
+        # Minted keyframes by sensor-clock INTERVAL instead of by count (the
+        # eval runner's dense mode): the first frame and every frame at least
+        # this far after the last minted keyframe. None = the count rule.
+        self.keyframe_interval_ns: Optional[int] = (int(float(keyframe_interval_s) * 1e9)
+                                                    if keyframe_interval_s and float(keyframe_interval_s) > 0 else None)
+        self.last_kf_sensor_ns: Optional[int] = None
         self.require_tracking_normal = bool(require_tracking_normal)
         self.confidence_threshold = int(confidence_threshold)
         self.pose_sink = pose_sink
@@ -213,6 +220,7 @@ class IngestFrontEnd:
         self.frame_count = 0
         self.throttle.reset()
         self.last_enq_ts_ns = None
+        self.last_kf_sensor_ns = None
 
     # ── counters ──
 
@@ -344,6 +352,12 @@ class IngestFrontEnd:
         if p.keyframe_rule == "source":
             is_keyframe = bool(h.keyframe_hint)
             kf_origin = KF_SOURCE if is_keyframe else None
+        elif self.keyframe_interval_ns is not None and ts is not None:
+            is_keyframe = (self.frame_count == 1 or self.last_kf_sensor_ns is None
+                           or ts - self.last_kf_sensor_ns >= self.keyframe_interval_ns)
+            kf_origin = KF_MINTED if is_keyframe else None
+            if is_keyframe:
+                self.last_kf_sensor_ns = ts
         else:
             is_keyframe = self.frame_count == 1 or self.frame_count % self.keyframe_every_n == 0
             kf_origin = KF_MINTED if is_keyframe else None

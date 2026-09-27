@@ -1,0 +1,25 @@
+== eval s1_replay rc=0 ==
+  "C:\\Users\\konam\\AppData\\Local\\Temp\\claude\\C--Users-konam-OneDrive-Desktop-calabi-repo-rtsm\\949c0384-41c4-4c7e-9f67-2ca869f46d96\\scratchpad\\p3t2_gate\\s1_replay\\run_3"
+ ]
+}
+== eval s1_bag rc=0 ==
+  "C:\\Users\\konam\\AppData\\Local\\Temp\\claude\\C--Users-konam-OneDrive-Desktop-calabi-repo-rtsm\\949c0384-41c4-4c7e-9f67-2ca869f46d96\\scratchpad\\p3t2_gate\\s1_bag\\run_1"
+ ]
+}
+== eval s1_dense rc=0 ==
+  "C:\\Users\\konam\\AppData\\Local\\Temp\\claude\\C--Users-konam-OneDrive-Desktop-calabi-repo-rtsm\\949c0384-41c4-4c7e-9f67-2ca869f46d96\\scratchpad\\p3t2_gate\\s1_dense\\run_1"
+ ]
+}
+== harness rc=0 ==
+B1: fingerprint ad6f71a5b89c8506 (anchor ad6f71a5b89c8506) dequeue 86 receiver 240
+   s1_replay/run_1: 124/65 @53 fp ad6f71a5b89c8506 | dequeue identical (86) | receiver identical (240) | pose 240 obs 695 view 53 | wall 17.125 s | faiss True -> True
+   s1_replay/run_2: 124/65 @53 fp ad6f71a5b89c8506 | dequeue identical (86) | receiver identical (240) | pose 240 obs 695 view 53 | wall 15.032 s | faiss True -> True
+   s1_replay/run_3: 124/65 @53 fp ad6f71a5b89c8506 | dequeue identical (86) | receiver identical (240) | pose 240 obs 695 view 53 | wall 14.235 s | faiss True -> True
+1. replay source x3 -> True | repeats ['ad6f71a5b89c8506', 'ad6f71a5b89c8506', 'ad6f71a5b89c8506'] identical True
+   s1_bag/run_1: 124/65 @53 fp ad6f71a5b89c8506 | dequeue identical (86) | receiver identical (240) | pose 240 obs 695 view 53 | wall 21.593 s | faiss True -> True
+2. bag source -> True
+3. harness through run.py: 124/65 fp ad6f71a5b89c8506 | dequeue identical (86) | receiver identical (240) -> True
+4. dense: gate shadow kf {'kind': 'interval', 'interval_s': 1.0} throttle 0.2 | keyframes 39 min gap 1.000 s | enqueued 195 outcomes {'processed': 195} gate_shadow lines 126 | memory 249/154 fp f9a81c3936d3e0db | wall 53.985 s -> True
+5. isolation: rtsm.yaml unchanged True | model_store/faiss unchanged True | per-run faiss stores [True, True, True] -> True
+HARD GATE: PASS | {'p1_replay_x3': True, 'p2_bag': True, 'p3_harness_run_py': True, 'p4_dense': True, 'p5_isolation': True}
+P3T2_GATE_DONE

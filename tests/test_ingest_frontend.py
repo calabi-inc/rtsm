@@ -163,6 +163,29 @@ def test_session_epoch_and_per_connection_reset():
     assert h.packets()[0].frame_epoch == 2
 
 
+def test_interval_keyframe_rule_on_the_sensor_clock():
+    """P3 task 2 (eval dense mode): keyframes minted by sensor-time interval
+    instead of by count -- the first frame, then every frame at least
+    `keyframe_interval_s` after the last minted keyframe; frames without a
+    stamp fall back to the count rule; a new session resets the anchor."""
+    h = Harness(WEBSOCKET_POLICY, keyframe_every_n=1000, nonkf_min_interval_s=0.0, keyframe_interval_s=1.0)
+    fe = h.fe
+    stamps = [0, 300, 900, 1000, 1500, 2100, 2999, 3000]                       # ms
+    for i, ms in enumerate(stamps, 1):
+        assert fe.offer(_raw(i, ms * 1_000_000 + 1))
+    kfs = [p.time.seq for p in h.packets() if p.is_keyframe]
+    assert kfs == [1, 4, 6]                                    # 0; 1000 (>= 1000 after 0); 2100 (>= 1000 after 1000); 3000 is only 900 after 2100
+    assert fe.last_kf_sensor_ns == 2100 * 1_000_000 + 1
+    fe.reset_session_state()
+    assert fe.last_kf_sensor_ns is None
+    assert fe.offer(_raw(9, 100)) and h.packets()[0].is_keyframe               # first frame of the session is a keyframe again
+    # count rule untouched when no interval is set
+    h2 = Harness(WEBSOCKET_POLICY, keyframe_every_n=2, nonkf_min_interval_s=0.0)
+    for i in range(1, 5):
+        h2.fe.offer(_raw(i, i * 10))
+    assert [p.is_keyframe for p in h2.packets()] == [True, True, False, True]
+
+
 # ───────────────────────────── zeromq flavour ─────────────────────────────
 
 def _zmq_harness(**kw):

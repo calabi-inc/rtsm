@@ -10,7 +10,7 @@ rtsm --bag my_rosbag2_dir --set io.bag.topics.depth=/camera/aligned_depth_to_col
 python scripts/inspect_bag.py my_rosbag2_dir      # what the reader will see: topics, encodings, K, TF hops, stamps
 ```
 
-`--bag` sets `io.receiver: bag` and resolves the ingest clock and policy as `--replay` does (sensor clock, lossless lane). Frames are offered as fast as the ingest queue accepts them; `--bag-speed 1.0` paces them by their header stamps instead.
+To evaluate a bag offline rather than run it live, use [`rtsm eval`](eval.md). `--bag` sets `io.receiver: bag` and resolves the ingest clock and policy as `--replay` does (sensor clock, lossless lane). Frames are offered as fast as the ingest queue accepts them; `--bag-speed 1.0` paces them by their header stamps instead.
 
 ## What the reader needs, and how it finds it
 

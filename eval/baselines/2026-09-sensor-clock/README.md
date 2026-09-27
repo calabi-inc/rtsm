@@ -495,3 +495,31 @@ because TUM's depth CameraInfo names the depth optical frame although its images
 sample is returned as stored so our own layout round-trips the receiver's pose bit for bit; bz2 ROS 1 bags decompress
 twice (two passes over chunks that mix topics). Not in this task: the G1-B anchor through the runner (task 2, GPU) —
 the parity predicate makes it a formality.
+
+## P3 task 2 reproduction (`rtsm eval`, the headless eval runner, 2026-09-27) — `p3-task2-eval-runner/` — **G3-2 HARD GATE PASS 5/5**
+
+Branch `feature/p3-task2-eval-runner`. `rtsm eval <bag-or-recording>` (`rtsm/evaluation/runner.py`) runs the pipeline
+in-process on the bag source (task 1) or the replay source: sensor clock, lossless lane, trace + ledgers on, an isolated
+vector store per run, a `force_all` upsert at the end, N repeats into separate run directories, deterministic
+termination (source done → queue drained → stop), no HTTP server, no config-file mutation. The engine is built through
+the new `rtsm/engine.py` (`load_models` + `build_runtime` = `run.py`'s construction moved verbatim; `run.py` builds
+through it too). Modes: `as_deployed` (the deployed ingest settings, sweep gate enforced) and `dense` (keyframes every
+`eval.keyframe_interval_s` of sensor time, throttle `1/eval.process_rate_hz`, the sweep gate in **shadow**: its
+rejection logged as `gate_shadow` on the dequeue line, the frame processed anyway). `p3t2_gate.sh` (GPU, dual backend);
+`gate.out` verbatim.
+
+| predicate | result |
+|---|---|
+| 1. `rtsm eval recordings/session1 --mode as_deployed --repeats 3` (replay source) | every run 124/65 @53, fingerprint `ad6f71a5b89c8506`, dequeue (86) + receiver (240) sequences identical to B1, pose 240 / obs 695 / view 53; `identical_fingerprints: true`; **14–17 s per run** after the model load |
+| 2. the same through `recordings/session1_bag` (bag source) | identical: 124/65 @53 `ad6f71a5b89c8506`, sequences identical, 21.6 s |
+| 3. the harness (`benchmark_datasheet.py dual`) through the refactored `run.py` | 124/65 `ad6f71a5b89c8506`, sequences identical — the engine factory moved nothing |
+| 4. `--mode dense` on session1 | gate shadow, interval keyframes: 39 keyframes with a minimum gap of 1.000 s on the sensor clock, throttle 0.2 s, 195 enqueued = 195 processed (0 `gate_rejected`), 126 dequeue lines carry `gate_shadow`; memory 249/154 (`f9a81c3936d3e0db`, no anchor — informational), 54 s |
+| 5. isolation | `rtsm/cfg/rtsm.yaml` byte-identical before/after, `model_store/faiss` untouched, each of the three replay runs has its own populated `faiss/` |
+
+Core CPU suite: 676 passed (the pre-existing `models`-marker `test_clip_model_exists` deselected). The per-run cost is
+what the harness used to spend polling: three as-deployed repeats now take under a minute after the models load,
+which is what the report's same-input floor (task 3, ≥ 3 runs) needs.
+
+Recorded: dense mode on session1 processes 3.7× the frames of the deployed cadence (195 vs 53) and the sweep gate would
+have rejected 126 of them — the "gate-would-admit" mask task 3 applies to observation metrics. Not in this task: the
+metrics and the report (task 3), CI (task 4), the vision_msgs detections adapter (master plan §9 item 2).

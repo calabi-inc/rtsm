@@ -191,6 +191,10 @@ class Pipeline:
         self.pose_conversion_failures = 0
         # Frame-quality gate (gates.*): skips unusable frames before segmentation
         self.frame_gate = FrameQualityGate(cfg)
+        # eval.gate_mode: enforce (default) | shadow -- shadow logs the sweep
+        # gate's rejection on the dequeue line (gate_shadow) and processes the
+        # frame anyway (the eval runner's dense mode; never the live default).
+        self._gate_shadow = str((cfg.get("eval") or {}).get("gate_mode", "enforce")).lower() == "shadow"
         # Frame-flow heartbeat read by the watchdog (see rtsm/core/watchdog.py)
         self.heartbeat = PipelineHeartbeat()
 
@@ -320,6 +324,9 @@ class Pipeline:
             logger.warning(f"ingest gate error; proceeding: {e}")
             accept = True
             gate_reason = DQ_REASON_GATE_ERROR
+        shadow_reason = None
+        if not accept and self._gate_shadow:
+            shadow_reason, accept = gate_reason, True           # logged, not enforced
         if not accept:
             if self._latency_analytics:
                 try:
@@ -346,7 +353,7 @@ class Pipeline:
             self.frame_gate.maybe_log(fq)
             self._trace_dequeue(pkt, t_deq, DQ_FRAME_REJECTED, str(getattr(fq, "reason", "") or ""))
             return
-        self._trace_dequeue(pkt, t_deq, DQ_PROCESSED, gate_reason)
+        self._trace_dequeue(pkt, t_deq, DQ_PROCESSED, gate_reason, gate_shadow=shadow_reason)
 
         t_step_start = time.perf_counter()
         t_step_start_mono = time.monotonic()   # same clock as the other trace kinds
@@ -779,7 +786,8 @@ class Pipeline:
             except Exception:
                 logger.debug("observation ledger: line skipped", exc_info=True)
 
-    def _trace_dequeue(self, pkt: Optional[FramePacket], t_deq: float, outcome: str, reason: str) -> None:
+    def _trace_dequeue(self, pkt: Optional[FramePacket], t_deq: float, outcome: str, reason: str,
+                       gate_shadow: Optional[str] = None) -> None:
         """Frame-flow trace: one 'dequeue' line per dequeued frame (no-op when
         diagnostics are off). Never raises into the processing path."""
         if not self._event_log.enabled or pkt is None:
@@ -796,6 +804,7 @@ class Pipeline:
                 outcome=outcome,
                 reason=reason,
                 clock_s=round(float(self.clock.now_mono()), 6),
+                gate_shadow=gate_shadow,
             ))
         except Exception:
             logger.debug("frame-flow trace (dequeue) failed", exc_info=True)

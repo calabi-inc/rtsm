@@ -459,6 +459,26 @@ analytics:
 # reason and queue wait), and one "frame" line per processed frame. First line is
 # "meta" with schema_version. Each pipeline run gets a FRESH file.
 # Path resolution: see rtsm/evaluation/event_log.py docstring.
+# -------------------- Evaluation runner (`rtsm eval <bag>`, P3) --------------------
+# Headless offline runs: sensor clock, lossless lane, trace + ledgers on, an
+# isolated vector store per run, every object force-flushed at the end.
+#   as_deployed = the deployed ingest settings (keyframes every ingest.keyframe_every_n
+#                 admitted frames, the non-keyframe throttle, the sweep gate ENFORCED):
+#                 what `python -m rtsm --replay/--bag` does; the determinism anchors
+#                 are defined on it.
+#   dense       = keyframes every keyframe_interval_s of sensor time, the throttle from
+#                 process_rate_hz, the sweep gate in SHADOW mode (its decision is logged
+#                 as `gate_shadow` on the dequeue line, the frame is processed anyway).
+eval:
+  mode: as_deployed               # as_deployed | dense (--mode overrides)
+  process_rate_hz: 5.0            # dense: non-keyframe throttle = 1 / process_rate_hz on the sensor clock
+  keyframe_interval_s: 1.0        # dense: a minted keyframe at least this far after the previous one (sensor time)
+  use_source_keyframes: auto      # as_deployed: auto = the source's own keyframes when it flags them, else every-N
+  gate_mode: auto                 # auto = enforce under as_deployed, shadow under dense; or enforce | shadow
+  repeats: 1                      # same-input repeats (--repeats overrides); the report's self-consistency floor needs >= 3
+  out: null                       # output directory; null = eval_output/<input>-<mode>-<stamp>/
+  max_wall_s: null                # abort a run after this many seconds (recorded as aborted); null = never
+
 diagnostics:
   enabled: false                  # Master switch. false = zero overhead, no file created.
   track_drops: false              # Capture per-dropped-mask detail (~10us per drop). Counts always tracked.

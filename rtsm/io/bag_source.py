@@ -49,7 +49,7 @@ class BagSource:
             logger.info("[bag] visualization.apply_camera_flip is ignored for bags: ROS optical frames are already the OpenCV convention")
         self._fe = IngestFrontEnd(
             source=source_name, policy=WEBSOCKET_POLICY, ingest_queue=ctx.ingest_queue,
-            throttle_clock=ctx.clock_mode, keyframe_every_n=ctx.keyframe_every_n,
+            throttle_clock=ctx.clock_mode, keyframe_every_n=ctx.keyframe_every_n, keyframe_interval_s=ctx.keyframe_interval_s,
             nonkf_min_interval_s=ctx.nonkf_min_interval_s, require_tracking_normal=False,   # decided per bag (tracking topic present?)
             confidence_threshold=ctx.confidence_threshold, pose_sink=ctx.pose_sink, clearance_sink=ctx.clearance_sink,
             event_sink=ctx.event_sink, ledger_sink=ctx.ledger_sink, latency_analytics=ctx.latency_analytics,

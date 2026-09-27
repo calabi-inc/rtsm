@@ -154,6 +154,7 @@ class SourceContext:
     ingest_queue: Any
     clock_mode: str = "wall"                      # wall | sensor (resolved)
     keyframe_every_n: int = 30
+    keyframe_interval_s: Optional[float] = None       # minted keyframes by sensor-clock interval instead of by count (eval dense mode)
     nonkf_min_interval_s: float = 0.5
     require_tracking_normal: bool = True
     confidence_threshold: int = 1
