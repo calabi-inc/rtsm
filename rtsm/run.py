@@ -18,7 +18,8 @@ except ImportError as e:
     ClipVocabClassifier = None  # type: ignore[assignment,misc]
 
 # ── Core imports (always available) ──
-from rtsm.models.segmentation import get_segmenter
+from rtsm.models.segmentation import get_segmenter  # noqa: F401 -- kept: tests patch run.get_segmenter as the model-load guard
+from rtsm.engine import build_runtime, load_models
 from rtsm.stores.working_memory import WorkingMemory, resolve_pose_stale_after_s
 from rtsm.stores.proximity_index import ProximityIndex, GridSpec
 from rtsm.core.association import Associator
@@ -218,82 +219,30 @@ def main(argv: "list[str] | None" = None):
         return
 
     # Create segmenter from config
-    segmenter = get_segmenter(cfg)
-    logger.info(f"Segmentation backend created: {segmenter.name}")
-    segmenter.warmup()
-    logger.info(f"Segmentation models loaded and ready: {segmenter.name}")
-
-    clip_cfg = cfg.get("clip", {})
-    clip_model = clip_cfg.get("model", "ViT-B-32")
-    clip_pretrained = clip_cfg.get("pretrained", "openai")
-    clip_local = clip_cfg.get("local_dir", "model_store/clip")
-    clip = CLIPAdapter(clip_model, clip_pretrained, clip_local, device=cfg.get("device","cuda"))
-    logger.info(f"CLIP model loaded: {clip_model} ({clip_pretrained})")
+    # ── The engine (rtsm/engine.py, P3 task 2): models once, then the runtime ──
+    # Same construction as before, moved into the factory the eval runner
+    # shares; the G1-B anchor through this runner is the proof it did not move.
+    models = load_models(cfg)
+    segmenter, clip, vocab_clf = models.segmenter, models.clip, models.vocab_clf
     # Determine world-frame up axis from receiver type (ARKit=Y-up, D435i/ROS=Z-up)
     io_cfg = cfg.get("io", {})
     receiver_type = str(io_cfg.get("receiver", "zeromq")).lower()
-    up_axis_default = "y" if receiver_type == "websocket" else "z"
-
-    # Proximity index config
-    scfg = cfg.get("sweep_cache", {})
-    two_d = bool(scfg.get("two_d", True))
-    cell_m = float(scfg.get("grid_size_m", 0.25))
-    per_cell_cap = int(scfg.get("per_cell_cap", 64))
-    neighbors_max = int(scfg.get("neighbors_max", 128))
-    up_axis = str(scfg.get("up_axis", up_axis_default))
-    pi_grid = GridSpec(cell_m=cell_m, use_3d=not two_d, up_axis=up_axis)
-    proximity_index = ProximityIndex(pi_grid, per_cell_cap=per_cell_cap, neighbors_max=neighbors_max)
-    logger.info(f"Proximity index successfully initialized")
-    wm = WorkingMemory(cfg, index=proximity_index, clock=clock)
-    logger.info(f"Working memory successfully initialized")
-    # ── Runtime analytics (optional): Tier-1 buffers + the Tier-2 rollup owner ──
-    # build_analytics returns the two buffers and the AnalyticsTicker (the ONE
-    # owner of the 1 Hz rollup, viz or not); it is started right before
-    # pipe.run_forever() below, so its late_ticks / stale_rollups measure the
-    # run and not the model loads. Sits below WorkingMemory because the ticker
-    # snapshots wm.stats() each tick; the buffers' first consumer is further down.
-    from rtsm.analytics import build_analytics
-    analytics = build_analytics(cfg, wm=wm)
-    seg_analytics = analytics.seg
-    latency_analytics = analytics.latency
-    if analytics.enabled:
-        logger.info(f"Runtime analytics initialized (retention={analytics.retention_s}s, buffer={analytics.buffer_frames} frames; rollup owner = analytics ticker)")
-    assoc = Associator(cfg)
-    ingest_gate = IngestGate(cfg)
-    logger.info(f"Ingest gate successfully initialized")
-    vocab_clf = ClipVocabClassifier(clip.artifacts.model, clip.artifacts.tokenizer, clip.artifacts.preprocess, str(cfg_path("clip/vocab.yaml")), device=cfg.get("device","cuda"))
-    logger.info(f"CLIP vocabulary classifier successfully initialized")
-    vec_cfg = cfg.get("vectors", {})
-    backend = str(vec_cfg.get("backend", "faiss")).lower()
-    vectors = None
-    if bool(vec_cfg.get("enable", True)):
-        if backend == "milvus":
-            from rtsm.stores.vectors.milvus_client import MilvusClient
-            vectors = MilvusClient(cfg)
-        else:
-            from rtsm.stores.vectors.faiss_client import FaissClient
-            vectors = FaissClient(cfg)
-            vs = vectors.stats()
-            logger.info(
-                f"Faiss vectors initialized (dim={vs['dim']}, "
-                f"loaded={vs['count']}, persist={vs['persist_path']})"
-            )
-
-    # Prepare ingest plumbing
-    # Note: Intrinsics are now dynamic per-frame from camera.rgbd topic
-    ingest_q = make_ingest_queue(lane_cfg)
-    sweep_cache = SweepCache(
-        grid_size_m=float(cfg.get("sweep_cache", {}).get("grid_size_m", 0.25)),
-        per_cell_cap=int(cfg.get("sweep_cache", {}).get("per_cell_cap", 64)),
-        neighbors_max=int(cfg.get("sweep_cache", {}).get("neighbors_max", 128)),
-        two_d=bool(cfg.get("sweep_cache", {}).get("two_d", True)),
-        yaw_bins=int(cfg.get("sweep_cache", {}).get("yaw_bins", 12)),
-        pitch_bins=int(cfg.get("sweep_cache", {}).get("pitch_bins", 5)),
-        pitch_deg=float(cfg.get("sweep_cache", {}).get("pitch_deg", 60.0)),
-        look_lru_keep=int(cfg.get("sweep_cache", {}).get("look_lru_keep", 8)),
-        up_axis=up_axis,
+    up_axis_default = "y" if receiver_type in ("websocket", "bag") or args.replay else "z"
+    event_log = EventLogWriter(
+        enabled=ledger_cfg.enabled,
+        configured_path=ledger_cfg.event_log_path,
+        extra_meta={"ingest_clock": clock_mode, "ingest_policy": lane_cfg.policy},
+        # P2 ledgers (diagnostics.ledgers): the pose ledger rides in the same file.
+        ledgers=ledger_cfg.ledgers,
+        ledger_format=ledger_cfg.ledger_format,
     )
-    logger.info(f"Sweep cache successfully initialized")
+    event_sink = event_log.sink()
+    ledger_sink = event_log.ledger_sink()      # None unless diagnostics.ledgers is on
+    rt = build_runtime(cfg, models, clock=clock, lane_cfg=lane_cfg, event_log=event_log, up_axis_default=up_axis_default)
+    proximity_index, wm, analytics = rt.proximity_index, rt.wm, rt.analytics
+    seg_analytics, latency_analytics = analytics.seg, analytics.latency
+    assoc, ingest_gate, vectors, ingest_q, sweep_cache, up_axis = (rt.associator, rt.ingest_gate, rt.vectors, rt.ingest_q,
+                                                                    rt.sweep_cache, rt.up_axis)
 
     # ---------------- Visualization Server (optional) ----------------
     vis_cfg = cfg.get("visualization", {})
@@ -335,19 +284,6 @@ def main(argv: "list[str] | None" = None):
     # Frame-flow trace (diagnostics.*): one JSONL writer shared by the receiver
     # thread and the pipeline thread. Disabled (the default) => every hook is a
     # no-op and event_sink is None, so receivers skip building events entirely.
-    event_log = EventLogWriter(
-        enabled=ledger_cfg.enabled,
-        configured_path=ledger_cfg.event_log_path,
-        extra_meta={"ingest_clock": clock_mode, "ingest_policy": lane_cfg.policy},
-        # P2 ledgers (diagnostics.ledgers): the pose ledger rides in the same file.
-        ledgers=ledger_cfg.ledgers,
-        ledger_format=ledger_cfg.ledger_format,
-    )
-    event_sink = event_log.sink()
-    ledger_sink = event_log.ledger_sink()      # None unless diagnostics.ledgers is on
-    # Lane-side drops (superseded / kf_dropped / age under policy latest) ->
-    # trace lines with source "lanes" + the analytics counters.
-    ingest_q.set_on_drop(lane_drop_handler(event_sink, latency_analytics, ingest_q))
 
     # ── The ingest source (P3 task 0.5) ──
     # Every source is a transport adapter on the ONE ingest front-end
@@ -423,23 +359,7 @@ def main(argv: "list[str] | None" = None):
     if vis_server:
         logger.info("Visualization server initialized (tasks start with API server)")
 
-    pipe = Pipeline(
-        cfg=cfg,
-        segmenter=segmenter,
-        clip=clip,
-        working_mem=wm,
-        proximity_index=proximity_index,
-        associator=assoc,
-        ingest_gate=ingest_gate,
-        vocab_clf=vocab_clf,
-        vectors=vectors,
-        ingest_q=ingest_q,
-        sweep_cache=sweep_cache,
-        event_log=event_log,
-        clock=clock,
-        seg_analytics=seg_analytics,
-        latency_analytics=latency_analytics,
-    )
+    pipe = rt.pipeline
 
     # ---------------- Frame-flow watchdog (live receivers only) ----------------
     # Distinguishes "starved" (input stopped), "hung" (frames waiting, loop

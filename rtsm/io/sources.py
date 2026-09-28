@@ -109,6 +109,7 @@ def replay_source(cfg: dict, ctx: SourceContext, **options: Any):
         ingest_queue=ctx.ingest_queue,
         require_tracking_normal=ctx.require_tracking_normal,
         keyframe_every_n=ctx.keyframe_every_n,
+        keyframe_interval_s=ctx.keyframe_interval_s,
         nonkf_min_interval_s=ctx.nonkf_min_interval_s,
         confidence_threshold=ctx.confidence_threshold,
         apply_camera_flip=ctx.apply_camera_flip,

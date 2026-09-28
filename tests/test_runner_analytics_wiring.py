@@ -61,7 +61,8 @@ def _first(code, opname_prefix: str, argval: str):
 def test_runner_builds_wires_starts_and_stops_the_ticker(modname, fn):
     code = getattr(importlib.import_module(modname), fn).__code__
     names = _all_names(code)
-    assert "build_analytics" in names, f"{modname}.{fn} must build analytics through build_analytics"
+    # P3 task 2: run.main builds its runtime (incl. the analytics) through rtsm.engine.build_runtime
+    assert "build_analytics" in names or (modname == "rtsm.run" and "build_runtime" in names),         f"{modname}.{fn} must build analytics through build_analytics (or the engine factory)"
     for old in ("SegAnalyticsBuffer", "PipelineLatencyBuffer"):
         assert old not in names, f"{modname}.{fn} constructs {old} directly: a second rollup owner or none"
 
@@ -78,8 +79,16 @@ def test_runner_builds_wires_starts_and_stops_the_ticker(modname, fn):
     # and the ticker starts before the PIPELINE loop, i.e. after every load.
     # (run.py also loads `sub.run_forever` as the ZeroMQ subscriber's thread
     # target, earlier in the body — hence the pin on `pipe.run_forever`.)
-    wm_store = _first(code, "STORE_", "wm")
-    build = _first(code, "LOAD_", "build_analytics")
+    # P3 task 2: for run.py the "wm before build_analytics" order is pinned inside
+    # rtsm.engine.build_runtime (run.main loads `build_runtime` instead).
+    if modname == "rtsm.run":
+        import rtsm.engine as engine
+        fcode = engine.build_runtime.__code__
+        assert _first(code, "LOAD_", "build_runtime") is not None, "run.main must build its runtime through rtsm.engine"
+    else:
+        fcode = code
+    wm_store = _first(fcode, "STORE_", "wm")
+    build = _first(fcode, "LOAD_", "build_analytics")
     assert wm_store is not None and build is not None
     assert wm_store < build, "build_analytics must run after WorkingMemory is constructed"
     pipe_loops = _attr_calls_on(code, "pipe", "run_forever")

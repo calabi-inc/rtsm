@@ -27,6 +27,8 @@ def no_models(monkeypatch):
     # run.py binds get_segmenter at module import; patch the module attribute
     # (patching rtsm.models.segmentation, as the demo test does, would be inert here).
     monkeypatch.setattr(run, "get_segmenter", boom)
+    import rtsm.engine as engine                                     # P3 task 2: the models load through the factory
+    monkeypatch.setattr(engine, "get_segmenter", boom)
 
 
 @pytest.mark.parametrize("bad", [

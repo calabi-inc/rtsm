@@ -64,6 +64,8 @@ The recording is stored with git-lfs. After cloning, run `git lfs pull` if the b
 
 ## Convert a recording to MCAP
 
+A recording can also be evaluated directly, without conversion: `rtsm eval recordings/session1` (see [Evaluating a Bag](eval.md)).
+
 The eval tooling reads bags. `scripts/recording_to_mcap.py` turns a recording into a **rosbag2 directory with MCAP storage** (`metadata.yaml` + one `.mcap`), readable by `rosbags`, the `mcap` library, Foxglove and ROS 2:
 
 ```bash

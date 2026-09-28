@@ -163,6 +163,31 @@ class TestDequeueTrace:
         assert r["queue_wait_s"] > 0.0                   # arrival t_mono 0.0 vs a live monotonic dequeue
         assert r["queue_depth"] == 0
 
+    def test_gate_shadow_logs_the_rejection_and_processes(self, tmp_path):
+        """P3 task 2 (eval dense mode): eval.gate_mode=shadow -- the sweep gate's
+        rejection is recorded as gate_shadow on the dequeue line and the frame
+        goes on to processing (here: the frame-quality gate, still enforced)."""
+        w = _writer(tmp_path)
+        q = IngestQueue()
+        pipe = Pipeline(cfg={"eval": {"gate_mode": "shadow"}}, segmenter=None, clip=None, working_mem=None, proximity_index=None,
+                        associator=None, ingest_gate=_GateStub(False, "ttl_not_expired"), ingest_q=q,
+                        sweep_cache=_SweepCacheStub(), event_log=w)
+        q.put(_packet(seq=42, ts_ns=42_000, is_kf=False, t_mono=0.0))
+        pipe.run_one_step()                       # past the (shadowed) ingest gate, stops at the frame-quality gate on a black frame
+        w.close()
+        deq = [r for r in _lines(w.path) if r["kind"] == "dequeue"]
+        assert len(deq) == 1 and deq[0]["outcome"] != "gate_rejected"
+        assert deq[0]["frame_seq"] == 42
+        # enforce (the default) still rejects the same frame at the gate, with no shadow field set
+        w2 = _writer(tmp_path / "enforce")
+        q2 = IngestQueue()
+        pipe2 = _pipeline(q2, _GateStub(False, "ttl_not_expired"), w2)
+        q2.put(_packet(seq=43, ts_ns=43_000, is_kf=False, t_mono=0.0))
+        pipe2.run_one_step()
+        w2.close()
+        r = [r for r in _lines(w2.path) if r["kind"] == "dequeue"][0]
+        assert r["outcome"] == "gate_rejected" and r.get("gate_shadow") is None
+
     def test_frame_gate_rejection_writes_frame_rejected(self, tmp_path):
         w = _writer(tmp_path)
         q = IngestQueue()
