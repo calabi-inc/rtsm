@@ -147,11 +147,7 @@ pip install "rtsm[all]" --extra-index-url https://download.pytorch.org/whl/cu128
 python scripts/benchmark_backends.py
 ```
 
-Results are saved to:
-
-- `reports/backend_comparison.md` — formatted comparison report
-- `reports/raw_dual.json` — raw metrics (dual backend)
-- `reports/raw_grounded_sam2.json` — raw metrics (grounded_sam2 backend)
+Results are written to `reports/` (`backend_comparison.md`, one `raw_<backend>.json` per backend); the directory is not tracked.
 
 ---
 

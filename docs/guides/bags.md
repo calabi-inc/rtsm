@@ -52,4 +52,4 @@ bz2-compressed ROS 1 bags (the TUM RGB-D distribution) are decompressed twice â€
 - `tests/test_tf_buffer.py`: TF composition and interpolation against analytic poses (the pose-math rule).
 - `tests/test_ros_codecs.py`, `tests/test_bag_reader.py`: every encoding, pairing, discovery on the corpus' topic sets, every refusal, a bare MCAP, sqlite3 storage, a `ros2idl` MCAP.
 - `tests/test_bag_source.py`: **the parity predicate** â€” `recordings/session1_bag` through the bag source reproduces the replay receiver's 240 receiver decisions (the B1 record) and its 86 packets bit for bit.
-- `eval/datasets/external-corpus.md`: the real files the reader is developed against (TUM fr1 / fr3, NVIDIA r2b) and what each demands.
+- Public files the reader is developed against: TUM RGB-D `fr1/desk` and `fr3/long_office_household` (ROS 1 bags, 4-hop mocap TF chain, `32FC1` depth with NaN), NVIDIA `r2b_cafe` / `r2b_hope` (rosbag2 sqlite3, no message definitions, no pose source: refused with the reason).

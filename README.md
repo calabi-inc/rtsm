@@ -296,7 +296,7 @@ Benchmarked on RTX 5090 (32 GB), iPhone ARKit recording (240 frames, 76s indoor 
 | Confirmation rate | 65.4% | 59.2% |
 | License | AGPL-3.0 | Apache-2.0 |
 
-> Full breakdown: **[Benchmarks](https://calabi-inc.github.io/rtsm/benchmarks/)** | [`reports/backend_comparison.md`](reports/backend_comparison.md)
+> Full breakdown: **[Benchmarks](https://calabi-inc.github.io/rtsm/benchmarks/)**
 
 ---
 
@@ -315,21 +315,23 @@ See [`config/rtsm.yaml`](config/rtsm.yaml) for full configuration options:
 
 ```
 rtsm/
-├── core/           # Pipeline, association, ingest gate, data models
+├── core/           # Pipeline, association, ingest + frame-quality gates, sensor clock
 ├── models/         # SAM2, Grounding DINO, FastSAM, YOLOE, CLIP adapters
 ├── stores/         # Working memory, proximity index, sweep cache, vector stores
-├── io/             # WebSocket + ZeroMQ receivers, recorder, replayer
+├── io/             # Ingest front-end; websocket / ZeroMQ / replay / bag sources; codecs; recorder; MCP
+├── evaluation/     # Diagnostics event log, ledgers, `rtsm eval` runner, metrics, report
 ├── analytics/      # Runtime analytics (latency, segmentation, congestion)
 ├── api/            # REST API server (FastAPI)
-├── visualization/  # WebSocket server, TSDF fusion, 3D demo
+├── visualization/  # Dashboard server, TSDF fusion, 3D demo
+├── cfg/            # Packaged configuration (rtsm.yaml, demo_config.yaml), CLIP vocabulary, tuning controls
+├── client.py       # Python client for the REST API (the SDK)
+├── engine.py       # Model loading + runtime construction shared by every runner
 └── utils/          # Mask staging, transforms, helpers
-config/
-├── rtsm.yaml       # Main configuration
-└── clip/vocab.yaml  # CLIP vocabulary
 scripts/
 ├── fetch_models.py          # Download models
 ├── debug_segmentation.py    # A/B segmentation viewer
-└── benchmark_backends.py    # Backend benchmark
+├── benchmark_backends.py    # Backend benchmark
+└── recording_to_mcap.py     # Lens recording -> rosbag2 / MCAP
 ```
 
 ---
@@ -344,8 +346,9 @@ scripts/
 - [x] A/B segmentation debug tooling
 - [x] Real-time analytics dashboard
 - [x] Agent interface (MCP — 6 tools via SSE)
-- [ ] Evaluation framework (ArUco ground truth, precision/recall)
-- [ ] More protocols (ROS 2, gRPC)
+- [x] Diagnostics ledgers + `rtsm eval` (ROS 1 / rosbag2 / MCAP bags, headless runs, a report with same-input floors)
+- [x] Python client (`rtsm.client`)
+- [ ] More protocols (ROS 2 live node, gRPC)
 - [ ] LLM integration for high-level queries
 - [ ] Docker image
 

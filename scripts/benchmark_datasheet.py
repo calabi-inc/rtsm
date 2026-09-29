@@ -14,7 +14,7 @@ Usage:
     python scripts/benchmark_datasheet.py fastsam         # subset
     python scripts/benchmark_datasheet.py fastsam yoloe dual grounded_sam2
     python scripts/benchmark_datasheet.py grounded_sam2 \
-        --profile examples/rc_car_agent/e1-demo2.profile.yaml   # E1 tuning
+        --profile my-site.profile.yaml                             # a sparse profile
 
 Options (everything else on the command line is a backend name):
     --profile PATH   pass `--profile PATH` to every `python -m rtsm --replay`

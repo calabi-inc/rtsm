@@ -1,8 +1,11 @@
 """
-Thin RTSM REST customer — the agent's ONLY window into RTSM.
+The Python client for the RTSM REST API -- the SDK a coordinator, a planner
+or a robot agent uses to read the memory. Needs ``requests`` only and imports
+without the perception stack, so it runs on a machine that never loads a model.
 
-Boundary rule (locked): the agent consumes RTSM through its public REST API
-exactly like any external user would. No rtsm imports, no internals.
+Boundary rule: this module consumes RTSM through its public REST API exactly
+like any external user would -- no imports from the rest of the package. The
+RC-car reference agent (its own repository) vendors this file unchanged.
 
 Endpoints used (shapes verified against rtsm/api/server.py):
   GET /healthz          -> {"status": "ok"}

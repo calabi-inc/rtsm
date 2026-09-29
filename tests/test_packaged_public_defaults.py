@@ -1,8 +1,9 @@
 """Pins the P0 config decision of the demo2 -> main reconcile (2026-09).
 
 The packaged ``rtsm/cfg/rtsm.yaml`` keeps main's PUBLIC perception defaults;
-the E1 (RC-car) campaign tuning lives only in the sparse profile
-``examples/rc_car_agent/e1-demo2.profile.yaml``.
+the E1 (RC-car) campaign tuning lives only in a sparse profile (kept with the
+experiments outside this repository since 2026-09-29; its three keys are inlined
+below as the negative the guard checks against).
 
 Why this exists: ``git merge-tree 73aa8e2 f7a0880`` auto-merges rtsm.yaml with
 demo2's ``box_threshold 0.30`` and 5-class vocabulary as the shipped default,
@@ -24,9 +25,16 @@ import pytest
 
 from rtsm.cfg import load_config
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-E1_PROFILE = REPO_ROOT / "examples" / "rc_car_agent" / "e1-demo2.profile.yaml"
 E1_ROSTER = ["teddy bear", "water bottle", "scissors", "tissue box", "dumbbell"]
+# The E1 campaign profile (e1-demo2.profile.yaml, sealed with the paper tree): exactly these three keys.
+E1_PROFILE_YAML = """segmentation:
+  grounded_sam2:
+    box_threshold: 0.30
+    vocab: [teddy bear, water bottle, scissors, tissue box, dumbbell]
+io:
+  clearance:
+    enable: true
+"""
 
 
 def _leaves(node: Any, prefix: str = "") -> Dict[str, Any]:
@@ -75,10 +83,11 @@ def test_packaged_yaml_carries_the_reconcile_blocks():
     assert "sigma_max_m" in cfg["filters"]["depth"]
 
 
-@pytest.mark.skipif(not E1_PROFILE.is_file(), reason="E1 profile not checked out")
-def test_e1_profile_layers_only_the_campaign_tuning():
+def test_e1_profile_layers_only_the_campaign_tuning(tmp_path: Path):
+    profile = tmp_path / "e1-demo2.profile.yaml"
+    profile.write_text(E1_PROFILE_YAML, encoding="utf-8")
     base = load_config("rtsm.yaml")
-    cfg = load_config("rtsm.yaml", profiles=[E1_PROFILE])
+    cfg = load_config("rtsm.yaml", profiles=[profile])
     g = cfg["segmentation"]["grounded_sam2"]
     assert g["box_threshold"] == pytest.approx(0.30)
     assert g["vocab"] == E1_ROSTER

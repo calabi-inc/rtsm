@@ -92,10 +92,6 @@ ENV/
 env/
 .venv.bak/
 
-# Arduino / ESP32 firmware secrets — local only, never commit
-examples/esp32_firmware/**/secrets.h
-!examples/esp32_firmware/**/secrets.h.example
-
 # IDE/editor
 .vscode/
 .idea/
@@ -141,16 +137,11 @@ config
 
 # MkDocs build output (should not be committed; deploy via CI or a gh-pages branch)
 site/
-!examples/rc_car_agent/.env.example
 
-
-# E1 campaign photo archive: home photos with EXIF/GPS - NEVER commit to the public repo.
-# Published form = selected, EXIF-stripped JPEGs in the anonymous artifact only.
-examples/rc_car_agent/paper/demo2_data/session_*/photos/
-
-# Gate records / development notes (eval/baselines/): kept LOCAL, never committed (founder, 2026-09-29).
-# The determinism anchors they hold (session1: 124/65 @53, fingerprint ad6f71a5b89c8506) are stated in the docs.
-eval/baselines/
+# Experiments, gate records and benchmark outputs live in the private lab repository
+# (rtsm-lab, 2026-09-29): nothing under eval/ or reports/ is tracked here. The benchmark
+# scripts still write their outputs to reports/ locally (reports/ is ignored above).
+eval/
 
 # scripts/benchmark_*.py rewrite the packaged config in place and keep a per-PID backup while a run is live
 rtsm/cfg/rtsm.yaml.*bak*
