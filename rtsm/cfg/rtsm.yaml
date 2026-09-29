@@ -368,7 +368,7 @@ ltm:
 visualization:
   # OFF by default (P1 task 7, 2026-09-18): the core runs headless (REST + MCP only). Turn the
   # dashboard on with `rtsm --viz` (or --set visualization.enable=true); `rtsm demo` keeps it on.
-  # G1-C (eval/baselines/2026-09-sensor-clock/README.md) measured the viz+TSDF path stalling the
+  # The G1-C gate (2026-09-18; record kept locally) measured the viz+TSDF path stalling the
   # receive loop and the API at every keyframe; the headless configuration passed every predicate.
   enable: false
   host: 0.0.0.0

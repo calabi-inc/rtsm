@@ -1,8 +1,8 @@
 """
 P3 task 3 -- the metrics over synthetic ledgers and the report over synthetic
 run directories (CPU only). Every metric is exercised on rows whose answer is
-known by construction; the real numbers are gated on session1
-(eval/baselines/2026-09-sensor-clock/p3-task3-metrics-report/).
+known by construction; the real numbers are gated on session1 (gate G3-3,
+2026-09-29; the record is kept with the local development notes).
 
 Contract under test:
   * clusters are leader clusters on the radius, deterministic and independent

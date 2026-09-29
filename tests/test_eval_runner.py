@@ -3,7 +3,7 @@ P3 task 2 -- the eval runner's plumbing on CPU: mode resolution, the per-run
 config isolation, termination (source done + queue drained), run-directory
 layout, summary / repeats records, the CLI. The pipeline is a stub that pops
 the queue and grows a fake memory; the real engine is gated on the GPU
-(eval/baselines/2026-09-sensor-clock/p3-task2-eval-runner/). P3 task 3 adds
+(gate G3-2, 2026-09-27; record kept locally). P3 task 3 adds
 the every_frame cadence and the report written after the repeats.
 """
 from __future__ import annotations

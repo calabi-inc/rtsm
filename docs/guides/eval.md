@@ -49,7 +49,7 @@ eval_output/<input>-<mode>-<stamp>/
   run_2/ …
 ```
 
-`summary.json.memory.fingerprint` is the sha256 of the sorted multiset of `(label_primary, xyz rounded to 3 decimals, hits, confirmed)` — the same definition every gate record in `eval/baselines/` uses.
+`summary.json.memory.fingerprint` is the sha256 of the sorted multiset of `(label_primary, xyz rounded to 3 decimals, hits, confirmed)` — the same definition the determinism gates use (the session1 anchor above).
 
 ## The report
 
