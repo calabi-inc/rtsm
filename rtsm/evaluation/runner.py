@@ -22,6 +22,14 @@ Modes
   decision is logged as ``gate_shadow`` on the dequeue line; the frame is
   processed anyway) -- the input for observation metrics that are then masked
   by what the deployed gate would have admitted.
+- ``every_frame`` (P3 task 3): ``dense`` without the throttle -- every frame
+  the input contains is admitted and processed (the only skips left are the
+  frame-quality gate and tracking-not-normal frames, both logged with a
+  reason). The exhaustive cadence: a detector failure cannot hide behind the
+  eval throttle. Costs the source rate x the per-frame time.
+
+After the repeats the report is written (``metrics.json`` + ``report.md``,
+``rtsm/evaluation/report.py``); ``rtsm report <out_dir>`` regenerates it.
 
 Every run records the keyframe rule, the resolved flags, the config
 fingerprint, the commit and the versions (``resolved`` in ``summary.json``).
@@ -49,7 +57,8 @@ from typing import Any, Callable, Dict, List, Optional
 logger = logging.getLogger(__name__)
 
 SUMMARY_SCHEMA = 1
-MODES = ("as_deployed", "dense")
+MODES = ("as_deployed", "dense", "every_frame")
+CADENCE = {"as_deployed": "deployed", "dense": "representative", "every_frame": "exhaustive"}
 
 
 # ───────────────────────────── options + resolution ─────────────────────────────
@@ -63,11 +72,13 @@ class EvalOptions:
     max_frames: Optional[int] = None
     max_wall_s: Optional[float] = None
     label: Optional[str] = None
+    report: bool = True                      # write metrics.json + report.md after the repeats
 
 
 @dataclass
 class ResolvedEval:
     mode: str
+    cadence: str                             # deployed | representative | exhaustive
     input: str
     input_kind: str                          # replay | bag
     clock: str                               # sensor
@@ -142,9 +153,12 @@ def resolve_eval(cfg: dict, opts: EvalOptions) -> ResolvedEval:
         interval = float(ev.get("keyframe_interval_s", 1.0))
         rate = float(ev.get("process_rate_hz", 5.0))
         if interval <= 0 or rate <= 0:
-            raise ValueError("eval.keyframe_interval_s and eval.process_rate_hz must be > 0")
+            raise ValueError("eval.keyframe_interval_s and eval.process_rate_hz must be > 0 (0 is not every-frame: use --mode every_frame)")
         keyframe_rule = {"kind": "interval", "interval_s": interval}
-        throttle = 1.0 / rate
+        # every_frame = dense without the non-keyframe throttle: only the cadence changes. The keyframe rule stays the
+        # interval rule because the memory position EMA trusts keyframes 0.9 and non-keyframes <= 0.1: every-frame
+        # keyframes would make the memory follow the latest measurement, keyframes-off would freeze positions.
+        throttle = 0.0 if mode == "every_frame" else 1.0 / rate
         gate_default = "shadow"
     gate_mode = str(ev.get("gate_mode", "auto")).lower()
     if gate_mode == "auto":
@@ -160,7 +174,7 @@ def resolve_eval(cfg: dict, opts: EvalOptions) -> ResolvedEval:
             up_axis_default = "z"
     diag = cfg.get("diagnostics") or {}
     return ResolvedEval(
-        mode=mode, input=str(opts.input), input_kind=kind, clock=clock, policy=lane_cfg.policy, keyframe_rule=keyframe_rule,
+        mode=mode, cadence=CADENCE[mode], input=str(opts.input), input_kind=kind, clock=clock, policy=lane_cfg.policy, keyframe_rule=keyframe_rule,
         nonkf_min_interval_s=throttle, gate_mode=gate_mode,
         require_tracking_normal=bool(ws.get("require_tracking_normal", True)), confidence_threshold=int(ws.get("confidence_threshold", 1)),
         apply_camera_flip=bool(vis.get("apply_camera_flip", False)), up_axis_default=up_axis_default,
@@ -379,6 +393,8 @@ class EvalResult:
     out_dir: Path
     resolved: ResolvedEval
     runs: List[Dict[str, Any]] = field(default_factory=list)
+    metrics_path: Optional[Path] = None
+    report_path: Optional[Path] = None
 
     @property
     def repeats(self) -> Dict[str, Any]:
@@ -422,6 +438,14 @@ def run_eval(cfg: dict, opts: EvalOptions, *, models: Any = None, load_models: O
                                runtime_factory=runtime_factory, source_factory=source_factory)
             result.runs.append(summary)
             (out_dir / "repeats.json").write_text(json.dumps(result.repeats, indent=1, default=str), encoding="utf-8")
+        if opts.report:
+            # the report is derived from the run directories; a failure here must not lose the runs
+            try:
+                from rtsm.evaluation.report import write_report
+                result.metrics_path, result.report_path = write_report(out_dir, cfg)
+                logger.info("[eval] report written: %s", result.report_path)
+            except Exception as e:  # noqa: BLE001
+                logger.warning("[eval] report failed (the runs stand; `rtsm report %s` retries): %s", out_dir, e, exc_info=True)
     finally:
         if close_models:
             for m in (getattr(models, "segmenter", None), getattr(models, "clip", None)):
@@ -441,12 +465,14 @@ def build_parser():
     from rtsm.cfg.cli import add_config_arguments
     ap = argparse.ArgumentParser(prog="rtsm eval", description="Headless evaluation run of a bag or a Lens recording (P3).")
     ap.add_argument("input", help="a ROS 1 .bag, a rosbag2 directory, a bare .mcap, or a Lens recording directory (messages.bin)")
-    ap.add_argument("--mode", choices=MODES, default=None, help="as_deployed (default; the deployed ingest settings, gate enforced) | dense")
+    ap.add_argument("--mode", choices=MODES, default=None,
+                    help="as_deployed (default; the deployed ingest settings, gate enforced) | dense (interval keyframes, throttled, gate shadow) | every_frame (dense without the throttle)")
     ap.add_argument("--repeats", type=int, default=None, help="same-input repeats (default: eval.repeats or 1)")
     ap.add_argument("--out", type=str, default=None, help="output directory (default: eval_output/<input>-<mode>-<stamp>/)")
     ap.add_argument("--max-frames", type=int, default=None, help="stop after this many paired frames (bag inputs)")
     ap.add_argument("--max-wall-s", type=float, default=None, help="abort a run after this many seconds of wall time")
     ap.add_argument("--label", type=str, default=None, help="name for the output directory instead of the input's")
+    ap.add_argument("--no-report", action="store_true", help="do not write metrics.json + report.md after the repeats (`rtsm report <dir>` writes them later)")
     add_config_arguments(ap)
     return ap
 
@@ -467,6 +493,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         repeats=(args.repeats if args.repeats is not None else int(ev.get("repeats", 1))),
         out=(args.out or ev.get("out") or None), max_frames=args.max_frames,
         max_wall_s=(args.max_wall_s if args.max_wall_s is not None else ev.get("max_wall_s")), label=args.label,
+        report=(False if args.no_report else bool(ev.get("report", True))),
     )
     if not Path(opts.input).exists():
         ap.error(f"input not found: {opts.input}")
@@ -476,14 +503,15 @@ def main(argv: Optional[List[str]] = None) -> int:
         resolved = resolve_eval(cfg, opts)
     except ValueError as exc:
         ap.error(str(exc))
-    print(f"rtsm eval: {resolved.input} ({resolved.input_kind}) mode={resolved.mode} clock={resolved.clock} policy={resolved.policy} "
+    print(f"rtsm eval: {resolved.input} ({resolved.input_kind}) mode={resolved.mode} ({resolved.cadence}) clock={resolved.clock} policy={resolved.policy} "
           f"keyframes={resolved.keyframe_rule} throttle={resolved.nonkf_min_interval_s:.3f}s gate={resolved.gate_mode} repeats={opts.repeats}")
     try:
         result = run_eval(cfg, opts)
     except ValueError as exc:
         ap.error(str(exc))
     rep = result.repeats
-    print(json.dumps({"out_dir": str(result.out_dir), **rep}, indent=1, default=str))
+    print(json.dumps({"out_dir": str(result.out_dir), **rep, "metrics": (str(result.metrics_path) if result.metrics_path else None),
+                      "report": (str(result.report_path) if result.report_path else None)}, indent=1, default=str))
     return 0 if not any(rep["aborted"]) else 1
 
 

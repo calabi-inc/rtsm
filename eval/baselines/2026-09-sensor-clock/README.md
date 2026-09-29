@@ -523,3 +523,45 @@ which is what the report's same-input floor (task 3, ≥ 3 runs) needs.
 Recorded: dense mode on session1 processes 3.7× the frames of the deployed cadence (195 vs 53) and the sweep gate would
 have rejected 126 of them — the "gate-would-admit" mask task 3 applies to observation metrics. Not in this task: the
 metrics and the report (task 3), CI (task 4), the vision_msgs detections adapter (master plan §9 item 2).
+
+## P3 task 3 reproduction (metrics + the free report, 2026-09-29) — `p3-task3-metrics-report/` — **G3-3 HARD GATE PASS 5/5**
+
+Branch `feature/p3-task3-metrics-report`. `rtsm eval` now ends by writing `metrics.json` + `report.md` over its run
+directories: `rtsm/evaluation/metrics.py` computes every metric of one run from the ledgers alone (spatial clusters on
+the associator's own distance gate, detection over in-frustum views split into re-identified / duplicated / missed and
+masked to the frames the deployed gate would have admitted, label disagreement, along-ray vs lateral scatter with a range
+fit, duplicate spawns with the alive rule and the reason classes, revisits with a re-identification lower bound, worst
+moments, admission, pose health); `rtsm/evaluation/report.py` aggregates the N repeats so every number carries its
+same-input floor (spread over ≥ 3 runs), renders the markdown, and is exposed as `rtsm report <out_dir>` (a pure
+function of the run directories). Also the `every_frame` cadence (dense without the throttle) and `--no-report`.
+`p3t3_gate.sh` (GPU, dual backend); `gate.out` verbatim; `report.md` (as-deployed ×3), `report.dense.md`,
+`report.every_frame.md`, `report.fr1_desk.md` = the reports exactly as the gate runs wrote them.
+
+| predicate | result |
+|---|---|
+| 1. `rtsm eval recordings/session1 --repeats 3` with the report on | every run 124/65 @53 `ad6f71a5b89c8506`, dequeue (86) + receiver (240) sequences identical to B1 (the report changed nothing); `metrics.json` + `report.md` written; 80 scalars, every one with `n_runs == 3`, **every spread 0**; 56 s for the three runs + model load (13.5–14.8 s per run) |
+| 2. logic cross-checks on run_1 | Σ cluster members = the 279 ids seen in the obs ledger (49 clusters at 0.50 m); duplicates = ids − clusters; id-level detection = the P2 view/obs join (398 matched / 1 235 missed in-frustum views); cluster views (470) = the per-frame sum; all 10 worst moments are dequeue / pose stamps; admission counts = `summary.frames`; every cluster leader inside the bbox of its members' raw observations (49/49); disagreement 0 for all 162 single-observation objects; scatter over the 65 objects with ≥ 3 observations; the 27 survivor-label conflicts all in clusters with ≥ 2 survivors |
+| 3. `--mode dense` | shadow: 2 294 cluster views, re-identification 49.5 %; masked to the frames the deployed gate would have admitted: 832 views, 48.3 % (both equal the per-frame sums); 126/195 processed frames shadowed; cadence `representative`; 47 s |
+| 4. `--mode every_frame` | 240 receiver lines all enqueued (0 throttled), 240 processed (0 `gate_rejected`, 0 `frame_rejected`), 39 keyframes ≥ 1.000 s apart, throttle 0.0, cadence `exhaustive`; memory 306/185 (informational), re-identification 49.3 % (masked 47.4 %); **55.9 s** for the 240 frames after the model load |
+| 5. `rtsm report` regeneration | `metrics.json` + `report.md` byte-identical to the files `rtsm eval` wrote |
+| 6. (informational) TUM fr1/desk, `--max-frames 300` | a report on an external ROS 1 bag (float depth, no confidence map, no tracking topic) without error: 22 frames processed at the deployed cadence (30 Hz input), memory 168/29, 17 clusters, re-identification 42.9 %, pose 29.0 Hz with 9 gaps (the RGB/depth pairing), `conf2` absent; 33 s |
+
+Core CPU suite: 692 passed / 0 failed (7 deselected by the gpu / hardware / models markers).
+
+What the free report puts on the table for session1 (as-deployed, dual backend; every number with spread 0 over the
+three runs — on session1 the observation ledger is bit-deterministic, not only the memory): 279 objects created for
+124 surviving (155 transient protos); 49 spatial clusters at the associator's 0.50 m gate (98 at 0.25 m, 19 at 1.0 m),
+84 duplicate objects in the final memory; **241 duplicate spawns = 86 % of created objects** (139 nearby but gated out,
+93 below the 0.90 cosine, 9 not returned by the index; 193 while the original was in the frustum); re-identification
+54.9 % of in-frustum cluster views (71.3 % counting the duplicates as detections); label disagreement p50 50 % and 74 %
+of the objects with ≥ 2 observations disagree with themselves; along-ray scatter 0.083 m RMS vs lateral 0.141 m, no range
+dependence over 1.5–4 m (R² 0.002); 12 revisits with a re-identification lower bound of 83 %; pose stream 5.90 Hz, 0 gaps,
+0 discontinuities. Cadence matters: at `dense` / `every_frame` the duplicate-spawn share rises to 93–94 % of created
+objects and the scatter halves (0.037 / 0.034 m) because consecutive observations of the same object sit closer to its
+median — reports are comparable at the same cadence only, which is why every report states it.
+
+Found and fixed during the gate: the first metrics build broke stamp ties in the cluster ordering on the object id,
+which is random per run — three runs with identical ledgers clustered differently (50 / 48 / 49). The tie-break is now
+the file position (predicate 1 pins it: all 80 spreads 0). Dropped from the scalars: the delivery lag, meaningless under
+the eval's as-fast-as-accepted replay. Not in this task: the baseline compare / attribution / tags / CI gate (P4,
+`rtsm-eval`), CI workflows (task 4), the vision_msgs adapter.

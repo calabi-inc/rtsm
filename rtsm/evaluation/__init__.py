@@ -18,4 +18,13 @@ Current scope:
   association (expected vs observed depth). Schema 1 frozen at G2-C.
 - ledger: reader + rollups over that file (read_events, by_kind,
   pose_health, to_parquet) and the `python -m rtsm.evaluation.ledger` CLI.
+- recording_mcap: the Lens recording -> rosbag2/MCAP converter (P3 task 0).
+- runner: `rtsm eval` (P3 task 2) -- the headless in-process eval run on the
+  bag or replay source, N repeats into run directories.
+- metrics: every metric of one run over its ledgers (P3 task 3): spatial
+  clusters, detection over in-frustum views, label disagreement, along-ray
+  vs lateral scatter, duplicate spawns, revisits, worst moments, admission,
+  pose health.
+- report: metrics.json + report.md over the run directories with the
+  same-input floor on every number; `rtsm report <out_dir>`.
 """

@@ -1,0 +1,32 @@
+== eval s1_replay rc=0 wall=56 s ==
+ ],
+ "metrics": "C:\\Users\\konam\\AppData\\Local\\Temp\\claude\\C--Users-konam-OneDrive-Desktop-calabi-repo-rtsm\\949c0384-41c4-4c7e-9f67-2ca869f46d96\\scratchpad\\p3t3_gate\\s1_replay\\metrics.json",
+ "report": "C:\\Users\\konam\\AppData\\Local\\Temp\\claude\\C--Users-konam-OneDrive-Desktop-calabi-repo-rtsm\\949c0384-41c4-4c7e-9f67-2ca869f46d96\\scratchpad\\p3t3_gate\\s1_replay\\report.md"
+}
+== eval s1_dense rc=0 wall=58 s ==
+ ],
+ "metrics": "C:\\Users\\konam\\AppData\\Local\\Temp\\claude\\C--Users-konam-OneDrive-Desktop-calabi-repo-rtsm\\949c0384-41c4-4c7e-9f67-2ca869f46d96\\scratchpad\\p3t3_gate\\s1_dense\\metrics.json",
+ "report": "C:\\Users\\konam\\AppData\\Local\\Temp\\claude\\C--Users-konam-OneDrive-Desktop-calabi-repo-rtsm\\949c0384-41c4-4c7e-9f67-2ca869f46d96\\scratchpad\\p3t3_gate\\s1_dense\\report.md"
+}
+== eval s1_every rc=0 wall=66 s ==
+ ],
+ "metrics": "C:\\Users\\konam\\AppData\\Local\\Temp\\claude\\C--Users-konam-OneDrive-Desktop-calabi-repo-rtsm\\949c0384-41c4-4c7e-9f67-2ca869f46d96\\scratchpad\\p3t3_gate\\s1_every\\metrics.json",
+ "report": "C:\\Users\\konam\\AppData\\Local\\Temp\\claude\\C--Users-konam-OneDrive-Desktop-calabi-repo-rtsm\\949c0384-41c4-4c7e-9f67-2ca869f46d96\\scratchpad\\p3t3_gate\\s1_every\\report.md"
+}
+== eval fr1_desk rc=0 wall=64 s ==
+ ],
+ "metrics": "C:\\Users\\konam\\AppData\\Local\\Temp\\claude\\C--Users-konam-OneDrive-Desktop-calabi-repo-rtsm\\949c0384-41c4-4c7e-9f67-2ca869f46d96\\scratchpad\\p3t3_gate\\fr1_desk\\metrics.json",
+ "report": "C:\\Users\\konam\\AppData\\Local\\Temp\\claude\\C--Users-konam-OneDrive-Desktop-calabi-repo-rtsm\\949c0384-41c4-4c7e-9f67-2ca869f46d96\\scratchpad\\p3t3_gate\\fr1_desk\\report.md"
+}
+== report regen rc=0 ==
+   run_1: 124/65 @53 fp ad6f71a5b89c8506 | dequeue identical (86) | receiver identical (240) | wall 14.218 s -> True
+   run_2: 124/65 @53 fp ad6f71a5b89c8506 | dequeue identical (86) | receiver identical (240) | wall 13.531 s -> True
+   run_3: 124/65 @53 fp ad6f71a5b89c8506 | dequeue identical (86) | receiver identical (240) | wall 14.828 s -> True
+1. anchor x3 + report: files True n_runs 3 floor True identical fp True | scalars 80 all n_runs==3 True | nonzero spreads {} -> True
+2. cross-checks run_1: members==ids True (279 ids, 49 clusters) | dups==ids-clusters True | id-level det == view join True (398/1235) | views == frame sum True (470) | moments exist True | admission == summary True | leader inside bbox True (49) | single-obs disagreement 0 True (162) | scatter tracks True (65) | label conflicts True (27) -> True
+3. dense: shadow True | all views 2294 (frame sum 2294) reid 0.495205 | masked views 832 (frame sum 832) reid 0.483173 | shadowed 126/195 | cadence representative -> True
+4. every_frame: receiver {'enqueued': 240} | dequeue {'processed': 240} | keyframes 39 min gap 1.00005675 | cadence exhaustive throttle 0.0 | memory 306/185 | reid 0.492798 masked 0.474388 | wall 55.89 s -> True
+5. rtsm report regeneration byte-identical: True
+6. (info) fr1_desk: processed 22 memory 168/29 | clusters 17 reid 0.428571 dups 166 | pose hz 29.0289 conf2 None | wall 33.281 s | report True
+HARD GATE: PASS | {'p1_anchor_x3_report': True, 'p2_cross_checks': True, 'p3_dense_masked': True, 'p4_every_frame': True, 'p5_regeneration': True}
+P3T3_GATE_DONE
