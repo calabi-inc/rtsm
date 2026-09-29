@@ -102,14 +102,14 @@ def patch_config(backend: str) -> None:
     #    the analytics ticker and runs whenever analytics.enable is true, so
     #    headless runs carry a full latency_hourly / segmentation_hourly
     #    history and real input_hz / effective_ratio. Records made before
-    #    that (eval/baselines/2026-09-sensor-clock/B1.json and older) have
+    #    that (the B1 sensor-clock anchor of 2026-09-09 and older; local gate records) have
     #    empty hourly lists, input_hz 0.0 and effective_ratio ~1000
     #    (processing / 0.001): the rollup then lived in the viz push loop
     #    and ran only while a browser client was attached.
     #  * Object counts are NOT viz-independent: a faster step shifts the
     #    wall-clock non-KF admission, so headless runs carry a few extra
     #    unconfirmed protos (confirmed set identical). Compare headless runs
-    #    only against headless anchors (eval/baselines/*-headless/).
+    #    only against headless anchors (the *-headless gate records, kept locally).
     # Pass --viz to the harness when a human wants to watch the run.
     cfg["visualization"]["enable"] = bool(VIZ)
     # Increase analytics buffer to capture all frames (session1 has 162)
@@ -232,7 +232,7 @@ def run_one_backend(backend_info: Dict[str, str]) -> Dict[str, Any]:
         basic_stats = api_get("/stats") or {}
         objects_all = api_get("/objects") or {}
         # /objects defaults to the first 100 objects; the multiset anchors
-        # recorded in eval/baselines/ were computed over that page, so it is
+        # recorded in the local gate records were computed over that page, so it is
         # kept as-is. objects_full is the whole map (server max 500) for the
         # post-reconcile anchors -- do not compare it against the old shas.
         objects_full = api_get("/objects?limit=500") or {}

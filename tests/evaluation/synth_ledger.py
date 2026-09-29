@@ -163,3 +163,57 @@ def frame_flow_rows(spec: Sequence[Tuple[str, str, str]], *, source: str = "repl
                          "is_keyframe": (i == 0), "queue_wait_s": 0.01, "queue_depth": 0, "outcome": dq, "reason": reason,
                          "clock_s": 100.0 + i})
     return rows
+
+
+# ───────────────────────────── P3 task 3: single-line builders for the metric tests ─────────────────────────────
+
+def obs_line(ts_ns: int, oid: Optional[str], outcome: str, p_world: Optional[Sequence[float]], *, cam: Sequence[float] = (0.0, 0.0, 0.0),
+             label: Optional[str] = "mug", frame_seq: Optional[int] = None, cand_idx: int = 0, n_nearby: int = 0, n_gate_survivors: int = 0,
+             max_cos: Optional[float] = None, cos_sim: Optional[float] = None, dist_m: Optional[float] = None,
+             matched_without_scoring: bool = False, range_m: Optional[float] = None, is_keyframe: bool = False) -> dict:
+    """One schema-1 obs line. The camera has identity rotation, so p_cam = p_world - cam."""
+    pw = [float(v) for v in p_world] if p_world is not None else None
+    cam_l = [float(v) for v in cam]
+    p_cam = ([pw[i] - cam_l[i] for i in range(3)] if pw is not None else None)
+    rng = range_m if range_m is not None else ((sum(v * v for v in p_cam) ** 0.5) if p_cam is not None else None)
+    return {
+        "kind": "obs", "timestamp": ts_ns / 1e9, "frame_seq": frame_seq, "t_sensor_ns": int(ts_ns), "epoch": 1,
+        "is_keyframe": is_keyframe, "lane": "fifo", "keyframe_origin": ("minted" if is_keyframe else None), "rx_seq": None,
+        "cam_t_wc": cam_l, "cam_q_wc_xyzw": [0.0, 0.0, 0.0, 1.0], "cand_idx": cand_idx, "outcome": outcome, "object_id": oid,
+        "p_world": pw, "p_cam": p_cam, "range_m": rng, "view_bin": (0 if p_cam is not None else None),
+        "cos_sim": cos_sim, "dist_m": dist_m, "px_err": None, "n_nearby": n_nearby, "n_gate_survivors": n_gate_survivors,
+        "max_cos": max_cos, "matched_without_scoring": matched_without_scoring,
+        "label_topk": ([{"label": label, "score": 0.5}] if label else None), "priority": 0.5,
+        "mask": {"area_px": 1000, "bbox": [0, 0, 10, 10], "coverage": 0.5, "border_fraction": 0.0, "depth_valid": 1.0,
+                 "depth_p50": (p_cam[2] if p_cam is not None else None), "depth_spread": 0.05, "planar_inlier_pct": None,
+                 "planar_rms_m": None, "centroid_px": [5.0, 5.0]},
+    }
+
+
+def view_line(ts_ns: int, ids: Sequence[str], *, expected: float = 2.0, observed: Optional[float] = 2.0, frame_seq: Optional[int] = None,
+              n_live: Optional[int] = None, is_keyframe: bool = False, expected_by_id: Optional[dict] = None) -> dict:
+    """One schema-1 view line listing ``ids`` (pre-existing objects in the frustum)."""
+    objs = [{"id": oid, "confirmed": True, "hits": 2, "stability": 0.8, "label_primary": "mug", "u": 5.0 + i, "v": 6.0,
+             "expected_depth": ((expected_by_id or {}).get(oid, expected)), "observed_depth": observed} for i, oid in enumerate(ids)]
+    return {"kind": "view", "timestamp": ts_ns / 1e9 - 0.001, "frame_seq": frame_seq, "t_sensor_ns": int(ts_ns), "epoch": 1,
+            "is_keyframe": is_keyframe, "frustum_model": "v1_occlusion_agnostic", "rgb_hw": [12, 16], "depth_hw": [6, 8],
+            "n_live": (n_live if n_live is not None else len(ids)), "n_in_frustum": len(ids), "objects": objs, "view_ms": 0.2}
+
+
+def dequeue_line(ts_ns: int, *, outcome: str = "processed", reason: str = "keyframe", gate_shadow: Optional[str] = None,
+                 frame_seq: Optional[int] = None, is_keyframe: bool = False) -> dict:
+    return {"kind": "dequeue", "timestamp": ts_ns / 1e9 - 0.002, "frame_seq": frame_seq, "t_sensor_ns": int(ts_ns), "is_keyframe": is_keyframe,
+            "queue_wait_s": 0.0, "queue_depth": 0, "outcome": outcome, "reason": reason, "clock_s": ts_ns / 1e9, "gate_shadow": gate_shadow}
+
+
+def summary_for(objects: Sequence[dict], **extra: object) -> dict:
+    """A summary.json-shaped dict whose ``memory.objects`` are ``objects``
+    ({id, xyz_world, hits, confirmed, label_primary, view_bins})."""
+    objs = [{"id": o["id"], "xyz_world": list(o.get("xyz_world", [0.0, 0.0, 2.0])), "created_wall_utc": 0.0, "created_mono": 0.0,
+             "stability": 0.8, "hits": int(o.get("hits", 1)), "confirmed": bool(o.get("confirmed", False)),
+             "label_primary": o.get("label_primary", "mug"), "view_bins": int(o.get("view_bins", 1)), "last_seen_mono": 0.0} for o in objects]
+    d = {"schema": 1, "memory": {"objects": objs, "objects_count": len(objs), "confirmed_count": sum(1 for o in objs if o["confirmed"]),
+                                 "fingerprint": "synthetic", "working_memory": {}}, "frames": {}, "wall_s": 1.0, "aborted": None, "run_index": 1}
+    d.update(extra)
+    return d
+

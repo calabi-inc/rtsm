@@ -3,7 +3,8 @@ P3 task 2 -- the eval runner's plumbing on CPU: mode resolution, the per-run
 config isolation, termination (source done + queue drained), run-directory
 layout, summary / repeats records, the CLI. The pipeline is a stub that pops
 the queue and grows a fake memory; the real engine is gated on the GPU
-(eval/baselines/2026-09-sensor-clock/p3-task2-eval-runner/).
+(gate G3-2, 2026-09-27; record kept locally). P3 task 3 adds
+the every_frame cadence and the report written after the repeats.
 """
 from __future__ import annotations
 
@@ -152,6 +153,14 @@ def test_resolve_both_modes(cfg, bag):
     with pytest.raises(ValueError):
         R.resolve_eval(cfg, R.EvalOptions(input=str(bag), mode="sparse"))
     assert R.input_kind(REPO / "recordings" / "demo_clip") == "replay" and R.input_kind(bag) == "bag"
+    # every_frame (task 3) = dense without the throttle; the cadence is recorded
+    e = R.resolve_eval(cfg, R.EvalOptions(input=str(bag), mode="every_frame"))
+    assert (e.cadence, e.gate_mode, e.nonkf_min_interval_s, e.keyframe_rule) == ("exhaustive", "shadow", 0.0, {"kind": "interval", "interval_s": 1.0})
+    assert r.cadence == "deployed" and d.cadence == "representative"
+    cfg3 = json.loads(json.dumps(cfg)); cfg3["eval"]["keyframe_interval_s"] = 0
+    for mode in ("dense", "every_frame"):
+        with pytest.raises(ValueError, match="every_frame"):
+            R.resolve_eval(cfg3, R.EvalOptions(input=str(bag), mode=mode))
 
 
 def test_configure_run_isolates_paths_and_never_touches_the_input(cfg, bag, tmp_path):
@@ -186,6 +195,12 @@ def test_run_eval_terminates_writes_records_and_isolates_repeats(cfg, bag, tmp_p
     assert packaged.read_bytes() == yaml_before
     assert (tmp_path / "out" / "resolved.json").is_file() and (tmp_path / "out" / "bag_probe.json").is_file()
     assert len(result.runs) == 2
+    # the report (task 3) is written after the repeats, over the run directories
+    assert result.metrics_path == tmp_path / "out" / "metrics.json" and result.report_path == tmp_path / "out" / "report.md"
+    doc = json.loads(result.metrics_path.read_text(encoding="utf-8"))
+    assert doc["n_runs"] == 2 and doc["aggregate"]["floor_established"] is False and doc["runs"][0]["scalars"]["admission.processed"] == 4
+    assert doc["runs"][0]["scalars"]["pose.n_frames"] == 12 and doc["runs"][0]["clusters"] == []      # the stub creates no obs lines
+    assert "Floor not established: 2 run(s)" in result.report_path.read_text(encoding="utf-8")
     for k, s in enumerate(result.runs, 1):
         rd = tmp_path / "out" / f"run_{k}"
         assert s["run_dir"] == str(rd) and (rd / "summary.json").is_file() and (rd / "events.jsonl").is_file()
@@ -217,6 +232,24 @@ def test_dense_mode_shadow_gate_interval_keyframes_and_max_frames(cfg, bag, tmp_
     rows = [json.loads(l) for l in (tmp_path / "out" / "run_1" / "events.jsonl").read_text(encoding="utf-8").splitlines() if l.strip()]
     assert rows[0]["eval_mode"] == "dense" and rows[0]["gate_mode"] == "shadow" and rows[0]["keyframe_rule"]["kind"] == "interval"
     assert sum(1 for r in rows if r.get("kind") == "dequeue" and r.get("gate_shadow")) == 4
+
+
+def test_every_frame_mode_admits_every_frame_and_no_report(cfg, bag, tmp_path):
+    opts = R.EvalOptions(input=str(bag), mode="every_frame", repeats=1, out=str(tmp_path / "out"), report=False)
+    result = R.run_eval(cfg, opts, models=object(), runtime_factory=fake_runtime_factory)
+    s = result.runs[0]
+    # 12 frames at 100 ms: interval keyframes at 0 and 1.0 s, no throttle -> every frame admitted and processed
+    assert s["frames"]["receiver"] == {"enqueued": 12} and s["frames"]["processed"] == 12
+    assert s["resolved"]["cadence"] == "exhaustive" and s["resolved"]["nonkf_min_interval_s"] == 0.0 and s["resolved"]["gate_mode"] == "shadow"
+    assert s["frames"]["gate_shadow"] == {"ttl": 10}                                  # the stub shadows every non-keyframe
+    rows = [json.loads(l) for l in (tmp_path / "out" / "run_1" / "events.jsonl").read_text(encoding="utf-8").splitlines() if l.strip()]
+    assert rows[0]["eval_mode"] == "every_frame" and rows[0]["nonkf_min_interval_s"] == 0.0
+    assert sum(1 for r in rows if r.get("kind") == "receiver" and r.get("is_keyframe")) == 2
+    assert result.report_path is None and not (tmp_path / "out" / "metrics.json").exists()
+    # rtsm report writes it later from the same directory
+    from rtsm.evaluation.report import write_report
+    mp, rp = write_report(tmp_path / "out", cfg)
+    assert mp.is_file() and "exhaustive (every_frame)" in rp.read_text(encoding="utf-8")
 
 
 def test_max_wall_abort_is_recorded(cfg, bag, tmp_path):
@@ -261,7 +294,9 @@ def test_cli_main_and_errors(cfg, bag, tmp_path, monkeypatch, capsys):
     assert R.main([str(bag), "--mode", "dense", "--repeats", "2", "--max-frames", "5", "--set", "eval.process_rate_hz=4"]) == 0
     out = capsys.readouterr().out
     assert seen["opts"].mode == "dense" and seen["opts"].repeats == 2 and seen["opts"].max_frames == 5
-    assert "keyframes={'kind': 'interval'" in out and '"identical_fingerprints": true' in out
+    assert "keyframes={'kind': 'interval'" in out and '"identical_fingerprints": true' in out and "(representative)" in out
+    assert seen["opts"].report is True
+    assert R.main([str(bag), "--no-report"]) == 0 and seen["opts"].report is False
     with pytest.raises(SystemExit) as ex:
         R.main([str(tmp_path / "missing.bag")])
     assert ex.value.code == 2 and "input not found" in capsys.readouterr().err

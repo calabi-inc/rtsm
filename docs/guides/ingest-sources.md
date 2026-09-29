@@ -124,6 +124,6 @@ An unknown value raises `codecs.UnsupportedEncoding`, which the front-end report
 
 - **Golden traces** (`tests/test_ingest_golden.py`): two fixed message streams, one Lens-shaped and one bridge-shaped, recorded from the receivers *before* the extraction. Every receiver line, pose-mailbox call, pose-ledger line, packet digest and end state must match byte for byte. Regenerate only with `RTSM_WRITE_GOLDEN=1` and a reason in the commit.
 - **Unit tests** (`tests/test_ingest_frontend.py`): the chain's order (tracking filter before pose parse, refusal before decode, throttle before enqueue), the two policies, the throttle, the codecs, the registry.
-- **The session1 anchor** (`eval/baselines/`): the headless replay of the reference recording must reproduce the anchor fingerprint and the per-line receiver / dequeue trace. Run it after any change to the front-end, a policy, or a codec.
+- **The session1 anchor** (124 objects / 65 confirmed at 53 processed frames, fingerprint `ad6f71a5b89c8506`, 86 dequeue + 240 receiver lines): the headless replay of the reference recording must reproduce the anchor fingerprint and the per-line receiver / dequeue trace. Run it after any change to the front-end, a policy, or a codec.
 
 A change that moves any of these is a behaviour change, not a refactor; it needs a new anchor and a note in the changelog.

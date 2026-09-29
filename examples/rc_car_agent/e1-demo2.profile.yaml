@@ -39,7 +39,7 @@
 # vocabulary amendment 2026-08-28, threshold amendment 2026-08-30 (0.20 -> 0.30).
 # Pre-reconcile floor with this tuning (demo2 f7a0880, grounded_sam2, session1
 # replay): 25 objects / 18 confirmed, 3/3 runs
-# (eval/baselines/2026-09-pre-reconcile/demo2-f7a0880/). This is an experiment
+# (pre-reconcile gate record demo2-f7a0880, kept locally). This is an experiment
 # configuration, not a general preset: the 5-class roster sees ~25 objects on
 # session1 where the packaged 48-class indoor vocabulary sees ~133-139.
 

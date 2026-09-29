@@ -591,7 +591,7 @@ extraction of the fused volume, which holds the Python GIL for 1-2.6 s and grows
 whole-process test at the phone's real frame rate that meant `/stats` calls up to 0.62 s (over the 0.6 s bound) and pose gaps up to
 0.82 s at every keyframe, and the dashboard client being dropped silently once the cloud exceeded a few MB. The
 headless configuration passed every predicate; the dashboard with TSDF off (one cloud per keyframe) passed as
-well. Record: `eval/baselines/2026-09-sensor-clock/README.md`, G1-C section. Turn the dashboard on for demos and
+well (the G1-C gate of 2026-09-18; its record is kept with the development notes, outside the repository). Turn the dashboard on for demos and
 short sessions (`--viz`); turn TSDF on only for short demos.
 
 ---
