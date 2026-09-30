@@ -30,15 +30,26 @@ fraction is `staging.depth_valid_min`. Coverage and border contact are scored
 softly through the `staging.w_*` weights rather than rejected outright.
 
 The shipped configuration uses the general indoor vocabulary (`vocab: null`,
-48 classes) with `box_threshold 0.20`. The RC-car experiment's five-object
-vocabulary and its `box_threshold 0.30` are **not** shipped as defaults; they
-live in a sparse profile, `examples/rc_car_agent/e1-demo2.profile.yaml`
-(together with the opt-in receive-time clearance the agent needs). Apply it
-when you want the E1 conditions:
+48 classes) with `box_threshold 0.20`. Site- or task-specific tuning does
+**not** go into the packaged file: keep it in a sparse profile that layers
+only the keys it changes. The RC-car reference experiment, for instance,
+ran a five-object vocabulary with `box_threshold 0.30` and the opt-in
+receive-time clearance from a three-key profile:
+
+```yaml
+# my-site.profile.yaml
+segmentation:
+  grounded_sam2:
+    box_threshold: 0.30
+    vocab: [teddy bear, water bottle, scissors, tissue box, dumbbell]
+io:
+  clearance:
+    enable: true
+```
 
 ```bash
-python -m rtsm --profile examples/rc_car_agent/e1-demo2.profile.yaml
-rtsm config show --profile examples/rc_car_agent/e1-demo2.profile.yaml
+python -m rtsm --profile my-site.profile.yaml
+rtsm config show --profile my-site.profile.yaml
 ```
 
 Inspect any vocabulary before evaluating on a different scene. The demo has a
@@ -233,9 +244,9 @@ over the central image band right after depth decode -- on the receiver
 thread, before the ingest queue and any GPU work -- published as
 `/stats.forward_clearance = {clearance_m, valid_frac, timestamp}` (`null`
 until the first depth frame; `clearance_m == 0.0` means blocked or
-unmeasurable, fail-closed). `examples/rc_car_agent` requires it
-(`python -m rtsm --set io.clearance.enable=true`, or the E1 profile above;
-its preflight refuses to start without the field). With the default `false`
+unmeasurable, fail-closed). The RC-car reference agent (its own repository)
+requires it (`python -m rtsm --set io.clearance.enable=true`, or a profile
+with `io.clearance.enable: true`; its preflight refuses to start without the field). With the default `false`
 the receiver and `/stats` are identical to a build without the feature.
 
 ### ZeroMQ Receiver (RealSense + RTABMap)

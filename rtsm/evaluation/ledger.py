@@ -33,7 +33,7 @@ Tracking-limited episodes are maximal runs of lines whose tracking_state is
 not "normal", in file order, for the sources that have a tracking state
 (ARKit / websocket / replay); ZeroMQ lines all read "not_available" because
 RTAB-Map publishes none, so no episode is ever counted there. The
-discontinuity rule is the RC-car agent's (``examples/rc_car_agent/monitor.py``)
+discontinuity rule is the RC-car reference agent's pose-monitor rule
 applied to the full 3-D translation, source-agnostic: a step larger than
 ``disc_base_m + disc_rate_mps * dt`` between consecutive stream poses. It is
 a DETECTOR: nothing acts on it. ``delivery_lag`` is arrival time (the line's

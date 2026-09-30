@@ -42,7 +42,7 @@ CONFIG_PATH = ROOT / "rtsm" / "cfg" / "rtsm.yaml"
 REPORT_DIR = ROOT / "reports"
 
 # Extra CLI arguments appended to every `python -m rtsm --replay ...` launch,
-# e.g. ["--profile", "examples/rc_car_agent/e1-demo2.profile.yaml"]. Set by
+# e.g. ["--profile", "my-site.profile.yaml"]. Set by
 # main() / benchmark_datasheet.py from --profile; empty = packaged yaml only.
 # Profiles are layered AFTER the base file, so patch_config()'s backend patch
 # still wins as long as the profile does not pin segmentation.backend.

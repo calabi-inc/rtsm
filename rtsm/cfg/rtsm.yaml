@@ -97,8 +97,8 @@ io:
   # band right after depth decode -- on the receiver thread, before the
   # ingest queue and any GPU work -- published as /stats.forward_clearance
   # {clearance_m, valid_frac, timestamp} (null until the first depth frame;
-  # 0.0 = blocked or unmeasurable, fail-closed). examples/rc_car_agent reads
-  # it as a drive-phase obstacle guard and a relocation-walk gate.
+  # 0.0 = blocked or unmeasurable, fail-closed). The RC-car reference agent
+  # reads it as a drive-phase obstacle guard and a relocation-walk gate.
   # Default false: the receiver does no extra per-frame work, takes no WM
   # lock, and /stats carries no forward_clearance key at all -- identical
   # to a build without the feature.

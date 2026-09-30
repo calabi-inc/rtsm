@@ -1,5 +1,5 @@
-"""rtsm_client parse tests against a canned local HTTP server (shapes match
-rtsm/api/server.py: /healthz, /stats, /search/semantic)."""
+"""rtsm.client (the Python SDK over the REST API) parse tests against a canned
+local HTTP server (shapes match rtsm/api/server.py: /healthz, /stats, /search/semantic)."""
 
 import json
 import threading
@@ -7,7 +7,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 
-from rtsm_client import RtsmClient
+from rtsm.client import RtsmClient
 
 POSE = {"xyz": [1.0, 0.3, -2.0], "quaternion_xyzw": [0, 0.7071, 0, 0.7071],
         "timestamp": 1751000000.25}
@@ -108,7 +108,7 @@ def test_pose_parse_ignores_mailbox_diagnostics():
     """RTSM's robot_pose carries mailbox diagnostics since P1 task 4 (age_s,
     stale, pose_clock, counters). The client reads only the geometry, the
     timestamp and the epoch; the extra keys must not change the sample."""
-    from rtsm_client import RtsmClient
+    from rtsm.client import RtsmClient
     c = RtsmClient("http://127.0.0.1:1", timeout_s=0.1)
     plain = {"xyz": [1.0, 2.0, 3.0], "quaternion_xyzw": [0, 0, 0, 1], "timestamp": 1751000000.5, "frame_epoch": 3}
     rich = dict(plain, sensor_ts_ns=683333172055083, pose_clock="sender", age_s=0.04, stale=False,

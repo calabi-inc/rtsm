@@ -41,6 +41,7 @@ nav:
       - REST API: api/rest-api.md
       - MCP (AI Agents): api/mcp.md
       - WebSocket: api/websocket.md
+      - Python Client: api/python-client.md
   - Benchmarks: benchmarks.md
   - Guides:
       - Record & Replay: guides/record-replay.md

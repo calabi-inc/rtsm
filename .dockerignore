@@ -7,6 +7,5 @@ __pycache__
 .mypy_cache
 .pytest_cache
 node_modules
-d435i
 demo
 docs
