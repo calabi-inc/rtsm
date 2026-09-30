@@ -1,5 +1,6 @@
 # RTSM — Real-Time Spatial Memory for Robots
 
+[![CI](https://github.com/calabi-inc/rtsm/actions/workflows/ci.yml/badge.svg)](https://github.com/calabi-inc/rtsm/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/rtsm)](https://pypi.org/project/rtsm/)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.12%2B-blue)](https://pypi.org/project/rtsm/)

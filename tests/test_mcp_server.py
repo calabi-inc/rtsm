@@ -3,22 +3,24 @@ from __future__ import annotations
 
 import json
 import pytest
+import pytest_asyncio
 import httpx
 import respx
 
 from rtsm.io.mcp_server import _dispatch, RTSM_API_URL
 
 
-@pytest.fixture(autouse=True)
-def _reset_client():
-    """Reset the module-level httpx client between tests."""
+@pytest_asyncio.fixture(autouse=True)
+async def _reset_client():
+    """Reset the module-level httpx client between tests. Async so the client
+    is closed in the test's own event loop: pytest-asyncio >= 1.4 leaves no
+    current loop at a sync teardown (asyncio.get_event_loop() raises there)."""
     import rtsm.io.mcp_server as mod
     mod._client = None
     yield
     if mod._client and not mod._client.is_closed:
-        import asyncio
-        asyncio.get_event_loop().run_until_complete(mod._client.aclose())
-        mod._client = None
+        await mod._client.aclose()
+    mod._client = None
 
 
 # ── semantic_query ──

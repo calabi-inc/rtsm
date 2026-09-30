@@ -1,0 +1,86 @@
+name: CI
+
+# The core CPU suite on Linux and Windows (no GPU, no model weights, no LFS),
+# plus an install job that builds the wheel and installs it into a clean
+# environment without torch. GPU gates run locally (see docs/guides/eval.md).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: tests (${{ matrix.os }}, py${{ matrix.python }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python: ["3.12"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: false   # recordings/session1 stays an LFS pointer; the tests that need it skip
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      # CPU torch first (the pipeline, mask staging, transforms and the engine import it at module level),
+      # then the extras the suite reaches: eval (bags, parquet), dev (pytest plugins), mcp (the MCP server
+      # tests), plus open-clip-torch (the CLIP adapter is imported by the pipeline module) and faiss-cpu
+      # (the vector store). No model weights: the `models` marker deselects what needs them.
+      - name: Install (CPU torch, core + eval/dev/mcp extras, open-clip, faiss)
+        run: |
+          python -m pip install -U pip
+          python -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install -e ".[eval,dev,mcp]" open-clip-torch faiss-cpu
+
+      - name: Core CPU suite
+        run: python -m pytest tests -q -m "not gpu and not hardware and not models"
+
+  install:
+    name: install (${{ matrix.os }}, wheel, no torch)
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build sdist + wheel
+        run: |
+          python -m pip install -U pip build
+          python -m build
+
+      - name: Install the wheel into a clean venv and import the core
+        shell: bash
+        run: |
+          python -m venv clean
+          if [ -x clean/bin/python ]; then PY=clean/bin/python; else PY=clean/Scripts/python.exe; fi
+          "$PY" -m pip install -U pip
+          "$PY" -m pip install dist/*.whl
+          "$PY" -m pip check
+          "$PY" -c "import rtsm.client, rtsm.cfg; from rtsm.io.websocket import WebSocketReceiver; print('core imports ok')"
+          "$PY" -c "import sys; from rtsm.cli import main; sys.argv = ['rtsm', 'config', 'show']; main()" > /dev/null && echo "config CLI ok"
+          if "$PY" -c "import torch" 2> /dev/null; then echo "torch leaked into the core install"; exit 1; fi
+          echo "torch absent from the core install: ok"

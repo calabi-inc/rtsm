@@ -54,8 +54,10 @@ viz = [
     "matplotlib>=3.2.2",
     "seaborn>=0.11.0",
 ]
+# rtsm/io/mcp_server.py + mcp_embedded.py use the 1.x low-level Server API (list_tools / call_tool
+# decorators), which mcp 2.0 removed; the 2.x migration is a separate task (CI found it, 2026-09-30).
 mcp = [
-    "mcp[cli]>=1.0.0",
+    "mcp[cli]>=1.0.0,<2",
     "httpx>=0.27.0",
 ]
 # Evaluation extras (P2: Parquet ledgers via diagnostics.ledger_format=parquet;
