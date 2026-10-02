@@ -113,7 +113,7 @@ exclude = [
 ]
 
 [tool.setuptools.package-data]
-rtsm = ["cfg/**/*.yaml", "static/**", "data/demo_clip/*"]
+rtsm = ["cfg/**/*.yaml", "static/**", "data/demo_clip/*", "io/msgdefs/**/*.msg", "io/msgdefs/**/NOTICE.md"]
 
 [tool.pytest.ini_options]
 # Explicit root: a bare `python -m pytest` from the repo root collects the core suite.

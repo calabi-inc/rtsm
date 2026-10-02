@@ -27,6 +27,7 @@ rtsm demo
 - Stores spatial, semantic, and temporal metadata per object (position, CLIP embedding, label confidence, view history)
 - Supports **semantic + spatial queries** (e.g. *"red bin near dock 3"*) via REST API and MCP
 - **SLAM-agnostic** — sits above any perception stack that provides RGB-D + pose
+- **Detector-agnostic** — runs on its own segmenters or on your detector's `vision_msgs` detections from a bag (`rtsm eval --set segmentation.backend=external`), and `rtsm eval` reports what the memory did with them
 
 ---
 

@@ -135,7 +135,7 @@ def validate_tuning(cfg: dict) -> list[str]:
     This is deliberately not a complete schema for every expert setting.
     """
     backend = _get(cfg, "segmentation.backend", "fastsam")
-    if backend not in ("grounded_sam2", "sam2", "fastsam", "yoloe", "dual"):
+    if backend not in ("grounded_sam2", "sam2", "fastsam", "yoloe", "dual", "external"):
         raise ConfigError(f"Unknown segmentation.backend: {backend!r}")
     for control in active_controls(cfg):
         value = _value(cfg, control)

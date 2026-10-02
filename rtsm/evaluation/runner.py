@@ -100,6 +100,7 @@ class ResolvedEval:
     repeats: int
     max_frames: Optional[int]
     max_wall_s: Optional[float]
+    detector: str = "model"                  # model (our segmenter) | external (the input's own detections topic)
 
 
 def input_kind(path: str | os.PathLike) -> str:
@@ -181,6 +182,7 @@ def resolve_eval(cfg: dict, opts: EvalOptions) -> ResolvedEval:
         ledgers=True, ledger_format=str(diag.get("ledger_format", "jsonl")), config_fingerprint=config_fingerprint(cfg),
         git_commit=_git_commit(), rtsm_version=_rtsm_version(), python=platform.python_version(), platform=platform.platform(),
         repeats=int(opts.repeats), max_frames=opts.max_frames, max_wall_s=opts.max_wall_s,
+        detector=("external" if str((cfg.get("segmentation") or {}).get("backend", "")).lower() == "external" else "model"),
     )
 
 
@@ -237,6 +239,38 @@ def summarize_memory(wm: Any) -> Dict[str, Any]:
         stats = {}
     return {"objects": objs, "objects_count": len(objs), "confirmed_count": sum(1 for o in objs if o["confirmed"]),
             "fingerprint": fingerprint(objs), "working_memory": stats}
+
+
+# ───────────────────────────── detector attribution ─────────────────────────────
+
+def detector_summary(cfg: dict, src_stats: Optional[dict], segmenter: Any, *, summary_frames: int = 0) -> Dict[str, Any]:
+    """Which detector produced the run's numbers (the report header prints it): our segmenter
+    backend, or the input's own detections through the ``external`` backend -- then also the
+    topic, the message type, whether the detections carried scores (present / absent / mixed),
+    how many frames had detections and how many messages matched no frame."""
+    seg = cfg.get("segmentation") or {}
+    backend = str(seg.get("backend", ""))
+    d: Dict[str, Any] = {"backend": backend, "kind": ("external" if backend == "external" else "model")}
+    if backend != "external":
+        return d
+    st = src_stats or {}
+    scoring = dict(st.get("detections_scoring") or {})
+    present, absent, mixed = scoring.get("present", 0), scoring.get("absent", 0), scoring.get("mixed", 0)
+    d.update({
+        "topic": st.get("detections_topic"), "msgtype": st.get("detections_msgtype"),
+        "scores": ("absent" if (absent and not present and not mixed) else "present" if (present and not absent and not mixed) else "mixed" if (present or absent or mixed) else "unknown"),
+        "messages_paired": int(st.get("detections_paired", 0) or 0), "messages_unpaired": int(st.get("detections_unpaired", 0) or 0),
+        "frames_without_detections": int(st.get("frames_without_detections", 0) or 0), "conversion_errors": int(st.get("detections_errors", 0) or 0),
+        "dropped": dict(st.get("detections_dropped") or {}), "scoring_messages": scoring,
+        "unscored_label_prior": float((seg.get("external") or {}).get("unscored_label_prior", 1.0)),
+    })
+    stats = getattr(segmenter, "stats", None)
+    if callable(stats):
+        try:
+            d["backend_stats"] = stats()
+        except Exception:  # noqa: BLE001
+            pass
+    return d
 
 
 # ───────────────────────────── one run ─────────────────────────────
@@ -365,6 +399,7 @@ def run_once(cfg: dict, models: Any, resolved: ResolvedEval, run_dir: Path, run_
         src_stats = src.stats() if hasattr(src, "stats") else src.liveness()
     except Exception:  # noqa: BLE001
         pass
+    detector = detector_summary(cfg_k, src_stats, getattr(models, "segmenter", None), summary_frames=sum(n for (o, _r), n in dequeue.items() if o == "processed"))
     summary = {
         "schema": SUMMARY_SCHEMA, "input": resolved.input, "input_kind": resolved.input_kind, "mode": resolved.mode,
         "run_index": run_index, "run_dir": str(run_dir), "started_utc": started.isoformat(), "wall_s": round(wall_s, 3),
@@ -376,6 +411,7 @@ def run_once(cfg: dict, models: Any, resolved: ResolvedEval, run_dir: Path, run_
                    "processed": sum(n for (o, _r), n in dequeue.items() if o == "processed"),
                    "kinds": {k: len(v) for k, v in kinds.items()}},
         "memory": memory, "flushed_to_vectors": flushed,
+        "detector": detector,
         "latency": latency, "segmentation": seg,
         "events_path": str(run_dir / "events.jsonl"),
     }
@@ -427,6 +463,11 @@ def run_eval(cfg: dict, opts: EvalOptions, *, models: Any = None, load_models: O
         if probe.refusal:
             raise ValueError("bag refused: " + "; ".join(f"{c}: {d}" for c, d in probe.refusal))
         (out_dir / "bag_probe.json").write_text(json.dumps(probe.as_dict(), indent=1, default=str), encoding="utf-8")
+        if resolved.detector == "external" and not probe.detections_topic:
+            raise ValueError("segmentation.backend=external needs a vision_msgs Detection2DArray / Detection3DArray topic in the bag "
+                             "(none discovered; set io.bag.topics.detections)")
+    elif resolved.detector == "external":
+        raise ValueError("segmentation.backend=external needs a bag with a detections topic; a Lens recording carries none")
     if models is None:
         if load_models is None:
             from rtsm.engine import load_models as load_models

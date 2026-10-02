@@ -68,6 +68,18 @@ segmentation:
     priority_penalty_yoloe_only: 0.0  # no penalty for YOLOE-only
     prefer_mask: yoloe26              # which mask to keep for dual-confirmed
 
+  # external: no detector runs; the frame's own detections (a vision_msgs Detection2DArray / Detection3DArray
+  # topic the bag reader pairs to each frame) become the candidates. Embeddings are still computed by
+  # RTSM from the crops; association, memory, ledgers and the report run unchanged. docs/guides/eval.md.
+  external:
+    mask_from: depth_band          # depth_band = pixels within depth_band_m of the box's median depth | box
+    depth_band_m: 0.20
+    min_box_px: 64                 # boxes with a smaller area are dropped (counted)
+    unscored_label_prior: 1.0      # label score stored when the detector reports no confidence (the obs ledger writes null)
+    class_names: {}                # optional id -> name map (ROS 1 int64 class ids)
+    refine: none                   # reserved for a mask refiner (SAM box prompts); only none exists
+
+
 clip:
   model: ViT-B-16-SigLIP
   pretrained: webli
@@ -120,7 +132,18 @@ io:
     camera_frame: null             # default: the RGB CameraInfo frame_id
     assume_aligned: false          # accept depth whose K differs from the RGB K (only if it IS registered to the RGB)
     typestore: humble              # message definitions assumed when the bag embeds none (humble | iron | jazzy | foxy | noetic)
-    topics: {}                     # overrides: rgb, depth, rgb_info, depth_info, confidence, tf, tf_static, odom, tracking, seq
+    topics:                       # role -> topic overrides; null = auto-discovered (docs/guides/bags.md)
+      rgb: null
+      depth: null
+      rgb_info: null
+      depth_info: null
+      confidence: null
+      tf: null
+      tf_static: null
+      odom: null
+      tracking: null
+      seq: null
+      detections: null            # a vision_msgs Detection2DArray / Detection3DArray topic (segmentation.backend: external)
 
 # -------------------- Ingest (frame admission timing) --------------------
 ingest:

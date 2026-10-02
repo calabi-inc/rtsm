@@ -177,6 +177,10 @@ class FramePacket:
     # queue at admission (see IngestMeta). None only for packets built by code
     # that predates it (tests, probes).
     ingest: Optional[IngestMeta] = None
+    # External detections for this frame (rtsm/io/detections.py ``Detections``), paired by the source
+    # (the bag reader's detections topic); None for every other source. Consumed by the ``external``
+    # segmentation backend only; the model backends never look at it. Typed Any: core never imports rtsm.io.
+    detections: Optional[Any] = None
 
     # convenience helpers
     @property
