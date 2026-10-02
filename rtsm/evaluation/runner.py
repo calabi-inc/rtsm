@@ -120,11 +120,16 @@ def _git_commit(repo_root: Optional[Path] = None) -> Optional[str]:
 
 
 def _rtsm_version() -> Optional[str]:
+    """The installed distribution's version, else the package's own ``__version__`` (a checkout without an install)."""
     try:
         from importlib.metadata import version
         return version("rtsm")
     except Exception:  # noqa: BLE001
-        return None
+        try:
+            from rtsm import __version__
+            return __version__
+        except Exception:  # noqa: BLE001
+            return None
 
 
 def resolve_eval(cfg: dict, opts: EvalOptions) -> ResolvedEval:

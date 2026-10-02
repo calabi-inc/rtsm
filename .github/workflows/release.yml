@@ -1,0 +1,90 @@
+name: Release
+
+# A `v*` tag on main builds the sdist + wheel, verifies the wheel in a clean
+# environment (imports, no torch leak, version == tag), creates the GitHub
+# Release with the changelog section as notes, and publishes to PyPI through
+# trusted publishing on the `pypi` environment (one-time PyPI configuration:
+# owner calabi-inc, repository rtsm, workflow release.yml, environment pypi).
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build + verify the wheel
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build sdist + wheel
+        run: |
+          python -m pip install -U pip build
+          python -m build
+      - name: Verify the wheel in a clean venv
+        shell: bash
+        run: |
+          python -m venv clean
+          PY=clean/bin/python
+          "$PY" -m pip install -U pip
+          "$PY" -m pip install dist/*.whl
+          "$PY" -m pip check
+          "$PY" -c "import rtsm.client, rtsm.cfg; from rtsm.io.websocket import WebSocketReceiver; print('core imports ok')"
+          V=$("$PY" -c "import rtsm; print(rtsm.__version__)")
+          echo "wheel version $V, tag $GITHUB_REF_NAME"
+          test "v$V" = "$GITHUB_REF_NAME"
+          if "$PY" -c "import torch" 2> /dev/null; then echo "torch leaked into the core install"; exit 1; fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  github-release:
+    name: GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - name: Release notes = the changelog section of this version
+        shell: bash
+        run: |
+          V="${GITHUB_REF_NAME#v}"
+          awk -v v="$V" '
+            $0 ~ "^## \\[" v "\\]" { on = 1; next }
+            on && $0 ~ "^## \\[" { exit }
+            on { print }
+          ' CHANGELOG.md > notes.md
+          test -s notes.md || echo "See CHANGELOG.md." > notes.md
+          echo "--- notes ---"; cat notes.md
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          body_path: notes.md
+
+  pypi:
+    name: publish to PyPI
+    needs: build
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1

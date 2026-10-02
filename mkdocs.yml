@@ -43,6 +43,11 @@ nav:
       - WebSocket: api/websocket.md
       - Python Client: api/python-client.md
   - Benchmarks: benchmarks.md
+  - Use Cases:
+      - Overview: use-cases/index.md
+      - TUM fr3 / long office: use-cases/tum-fr3-long-office.md
+      - TUM fr1 / desk: use-cases/tum-fr1-desk.md
+      - NVIDIA r2b_cafe (refusal): use-cases/nvidia-r2b-cafe.md
   - Guides:
       - Record & Replay: guides/record-replay.md
       - Analytics Dashboard: guides/analytics-dashboard.md

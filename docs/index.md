@@ -35,6 +35,9 @@ This makes spatial state inspectable, queryable, and reusable across robots, age
 - **Record & replay** — Capture live sessions for offline benchmarking and reproducible testing
 - **Runtime analytics** — Per-stage latency, segmentation rates, and throughput dashboards
 - **Queryable API** — REST endpoints for objects, search, stats, and analytics
+- **Offline evaluation** — `rtsm eval` runs the pipeline on ROS 1 / rosbag2 / MCAP bags or recordings and writes a report with same-input floors; the ledgers are an open, documented format
+- **Bring your own detector** — a `vision_msgs` detections topic in the bag becomes the memory's input; the report names the detector
+- **Python client** — `rtsm.client` talks to the REST API without the perception stack installed
 
 ```json
 // "Where is the red backpack?"
