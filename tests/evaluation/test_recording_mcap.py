@@ -18,6 +18,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from _recordings import real_recording
+
 pytest.importorskip("rosbags", reason="the [eval] extra is not installed")
 
 from rtsm.evaluation import recording_mcap as rm
@@ -220,7 +222,7 @@ def test_cli_wrapper(synthetic, tmp_path, capsys):
 
 # ───────────────────────────── the real thing ─────────────────────────────
 
-@pytest.mark.skipif(not (SESSION1 / "messages.bin").is_file(), reason="recordings/session1 not on this box")
+@pytest.mark.skipif(not real_recording(SESSION1 / "messages.bin"), reason="recordings/session1 not on this box (or an LFS pointer)")
 def test_session1_first_20_frames_match_the_receiver_packets(tmp_path):
     """The receiver's FramePackets (through the ingest front-end, no throttle,
     no confidence filter) vs the bag's frames: RGB, depth, confidence,

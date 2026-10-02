@@ -11,6 +11,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from _recordings import real_recording
+
 pytest.importorskip("rosbags", reason="the [eval] extra is not installed")
 
 from rtsm.evaluation.event_log import RX_DROPPED, RX_ENQUEUED, RX_THROTTLE
@@ -22,7 +24,7 @@ from rtsm.io.sources import make_source
 REPO = Path(__file__).resolve().parents[1]
 SESSION1 = REPO / "recordings" / "session1"
 SESSION1_BAG = REPO / "recordings" / "session1_bag"
-B1 = REPO / "eval" / "baselines" / "2026-09-sensor-clock" / "B1.events.jsonl"
+B1 = REPO / "eval" / "baselines" / "2026-09-sensor-clock" / "B1.events.jsonl"   # local gate asset (rtsm-lab); absent in CI -> the parity test skips
 
 
 def _ctx(q, events=None, **kw):
@@ -115,7 +117,7 @@ def _drain(q):
         out.append(p)
 
 
-@pytest.mark.skipif(not ((SESSION1 / "messages.bin").is_file() and (SESSION1_BAG / "metadata.yaml").is_file() and B1.is_file()),
+@pytest.mark.skipif(not (real_recording(SESSION1 / "messages.bin") and (SESSION1_BAG / "metadata.yaml").is_file() and B1.is_file()),
                     reason="session1 recording, its bag and the B1 record are needed")
 def test_session1_bag_reproduces_the_replay_path():
     events = []

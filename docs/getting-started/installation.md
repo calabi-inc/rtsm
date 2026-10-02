@@ -151,6 +151,9 @@ docker run --gpus all calabi/rtsm demo
     - `tests/Dockerfile.deptest` — Dependency verification (core, GPU, full)
     - `tests/Dockerfile.gpu-test` — GPU pipeline replay test
 
+!!! note "What CI verifies"
+    Every push and pull request runs the core CPU suite on Linux and Windows (Python 3.12, CPU torch, no model weights, no LFS) and installs the built wheel into a clean environment without torch (`.github/workflows/ci.yml`). The GPU gates (the session1 anchor, the eval runs) stay local.
+
 ---
 
 ## Install MCP Support (Optional)
