@@ -37,12 +37,14 @@ def _kw_tuples(code):
 
 def _attr_calls_on(code, var: str, attr: str):
     """Offsets of `<var>.<attr>` loads in the top-level function body
-    (EXTENDED_ARG prefixes, present once a body has > 256 names, are skipped)."""
+    (EXTENDED_ARG prefixes, present once a body has > 256 names, are skipped).
+    A method call compiles to LOAD_METHOD on Python 3.10 / 3.11 and to LOAD_ATTR
+    on 3.12+ (where LOAD_METHOD was folded into it): both count."""
     ins = [x for x in dis.get_instructions(code) if x.opname != "EXTENDED_ARG"]
     out = []
     for prev, cur in zip(ins, ins[1:]):
-        if cur.opname == "LOAD_ATTR" and cur.argval == attr and prev.opname in ("LOAD_FAST", "LOAD_DEREF", "LOAD_FAST_CHECK") \
-                and prev.argval == var:
+        if cur.opname in ("LOAD_ATTR", "LOAD_METHOD") and cur.argval == attr \
+                and prev.opname in ("LOAD_FAST", "LOAD_DEREF", "LOAD_FAST_CHECK") and prev.argval == var:
             out.append(cur.offset)
     return out
 
@@ -129,7 +131,7 @@ def test_runner_receivers_read_timing_from_lane_cfg_not_ws_cfg(modname, fn, site
         ins = [x for x in dis.get_instructions(cc) if x.opname != "EXTENDED_ARG"]
         for i, x in enumerate(ins):
             if x.opname == "LOAD_CONST" and x.argval in keys:
-                window = [y.argval for y in ins[max(0, i - 3):i] if y.opname.startswith("LOAD_ATTR")]
+                window = [y.argval for y in ins[max(0, i - 3):i] if y.opname in ("LOAD_ATTR", "LOAD_METHOD")]   # LOAD_METHOD on 3.10 / 3.11
                 assert "get" not in window, f"{modname}.{fn} still reads {x.argval!r} via .get() (offset {x.offset})"
 
 
