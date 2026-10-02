@@ -73,6 +73,21 @@ Every number is computed per run from the ledgers alone (`rtsm/evaluation/metric
 
 Parameters live under `eval.metrics` in the configuration: `cluster_radius_m` (null = `assoc.gate_dist_base_m`), `cluster_radii_m` (the sensitivity radii), `revisit_gap_s`, `range_bin_m`, `min_obs_scatter`, `worst_n`, `moments_cap`. Override them like any other key (`--set eval.metrics.cluster_radius_m=0.3`), for `rtsm eval` and `rtsm report` alike.
 
+## Your own detector
+
+If the bag already carries a detector's output as a `vision_msgs/msg/Detection2DArray` (or `Detection3DArray`) topic, RTSM can run on *those* detections instead of its own: the memory, the ledgers and the report are then about your detector.
+
+```bash
+rtsm eval my_bag --set segmentation.backend=external                       # the detections topic is auto-discovered
+rtsm eval my_bag --set segmentation.backend=external --set io.bag.topics.detections=/perception/detections
+```
+
+How it works: the bag reader pairs each RGB frame with the detections message nearest in stamp (within `io.bag.pair_tolerance_s`; detectors publish after the image, so a frame waits up to a second for its message), the `external` backend turns the boxes into instance masks (the pixels within `segmentation.external.depth_band_m` of the box's median depth, or the box itself without depth), labels are the top hypothesis of each detection, CLIP embeddings are computed by RTSM from the crops exactly as for its own detectors, and everything downstream is unchanged. The `vision_msgs` definitions ship with RTSM (both the ROS 2 and the ROS 1 layouts), so a bag without embedded message definitions still reads. 3-D boxes are projected into the image through the bag's TF at the stamp and the camera intrinsics.
+
+Scores: a detector that reports no confidence (the 2026 VLM detectors, for instance) is a first-class case. Its labels are stored with `segmentation.external.unscored_label_prior`, the observation ledger records `score: null` for them, and the report header says `scores: absent` so no label-confidence number is read as measured. The header always names the detector the numbers came from: our backend, or the topic and message type, with how many frames had detections and how many messages matched no frame.
+
+Not supported in v1: masks from the detector (boxes only; a mask-refiner slot exists but only `none` is implemented), tracks (ids are carried, not used), proprietary formats (write an adapter against `rtsm.io.detections.DetectionsAdapter` and register it). `scripts/export_detections.py` writes a bag with RTSM's own detections as such a topic, which is how the path is gated and a demonstration of the format.
+
 ## Options
 
 `--mode`, `--repeats`, `--out`, `--label`, `--max-frames` (bag inputs), `--max-wall-s` (abort a run and record it), `--no-report`, plus the usual `--config` / `--profile` / `--set` overrides. Defaults live in the `eval:` block of the configuration.

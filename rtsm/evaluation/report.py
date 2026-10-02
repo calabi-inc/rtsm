@@ -60,6 +60,7 @@ def run_metrics(run_dir: Path, params: MetricParams) -> dict:
     m = compute_metrics(rows, summary, params)
     m["run_dir"] = run_dir.name
     m["run_index"] = summary.get("run_index")
+    m["detector"] = summary.get("detector")
     m["wall_s"] = summary.get("wall_s")
     m["aborted"] = summary.get("aborted")
     return m
@@ -146,6 +147,21 @@ def _fmt(key: str, v: Any) -> str:
     return f"{f:.3f}"
 
 
+def _detector_line(d: Optional[dict]) -> str:
+    """The report's attribution of its numbers to a detector."""
+    if not d:
+        return "RTSM's own segmenter (backend not recorded)"
+    if d.get("kind") != "external":
+        return f"RTSM's own segmenter, backend `{d.get('backend')}`"
+    parts = [f"**external** — `{d.get('topic')}` ({d.get('msgtype')}), scores **{d.get('scores')}**",
+             f"{d.get('messages_paired', 0)} messages paired, {d.get('frames_without_detections', 0)} frames without detections, {d.get('messages_unpaired', 0)} messages unmatched"]
+    if d.get("scores") in ("absent", "mixed"):
+        parts.append(f"unscored labels stored with prior {d.get('unscored_label_prior')} (the ledger records `score: null`; label-confidence numbers are not measured)")
+    if d.get("dropped"):
+        parts.append("dropped: " + ", ".join(f"{k} {v}" for k, v in d["dropped"].items()))
+    return "; ".join(parts)
+
+
 def _cell(agg: dict, key: str, label: Optional[str] = None) -> str:
     s = agg["scalars"].get(key)
     if s is None or s["n_runs"] == 0:
@@ -188,6 +204,7 @@ def render_markdown(agg: dict, ref: dict, *, resolved: Optional[dict], input_nam
     L.append(f"| config fingerprint | `{r.get('config_fingerprint', '–')}` |")
     L.append(f"| commit / rtsm / python | `{r.get('git_commit', '–')}` / {r.get('rtsm_version', '–')} / {r.get('python', '–')} |")
     L.append(f"| cluster radius | {params.cluster_radius_m} m (the associator's distance gate); sensitivity at {', '.join(f'{x:g}' for x in params.cluster_radii_m)} m |")
+    L.append(f"| detector | {_detector_line(ref.get('detector'))} |")
     if repeats:
         L.append(f"| wall time per run | {', '.join(f'{w:.1f} s' for w in repeats.get('wall_s', []) if isinstance(w, (int, float)))} |")
     L.append("")

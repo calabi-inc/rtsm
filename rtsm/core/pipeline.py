@@ -195,6 +195,12 @@ class Pipeline:
         # gate's rejection on the dequeue line (gate_shadow) and processes the
         # frame anyway (the eval runner's dense mode; never the live default).
         self._gate_shadow = str((cfg.get("eval") or {}).get("gate_mode", "enforce")).lower() == "shadow"
+        # P3 detections adapter: the label score stored for a detector label that comes without a confidence.
+        # 0.5 keeps the historical substitution for the model backends; the external backend's prior is configurable
+        # (the observation ledger writes score: null for such a label either way).
+        _seg = cfg.get("segmentation") or {}
+        self._unscored_label_prior = (float((_seg.get("external") or {}).get("unscored_label_prior", 1.0))
+                                      if str(_seg.get("backend", "")).lower() == "external" else 0.5)
         # Frame-flow heartbeat read by the watchdog (see rtsm/core/watchdog.py)
         self.heartbeat = PipelineHeartbeat()
 
@@ -381,7 +387,11 @@ class Pipeline:
 
         # Run segmentation
         t_seg_start = time.perf_counter()
-        seg_result = self.segmenter.segment(pil_img, vocab=vocab)
+        seg_kwargs = {}
+        if getattr(self.segmenter, "consumes_detections", False):
+            # the external backend: the frame's own detections + the depth for the masks (model backends: unchanged call)
+            seg_kwargs = {"detections": getattr(pkt, "detections", None), "depth_m": snap.depth_m}
+        seg_result = self.segmenter.segment(pil_img, vocab=vocab, **seg_kwargs)
         t_seg_end = time.perf_counter()
         # Store for downstream priority boost and label propagation
         self._last_seg_result = seg_result
@@ -779,7 +789,8 @@ class Pipeline:
                     n_gate_survivors=int(rec.get("n_gate_survivors", 0) or 0),
                     max_cos=(float(rec["max_cos"]) if rec.get("max_cos") is not None else None),
                     matched_without_scoring=bool(rec.get("matched_without_scoring", False)),
-                    label_topk=[{"label": str(l), "score": float(sc)} for l, sc in topk],
+                    label_topk=[{"label": str(l), "score": (None if (getattr(c, "label_unscored", None) is not None and l == c.label_unscored) else float(sc))}
+                                for l, sc in topk],
                     priority=float(getattr(c, "priority", 0.0) or 0.0),
                     mask=_mask_stats_dict(st),
                 ))
@@ -1279,15 +1290,23 @@ class Pipeline:
                         # label-search ranking (exact ties broken by
                         # object age) and fabricates every stored
                         # label_confidence (reviewed 2026-08-28).
-                        det_score = (float(det_conf[src_idx])
-                                     if det_conf and src_idx < len(det_conf)
-                                     else 0.5)
+                        raw_conf = det_conf[src_idx] if (det_conf and src_idx < len(det_conf)) else None
+                        try:
+                            raw_conf = float(raw_conf) if raw_conf is not None else None
+                        except (TypeError, ValueError):
+                            raw_conf = None
+                        if raw_conf is not None and raw_conf != raw_conf:      # NaN = unscored in a mixed message
+                            raw_conf = None
+                        # An unscored detector label (external detectors without confidence) is stored with the
+                        # configured prior and flagged so the observation ledger records score: null for it.
+                        det_score = raw_conf if raw_conf is not None else self._unscored_label_prior
                         existing = getattr(c, 'label_topk', None) or []
                         merged = [(det_label, det_score)]
                         for lbl, sc in existing:
                             if lbl != det_label:
                                 merged.append((lbl, sc))
                         c.label_topk = merged[:5]
+                        c.label_unscored = det_label if raw_conf is None else None
 
         # Single boundary cast: move whole batch to CPU numpy float32 for association/WM
         try:

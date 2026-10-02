@@ -75,10 +75,13 @@ def get_segmenter(cfg: Dict[str, Any]) -> SegmentationAdapter:
         return _create_sam2(cfg, seg_cfg)
     elif backend == "grounded_sam2":
         return _create_grounded_sam2(cfg, seg_cfg)
+    elif backend == "external":
+        from rtsm.models.segmentation.external import ExternalDetectionsSegmenter
+        return ExternalDetectionsSegmenter(seg_cfg.get("external", {}))
     else:
         raise ValueError(
             f"Unknown segmentation backend: {backend}. "
-            f"Available: grounded_sam2, sam2, fastsam, yoloe, dual"
+            f"Available: grounded_sam2, sam2, fastsam, yoloe, dual, external"
         )
 
 

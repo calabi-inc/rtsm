@@ -32,6 +32,10 @@ Every choice is logged with the rule that made it. Relative topic names (`d455_1
 
 **Tracking filter.** Only when the bag carries a tracking-state topic; otherwise every frame counts as `normal` and the filter is off.
 
+## External detections (optional)
+
+A `vision_msgs/msg/Detection2DArray` or `Detection3DArray` topic is discovered as the role `detections` (`io.bag.topics.detections` overrides; 2-D preferred when both exist). The message definitions ship with RTSM, ROS 2 and ROS 1 layouts alike, because no rosbags typestore contains them. Each RGB frame gets the message nearest in stamp within `pair_tolerance_s`; since detectors publish after the image, a frame waits up to one second of log time for its message before it goes out without one. The probe and the source statistics report the topic, the message type, the paired and unmatched messages, the frames without detections and the per-detection drop reasons (degenerate or outside boxes, an unresolved 3-D frame, a box behind the camera). The detections are consumed only when `segmentation.backend: external` ([Evaluating a Bag](eval.md#your-own-detector)); every other backend ignores the topic.
+
 ## What v1 refuses (with the reason, before any model loads)
 
 | Code | Meaning | What to do |

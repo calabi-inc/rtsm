@@ -412,6 +412,7 @@ class IngestFrontEnd:
             time=tb, rgb=rgb, depth_m=depth_m, pose=pose, intr=h.intrinsics, is_keyframe=is_keyframe,
             confidence=conf_map, rgb_jpeg=raw_jpeg, frame_epoch=self.frame_epoch,
             ingest=IngestMeta(keyframe_origin=kf_origin, depth_valid_frac=dvf, rx_seq=rx_seq),
+            detections=h.extra.get("detections"),
         )
 
     def enqueue(self, pkt: FramePacket) -> bool:

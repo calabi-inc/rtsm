@@ -48,7 +48,9 @@ from rtsm.core.datamodel import PinholeIntrinsics
 from rtsm.io import codecs
 from rtsm.io.codecs import UnsupportedEncoding
 from rtsm.io.contracts import CONVENTION_OPENCV, POSE_FMT_PREPARED, EncodedImage, FrameHeader, RawFrame
-from rtsm.io.tf_buffer import TfBuffer, TfLookupError, norm_frame
+from rtsm.io.detections import DETECTION_2D, DETECTION_3D, adapter_for
+from rtsm.io.msgdefs import register_vision_msgs
+from rtsm.io.tf_buffer import TfBuffer, TfLookupError, make_T, norm_frame
 
 logger = logging.getLogger(__name__)
 
@@ -154,6 +156,12 @@ class _RosbagsStream:
         self.kind, self.storage = _bag_kind(path)
         self._reader = AnyReader([path], default_typestore=_typestore(typestore_name))
         self._reader.open()
+        # vision_msgs (external detections) are in no stock typestore: register the bundled definitions the bag lacks
+        try:
+            self.registered_types = register_vision_msgs(self._reader.typestore, "ros1" if self.kind == "ros1" else "ros2")
+        except Exception as e:  # noqa: BLE001 -- a bag without detections never needs them
+            logger.debug("[bag] vision_msgs registration skipped: %s", e)
+            self.registered_types = []
         topics: Dict[str, TopicInfo] = {}
         has_defs = False
         for c in self._reader.connections:
@@ -208,6 +216,8 @@ class _McapStream:
                     add.update(get_types_from_msg(s.data.decode("utf-8"), s.name))
             if add:
                 self._ts.register(add)
+            flavour = "ros1" if any(s.encoding == "ros1msg" for s in summ.schemas.values()) else "ros2"
+            self.registered_types = register_vision_msgs(self._ts, flavour)
             stats = summ.statistics
             counts = dict(stats.channel_message_counts) if stats is not None else {}
             topics: Dict[str, TopicInfo] = {}
@@ -264,9 +274,10 @@ class TopicMap:
     odom: Optional[str] = None
     tracking: Optional[str] = None
     seq: Optional[str] = None
+    detections: Optional[str] = None       # vision_msgs Detection2DArray / Detection3DArray (external detections, optional)
     rules: Dict[str, str] = field(default_factory=dict)
 
-    ROLES = ("rgb", "depth", "rgb_info", "depth_info", "confidence", "tf", "tf_static", "odom", "tracking", "seq")
+    ROLES = ("rgb", "depth", "rgb_info", "depth_info", "confidence", "tf", "tf_static", "odom", "tracking", "seq", "detections")
 
     def as_dict(self) -> Dict[str, Any]:
         return {k: getattr(self, k) for k in self.ROLES}
@@ -343,6 +354,8 @@ def resolve_topics(info: BagInfo, overrides: Optional[Dict[str, str]] = None) ->
     pick("odom", sorted(t.name for t in info.of_type(ODOM_T, POSE_T)), "nav_msgs/Odometry or PoseStamped topic")
     pick("tracking", sorted(t.name for t in info.of_type(STRING_T) if "tracking" in t.name.lower()), "std_msgs/String named tracking_state")
     pick("seq", sorted(t.name for t in info.of_type(U32_T) if "seq" in t.name.lower()), "std_msgs/UInt32 named frame_seq")
+    dets = sorted((t.name for t in info.of_type(DETECTION_2D, DETECTION_3D)), key=lambda n: (0 if topics[n].msgtype == DETECTION_2D else 1, n))
+    pick("detections", dets, "vision_msgs Detection2DArray (preferred) / Detection3DArray topic")
     return tm
 
 
@@ -360,6 +373,15 @@ class BagStats:
     yielded: int = 0
     pair_dt_ms_max: float = 0.0
     pose_kind: str = ""
+    # external detections (a vision_msgs topic paired to the frames; all zero without one)
+    detections_topic: Optional[str] = None
+    detections_msgtype: Optional[str] = None
+    detections_paired: int = 0               # messages attached to a frame
+    detections_unpaired: int = 0             # messages no frame matched within the tolerance
+    frames_without_detections: int = 0       # frames that went out without a detections message
+    detections_errors: int = 0               # messages the adapter could not convert
+    detections_dropped: Dict[str, int] = field(default_factory=dict)      # adapter drop reasons -> count
+    detections_scoring: Dict[str, int] = field(default_factory=dict)      # present | absent | mixed -> messages
     world_frame: str = ""
     camera_frame: str = ""
     tf_chain: List[str] = field(default_factory=list)
@@ -628,8 +650,15 @@ def _prepare(stream, st: BagStats, *, topics, tf_extrapolation_s, world_frame, c
               "message_count": info.message_count, "duration_s": info.duration_s}
     if not info.has_typedefs:
         logger.warning("[bag] %s carries no message definitions; assuming the %s typestore (io.bag.typestore)", info.path, info.typestore)
-    tm = resolve_topics(info, topics)
+    try:
+        tm = resolve_topics(info, topics)
+    except BagRefusal as e:                       # an override naming a topic the bag lacks
+        st.refusal = list(e.reasons)
+        raise
     st.topics = {**tm.as_dict(), "rules": dict(tm.rules)}
+    if tm.detections:
+        st.detections_topic = tm.detections
+        st.detections_msgtype = info.topics[tm.detections].msgtype
     reasons: List[Tuple[str, str]] = []
     image_names = [t.name for t in info.of_type(IMAGE_T, COMPRESSED_T)]
     for role in ("rgb", "depth"):
@@ -655,6 +684,95 @@ def _prepare(stream, st: BagStats, *, topics, tf_extrapolation_s, world_frame, c
     return tm, buf, world, cam, rgb_info, (info.custom_data.get("session_id") or None)
 
 
+
+# ───────────────────────────── external detections ─────────────────────────────
+
+DETECTIONS_WAIT_S = 1.0     # a frame waits this long (log time) for its detections message before it goes out without one
+
+
+class _DetectionsJoiner:
+    """Attaches to each emitted frame the detections message nearest in stamp
+    (within the pair tolerance). Detectors publish after the image, so a frame
+    waits: it is released with its detections when they arrive, without them
+    when a detections message with a later stamp arrives or the log time passes
+    the frame's by ``DETECTIONS_WAIT_S``, and at the end of the bag. Frame order
+    is preserved; every outcome is counted in the BagStats."""
+
+    def __init__(self, adapter, msgtype: str, tol_ns: int, wait_ns: int, st: "BagStats", tf_lookup, source: str) -> None:
+        self.adapter, self.msgtype, self.tol, self.wait, self.st, self.tf_lookup, self.source = adapter, msgtype, int(tol_ns), int(wait_ns), st, tf_lookup, source
+        self.pending: Deque[Tuple[RawFrame, int]] = deque()
+        self.dets: List[Tuple[int, Any]] = []
+        self.last_released: Optional[int] = None
+
+    def add_frame(self, fr: RawFrame, log_ns: int):
+        self.pending.append((fr, int(log_ns)))
+        yield from self._release(log_ns=int(log_ns))
+
+    def add_detections(self, msg: Any, log_ns: int):
+        try:
+            stamp = _stamp_ns(msg.header)
+        except Exception:  # noqa: BLE001
+            stamp = 0
+        if stamp <= 0:
+            self.st.detections_unpaired += 1
+            return
+        self.dets.append((int(stamp), msg))
+        yield from self._release(log_ns=int(log_ns))
+
+    def advance(self, log_ns: int):
+        yield from self._release(log_ns=int(log_ns))
+
+    def flush(self):
+        yield from self._release(final=True)
+
+    def _attach(self, fr: RawFrame, msg: Any, stamp: int) -> None:
+        h = fr.header
+        try:
+            det = self.adapter.convert(msg, self.msgtype, rgb_hw=tuple(h.extra.get("rgb_hw") or (h.rgb.height, h.rgb.width)),
+                                       intrinsics=h.intrinsics, tf_lookup=self.tf_lookup, t_sensor_ns=stamp, source=self.source)
+        except Exception as e:  # noqa: BLE001 -- a bad message is counted, never fatal
+            logger.warning("[bag] detections at %d not converted: %s", stamp, e)
+            self.st.detections_errors += 1
+            return
+        h.extra["detections"] = det
+        h.extra["detections_dt_ms"] = round(abs(stamp - int(h.t_sensor_ns)) / 1e6, 3)
+        self.st.detections_paired += 1
+        self.st.detections_scoring[det.scoring] = self.st.detections_scoring.get(det.scoring, 0) + 1
+        for k, v in det.n_dropped.items():
+            self.st.detections_dropped[k] = self.st.detections_dropped.get(k, 0) + int(v)
+
+    def _release(self, log_ns: Optional[int] = None, final: bool = False):
+        while self.pending:
+            fr, fr_log = self.pending[0]
+            fs = int(fr.header.t_sensor_ns)
+            best = None
+            for i, (ds, _m) in enumerate(self.dets):
+                d = abs(ds - fs)
+                if d <= self.tol and (best is None or d < best[0]):
+                    best = (d, i)
+            if best is not None:
+                ds, msg = self.dets.pop(best[1])
+                self._attach(fr, msg, ds)
+            else:
+                later = any(ds > fs + self.tol for ds, _m in self.dets)
+                timed_out = log_ns is not None and (log_ns - fr_log) > self.wait
+                if not (final or later or timed_out):
+                    break
+                self.st.frames_without_detections += 1
+            self.pending.popleft()
+            self.last_released = fs
+            yield fr
+        # detections that no frame can match any more (older than every frame still to come)
+        floor = (int(self.pending[0][0].header.t_sensor_ns) if self.pending else self.last_released)
+        if floor is not None:
+            keep = [(ds, m) for ds, m in self.dets if ds >= floor - self.tol]
+            self.st.detections_unpaired += len(self.dets) - len(keep)
+            self.dets = keep
+        if final:
+            self.st.detections_unpaired += len(self.dets)
+            self.dets = []
+
+
 def iter_bag_frames(path: str | os.PathLike, *, topics: Optional[Dict[str, str]] = None, pair_tolerance_s: float = 0.02,
                     tf_extrapolation_s: float = 0.05, world_frame: Optional[str] = None, camera_frame: Optional[str] = None,
                     assume_aligned: bool = False, typestore: str = "humble", stats: Optional[BagStats] = None,
@@ -670,7 +788,7 @@ def iter_bag_frames(path: str | os.PathLike, *, topics: Optional[Dict[str, str]]
                                                               world_frame=world_frame, camera_frame=camera_frame,
                                                               assume_aligned=assume_aligned)
 
-        want = [t for t in (tm.rgb, tm.depth, tm.rgb_info, tm.confidence, tm.tracking, tm.seq) if t]
+        want = [t for t in (tm.rgb, tm.depth, tm.rgb_info, tm.confidence, tm.tracking, tm.seq, tm.detections) if t]
         pairer = _Pairer(int(pair_tolerance_s * 1e9))
         infos: List[Tuple[int, Any]] = []
         confs: Dict[int, Any] = {}
@@ -682,9 +800,26 @@ def iter_bag_frames(path: str | os.PathLike, *, topics: Optional[Dict[str, str]]
         rgb_type = info.topics[tm.rgb].msgtype
         depth_type = info.topics[tm.depth].msgtype
         n_out = 0
+        joiner: Optional[_DetectionsJoiner] = None
+        if tm.detections:
+            det_type = info.topics[tm.detections].msgtype
+            adapter = adapter_for(det_type)
+            if adapter is None:
+                st.refusal = [("unsupported_detections_type", f"{tm.detections}: no detections adapter for {det_type}")]
+                raise BagRefusal(st.refusal)
+
+            def _tf_lookup(frame_id: str, t_ns: int, _buf=buf, _world=world, _cam=cam) -> np.ndarray:
+                """T_cam_from_frame at t: the camera pose inverted, composed with world <- frame."""
+                fid = norm_frame(frame_id)
+                if fid == _cam:
+                    return np.eye(4)
+                T_wc = make_T(*_buf.lookup(_world, _cam, t_ns))
+                return np.linalg.inv(T_wc) @ _buf.lookup_T(_world, fid, t_ns)
+
+            joiner = _DetectionsJoiner(adapter, det_type, int(pair_tolerance_s * 1e9), int(DETECTIONS_WAIT_S * 1e9), st,
+                                       _tf_lookup, source=f"{tm.detections}")
 
         def emit(stamp: int, rgb_msg, log_ns: int, depth_pair) -> Optional[RawFrame]:
-            nonlocal n_out
             if depth_pair is None:
                 st.unpaired_rgb += 1
                 return None
@@ -715,58 +850,77 @@ def iter_bag_frames(path: str | os.PathLike, *, topics: Optional[Dict[str, str]]
             if seq is None:
                 seq = index_of.get(stamp, 0)
             tracking = tracking_at.pop(log_ns, None) or (latest_tracking if tm.tracking else "normal")
-            n_out += 1
-            st.yielded = n_out
             return RawFrame(header=FrameHeader(
                 source=source, seq=int(seq), t_sensor_ns=int(stamp), t_wall_utc_s=(log_ns / 1e9 if log_ns else None),
                 tracking_state=str(tracking), keyframe_hint=None, rgb=rgb_img, depth=depth_img, intrinsics=intr,
                 pose_raw=(t_wc, q_wc), pose_format=POSE_FMT_PREPARED, pose_convention=CONVENTION_OPENCV, confidence=conf,
                 session_id=session_id, pose_frame_id=world, keep_encoded_rgb=False,
-                extra={"pair_dt_ms": round(abs(depth_pair[0] - stamp) / 1e6, 3)},
+                extra={"pair_dt_ms": round(abs(depth_pair[0] - stamp) / 1e6, 3), "rgb_hw": (int(rgb_h), int(rgb_w))},
             ))
 
-        for topic, _mt, log_ns, msg in stream.messages(want):
-            if topic == tm.rgb_info:
-                infos.append((_stamp_ns(msg.header), msg))
-                if len(infos) > 64:
-                    del infos[:-64]
-                continue
-            if topic == tm.tracking:
-                tracking_at[log_ns] = latest_tracking = str(msg.data)
-                continue
-            if topic == tm.seq:
-                seq_at[log_ns] = int(msg.data)
-                continue
-            if topic == tm.confidence:
-                confs[_stamp_ns(msg.header)] = msg
-                if len(confs) > 64:
-                    for k in sorted(confs)[:-64]:
-                        confs.pop(k, None)
-                continue
-            stamp = _stamp_ns(msg.header)
-            if stamp <= 0:
-                st.skipped_zero_stamp += 1
-                continue
-            if topic == tm.rgb:
-                st.frames_seen += 1
-                index_of[stamp] = rgb_index
-                rgb_index += 1
-                pairer.add_rgb(stamp, msg, log_ns)
-            elif topic == tm.depth:
-                pairer.add_depth(stamp, msg)
-            for stamp_r, rgb_msg, log_r, dp in pairer.resolve():
+        def frames():
+            """The frames in emission order; with a detections topic, through the joiner (which may hold a frame
+            until its detections arrive)."""
+            nonlocal rgb_index, latest_tracking
+            for topic, _mt, log_ns, msg in stream.messages(want):
+                if topic == tm.rgb_info:
+                    infos.append((_stamp_ns(msg.header), msg))
+                    if len(infos) > 64:
+                        del infos[:-64]
+                    continue
+                if topic == tm.tracking:
+                    tracking_at[log_ns] = latest_tracking = str(msg.data)
+                    continue
+                if topic == tm.seq:
+                    seq_at[log_ns] = int(msg.data)
+                    continue
+                if topic == tm.confidence:
+                    confs[_stamp_ns(msg.header)] = msg
+                    if len(confs) > 64:
+                        for k in sorted(confs)[:-64]:
+                            confs.pop(k, None)
+                    continue
+                if joiner is not None and topic == tm.detections:
+                    yield from joiner.add_detections(msg, log_ns)
+                    continue
+                stamp = _stamp_ns(msg.header)
+                if stamp <= 0:
+                    st.skipped_zero_stamp += 1
+                    continue
+                if topic == tm.rgb:
+                    st.frames_seen += 1
+                    index_of[stamp] = rgb_index
+                    rgb_index += 1
+                    pairer.add_rgb(stamp, msg, log_ns)
+                elif topic == tm.depth:
+                    pairer.add_depth(stamp, msg)
+                for stamp_r, rgb_msg, log_r, dp in pairer.resolve():
+                    fr = emit(stamp_r, rgb_msg, log_r, dp)
+                    if fr is None:
+                        continue
+                    if joiner is None:
+                        yield fr
+                    else:
+                        yield from joiner.add_frame(fr, log_r)
+                if joiner is not None:
+                    yield from joiner.advance(log_ns)
+            for stamp_r, rgb_msg, log_r, dp in pairer.resolve(final=True):
                 fr = emit(stamp_r, rgb_msg, log_r, dp)
-                if fr is not None:
+                if fr is None:
+                    continue
+                if joiner is None:
                     yield fr
-                    if max_frames is not None and n_out >= int(max_frames):
-                        st.unpaired_depth = pairer.dropped_depth
-                        return
-        for stamp_r, rgb_msg, log_r, dp in pairer.resolve(final=True):
-            fr = emit(stamp_r, rgb_msg, log_r, dp)
-            if fr is not None:
-                yield fr
-                if max_frames is not None and n_out >= int(max_frames):
-                    break
+                else:
+                    yield from joiner.add_frame(fr, log_r)
+            if joiner is not None:
+                yield from joiner.flush()
+
+        for fr in frames():
+            n_out += 1
+            st.yielded = n_out
+            yield fr
+            if max_frames is not None and n_out >= int(max_frames):
+                break
         st.unpaired_depth = pairer.dropped_depth
     finally:
         stream.close()

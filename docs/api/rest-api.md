@@ -6,6 +6,8 @@ RTSM exposes a REST API for querying objects, system state, and runtime analytic
 
 All list endpoints support **offset-based pagination** via `offset` and `limit` parameters. Responses include `total`, `offset`, `limit`, and `count` fields for pagination metadata.
 
+The [Python client](python-client.md) is the reference consumer: the fields it reads (`/healthz.status`; `/stats` with `robot_pose` and `forward_clearance`; `/objects` entries; the snapshot image; `/search/semantic` and `/search/label` results) are pinned by `tests/test_api_contract.py`, which feeds the server's responses through the client's own parsers. A change that breaks one of them fails CI.
+
 ---
 
 ## Health
