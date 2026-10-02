@@ -1,0 +1,1727 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Real-Time Spatio-Semantic Memory for spatial AI and robotics">
+      
+      
+      
+        <link rel="canonical" href="https://calabi-inc.github.io/rtsm/guides/ingest-sources/">
+      
+      
+        <link rel="prev" href="../diagnostics/">
+      
+      
+        <link rel="next" href="../bags/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Ingest Sources - RTSM Documentation</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#ingest-sources" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="RTSM Documentation" class="md-header__button md-logo" aria-label="RTSM Documentation" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            RTSM Documentation
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Ingest Sources
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/calabi-inc/rtsm" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    calabi-inc/rtsm
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="RTSM Documentation" class="md-nav__button md-logo" aria-label="RTSM Documentation" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    RTSM Documentation
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/calabi-inc/rtsm" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    calabi-inc/rtsm
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting Started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/quick-start/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quick Start
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concepts
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Concepts
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/perception-pipeline/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Perception Pipeline
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/memory-model/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Memory Model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    API Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/rest-api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    REST API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/mcp/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MCP (AI Agents)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/websocket/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    WebSocket
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/python-client/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Python Client
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../benchmarks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Benchmarks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Use Cases
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Use Cases
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../use-cases/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../use-cases/tum-fr3-long-office/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    TUM fr3 / long office
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../use-cases/tum-fr1-desk/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    TUM fr1 / desk
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../use-cases/nvidia-r2b-cafe/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    NVIDIA r2b_cafe (refusal)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Guides
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_7">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Guides
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../record-replay/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Record & Replay
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../analytics-dashboard/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Analytics Dashboard
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../diagnostics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Diagnostics & Ledgers
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ingest Sources
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ingest Sources
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#the-pieces" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The pieces
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-an-adapter-does-and-does-not-do" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What an adapter does, and does not do
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#writing-a-source" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Writing a source
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Writing a source">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#choosing-a-policy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Choosing a policy
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#encodings-the-codec-layer-understands" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Encodings the codec layer understands
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#how-the-behaviour-is-pinned" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How the behaviour is pinned
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../bags/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reading Bags
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../eval/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Evaluating a Bag
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../rtabmap-setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    RTAB-Map Setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../realsense-setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    RealSense Setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../contributing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#the-pieces" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The pieces
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-an-adapter-does-and-does-not-do" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What an adapter does, and does not do
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#writing-a-source" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Writing a source
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Writing a source">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#choosing-a-policy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Choosing a policy
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#encodings-the-codec-layer-understands" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Encodings the codec layer understands
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#how-the-behaviour-is-pinned" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How the behaviour is pinned
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="ingest-sources">Ingest Sources<a class="headerlink" href="#ingest-sources" title="Permanent link">&para;</a></h1>
+<p>RTSM takes frames from a <em>source</em>: a transport adapter that turns bytes from somewhere (a Calabi Lens websocket, a RealSense + RTAB-Map ZeroMQ bridge, a recording) into frames and poses. Since the ingest front-end extraction, every source runs the <strong>same admission chain</strong>, so what the determinism gates and the benchmarks say about one source holds for all of them, and a new source is a small adapter, not a fourth copy of the receiver.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>transport bytes ──adapter──▶ RawFrame / PoseSample ──front-end──▶ FramePacket ──▶ ingest queue ──▶ pipeline
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>                 (rtsm/io/websocket.py,            (rtsm/io/ingest_frontend.py,
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>                  zeromq.py, replayer.py,           one implementation)
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>                  your plug-in)
+</code></pre></div>
+<h2 id="the-pieces">The pieces<a class="headerlink" href="#the-pieces" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Layer</th>
+<th>Module</th>
+<th>Job</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Contracts</td>
+<td><code>rtsm/io/contracts.py</code></td>
+<td>The versioned seam: <code>RawFrame</code> (a <code>FrameHeader</code> + still-encoded payloads), <code>PoseSample</code>, <code>FrameCorrection</code>, <code>TrackingStatus</code>, the <code>Source</code> protocol, <code>SourceContext</code>. <code>CONTRACT_VERSION = 1</code>.</td>
+</tr>
+<tr>
+<td>Codecs</td>
+<td><code>rtsm/io/codecs.py</code></td>
+<td>Pixels and poses: JPEG / PNG / BGRA / NV12 RGB, <code>uint16_mm</code> / <code>float32_m</code> / PNG depth, confidence maps, intrinsics rescaling, ARKit and RTAB-Map pose formats, the ARKit→OpenCV convention flip.</td>
+</tr>
+<tr>
+<td>Front-end</td>
+<td><code>rtsm/io/ingest_frontend.py</code></td>
+<td>The chain: tracking filter → pose parse → receive-time pose mailbox → depth decode + pose ledger → keyframe rule → non-keyframe throttle → lane admission (admit-before-decode) → decode on admit (memoised) → clearance / confidence filter → <code>FramePacket</code> → enqueue → callbacks → frame-flow trace.</td>
+</tr>
+<tr>
+<td>Policy</td>
+<td><code>FrontEndPolicy</code> (same module)</td>
+<td>The per-source flavour of the chain. Two ship: <code>WEBSOCKET_POLICY</code> (minted keyframes, pose rides with the frame, depth decoded before admission) and <code>ZEROMQ_POLICY</code> (SLAM keyframes, poses as separate events, decode after admission, repeat-stamp dedup, receiver-minted epochs).</td>
+</tr>
+<tr>
+<td>Registry</td>
+<td><code>rtsm/io/sources.py</code></td>
+<td><code>make_source(name, cfg, ctx, **options)</code> builds a source by name from one <code>SourceContext</code>. Built-ins <code>websocket</code>, <code>zeromq</code>, <code>replay</code>, <code>bag</code> (see <a href="../bags/">Reading Bags</a>); plug-ins via the <code>rtsm.sources</code> entry-point group.</td>
+</tr>
+</tbody>
+</table>
+<p><code>io.receiver</code> in the config names the source (<code>websocket</code> or <code>zeromq</code>, or a plug-in name); <code>--replay &lt;dir&gt;</code> selects the replay source regardless. See <a href="../../getting-started/configuration/#io--receiver">Configuration → I/O &amp; Receiver</a>.</p>
+<h2 id="what-an-adapter-does-and-does-not-do">What an adapter does, and does not do<a class="headerlink" href="#what-an-adapter-does-and-does-not-do" title="Permanent link">&para;</a></h2>
+<p>An adapter owns the transport (sockets, files, pairing of poses with camera frames on a bridge that publishes them separately) and produces:</p>
+<ul>
+<li>one <code>RawFrame</code> per candidate frame: header fields (source frame id, sensor stamp, sender wall stamp, tracking state, the source's own keyframe flag if it has one), the <strong>still-encoded</strong> RGB / depth / confidence payloads with their encodings and declared sizes, intrinsics at RGB resolution (<code>codecs.rescale_intrinsics</code>), and the pose as the transport delivered it plus <code>pose_format</code> / <code>pose_convention</code> tags;</li>
+<li><code>PoseSample</code> events for poses that arrive separately from frames (<code>IngestFrontEnd.pose_event</code>), so the receive-time robot pose and the pose ledger see every pose at input rate;</li>
+<li><code>FrameCorrection</code> events for retroactive pose corrections (loop closure, relocalisation).</li>
+</ul>
+<p>It never decodes pixels, never applies keyframe or throttle logic, never touches the ingest queue. Those belong to the front-end; that is what keeps the session1 anchor (<code>ad6f71a5b89c8506</code>, 124 objects / 65 confirmed at 53 frames) meaningful across sources.</p>
+<p>The adapter then calls <code>fe.admit(raw)</code> (or <code>fe.offer(raw)</code> = admit + enqueue). <code>admit</code> returns the <code>FramePacket</code> to enqueue, <code>None</code> when the chain dropped the frame (the drop line is already written), and re-raises after writing a <code>parse_error</code> line when the pose or a payload fails to parse: the adapter logs and continues, as the receivers always did. Transport-level drops the front-end never saw (malformed framing, no camera frame to pair with) are reported with <code>fe.reject(reason, ...)</code> so the frame-flow trace stays complete.</p>
+<h2 id="writing-a-source">Writing a source<a class="headerlink" href="#writing-a-source" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1"># my_package/rtsm_source.py</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="kn">import</span><span class="w"> </span><span class="nn">threading</span><span class="o">,</span><span class="w"> </span><span class="nn">time</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="kn">from</span><span class="w"> </span><span class="nn">rtsm.io.contracts</span><span class="w"> </span><span class="kn">import</span> <span class="n">EncodedImage</span><span class="p">,</span> <span class="n">FrameHeader</span><span class="p">,</span> <span class="n">RawFrame</span><span class="p">,</span> <span class="n">SourceContext</span><span class="p">,</span> <span class="n">POSE_FMT_PREPARED</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="kn">from</span><span class="w"> </span><span class="nn">rtsm.io.ingest_frontend</span><span class="w"> </span><span class="kn">import</span> <span class="n">IngestFrontEnd</span><span class="p">,</span> <span class="n">WEBSOCKET_POLICY</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="k">class</span><span class="w"> </span><span class="nc">BagSource</span><span class="p">:</span>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>    <span class="n">name</span> <span class="o">=</span> <span class="s2">"mybag"</span>
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">cfg</span><span class="p">:</span> <span class="nb">dict</span><span class="p">,</span> <span class="n">ctx</span><span class="p">:</span> <span class="n">SourceContext</span><span class="p">,</span> <span class="o">**</span><span class="n">options</span><span class="p">):</span>
+<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">_path</span> <span class="o">=</span> <span class="n">options</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"recording_dir"</span><span class="p">)</span> <span class="ow">or</span> <span class="n">cfg</span><span class="p">[</span><span class="s2">"io"</span><span class="p">][</span><span class="s2">"mybag"</span><span class="p">][</span><span class="s2">"path"</span><span class="p">]</span>
+<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">_fe</span> <span class="o">=</span> <span class="n">IngestFrontEnd</span><span class="p">(</span>
+<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a>            <span class="n">source</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">name</span><span class="p">,</span> <span class="n">policy</span><span class="o">=</span><span class="n">WEBSOCKET_POLICY</span><span class="p">,</span> <span class="n">ingest_queue</span><span class="o">=</span><span class="n">ctx</span><span class="o">.</span><span class="n">ingest_queue</span><span class="p">,</span>
+<a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a>            <span class="n">throttle_clock</span><span class="o">=</span><span class="n">ctx</span><span class="o">.</span><span class="n">clock_mode</span><span class="p">,</span> <span class="n">keyframe_every_n</span><span class="o">=</span><span class="n">ctx</span><span class="o">.</span><span class="n">keyframe_every_n</span><span class="p">,</span>
+<a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a>            <span class="n">nonkf_min_interval_s</span><span class="o">=</span><span class="n">ctx</span><span class="o">.</span><span class="n">nonkf_min_interval_s</span><span class="p">,</span>
+<a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a>            <span class="n">require_tracking_normal</span><span class="o">=</span><span class="n">ctx</span><span class="o">.</span><span class="n">require_tracking_normal</span><span class="p">,</span>
+<a id="__codelineno-1-17" name="__codelineno-1-17" href="#__codelineno-1-17"></a>            <span class="n">confidence_threshold</span><span class="o">=</span><span class="n">ctx</span><span class="o">.</span><span class="n">confidence_threshold</span><span class="p">,</span>
+<a id="__codelineno-1-18" name="__codelineno-1-18" href="#__codelineno-1-18"></a>            <span class="n">pose_sink</span><span class="o">=</span><span class="n">ctx</span><span class="o">.</span><span class="n">pose_sink</span><span class="p">,</span> <span class="n">event_sink</span><span class="o">=</span><span class="n">ctx</span><span class="o">.</span><span class="n">event_sink</span><span class="p">,</span> <span class="n">ledger_sink</span><span class="o">=</span><span class="n">ctx</span><span class="o">.</span><span class="n">ledger_sink</span><span class="p">,</span>
+<a id="__codelineno-1-19" name="__codelineno-1-19" href="#__codelineno-1-19"></a>            <span class="n">latency_analytics</span><span class="o">=</span><span class="n">ctx</span><span class="o">.</span><span class="n">latency_analytics</span><span class="p">,</span>
+<a id="__codelineno-1-20" name="__codelineno-1-20" href="#__codelineno-1-20"></a>            <span class="n">on_camera_frame</span><span class="o">=</span><span class="n">ctx</span><span class="o">.</span><span class="n">on_camera_frame</span><span class="p">,</span> <span class="n">on_keyframe</span><span class="o">=</span><span class="n">ctx</span><span class="o">.</span><span class="n">on_keyframe</span><span class="p">,</span>
+<a id="__codelineno-1-21" name="__codelineno-1-21" href="#__codelineno-1-21"></a>        <span class="p">)</span>
+<a id="__codelineno-1-22" name="__codelineno-1-22" href="#__codelineno-1-22"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">_thread</span> <span class="o">=</span> <span class="kc">None</span>
+<a id="__codelineno-1-23" name="__codelineno-1-23" href="#__codelineno-1-23"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">_stop</span> <span class="o">=</span> <span class="n">threading</span><span class="o">.</span><span class="n">Event</span><span class="p">()</span>
+<a id="__codelineno-1-24" name="__codelineno-1-24" href="#__codelineno-1-24"></a>
+<a id="__codelineno-1-25" name="__codelineno-1-25" href="#__codelineno-1-25"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">start</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<a id="__codelineno-1-26" name="__codelineno-1-26" href="#__codelineno-1-26"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">_thread</span> <span class="o">=</span> <span class="n">threading</span><span class="o">.</span><span class="n">Thread</span><span class="p">(</span><span class="n">target</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">_loop</span><span class="p">,</span> <span class="n">daemon</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">name</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">name</span><span class="p">)</span>
+<a id="__codelineno-1-27" name="__codelineno-1-27" href="#__codelineno-1-27"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">_thread</span><span class="o">.</span><span class="n">start</span><span class="p">()</span>
+<a id="__codelineno-1-28" name="__codelineno-1-28" href="#__codelineno-1-28"></a>
+<a id="__codelineno-1-29" name="__codelineno-1-29" href="#__codelineno-1-29"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">stop</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<a id="__codelineno-1-30" name="__codelineno-1-30" href="#__codelineno-1-30"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">_stop</span><span class="o">.</span><span class="n">set</span><span class="p">()</span>
+<a id="__codelineno-1-31" name="__codelineno-1-31" href="#__codelineno-1-31"></a>
+<a id="__codelineno-1-32" name="__codelineno-1-32" href="#__codelineno-1-32"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">liveness</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
+<a id="__codelineno-1-33" name="__codelineno-1-33" href="#__codelineno-1-33"></a>        <span class="n">t</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_thread</span>
+<a id="__codelineno-1-34" name="__codelineno-1-34" href="#__codelineno-1-34"></a>        <span class="k">return</span> <span class="p">{</span><span class="s2">"alive"</span><span class="p">:</span> <span class="nb">bool</span><span class="p">(</span><span class="n">t</span> <span class="ow">and</span> <span class="n">t</span><span class="o">.</span><span class="n">is_alive</span><span class="p">()),</span> <span class="o">**</span><span class="bp">self</span><span class="o">.</span><span class="n">_fe</span><span class="o">.</span><span class="n">liveness</span><span class="p">()}</span>
+<a id="__codelineno-1-35" name="__codelineno-1-35" href="#__codelineno-1-35"></a>
+<a id="__codelineno-1-36" name="__codelineno-1-36" href="#__codelineno-1-36"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">_loop</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<a id="__codelineno-1-37" name="__codelineno-1-37" href="#__codelineno-1-37"></a>        <span class="k">for</span> <span class="n">msg</span> <span class="ow">in</span> <span class="n">read_my_bag</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_path</span><span class="p">):</span>                 <span class="c1"># your transport</span>
+<a id="__codelineno-1-38" name="__codelineno-1-38" href="#__codelineno-1-38"></a>            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_stop</span><span class="o">.</span><span class="n">is_set</span><span class="p">():</span>
+<a id="__codelineno-1-39" name="__codelineno-1-39" href="#__codelineno-1-39"></a>                <span class="k">break</span>
+<a id="__codelineno-1-40" name="__codelineno-1-40" href="#__codelineno-1-40"></a>            <span class="bp">self</span><span class="o">.</span><span class="n">_fe</span><span class="o">.</span><span class="n">last_rx_mono</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">monotonic</span><span class="p">()</span>
+<a id="__codelineno-1-41" name="__codelineno-1-41" href="#__codelineno-1-41"></a>            <span class="n">raw</span> <span class="o">=</span> <span class="n">RawFrame</span><span class="p">(</span><span class="n">header</span><span class="o">=</span><span class="n">FrameHeader</span><span class="p">(</span>
+<a id="__codelineno-1-42" name="__codelineno-1-42" href="#__codelineno-1-42"></a>                <span class="n">source</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">name</span><span class="p">,</span> <span class="n">seq</span><span class="o">=</span><span class="n">msg</span><span class="o">.</span><span class="n">seq</span><span class="p">,</span> <span class="n">t_sensor_ns</span><span class="o">=</span><span class="n">msg</span><span class="o">.</span><span class="n">stamp_ns</span><span class="p">,</span> <span class="n">t_wall_utc_s</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-1-43" name="__codelineno-1-43" href="#__codelineno-1-43"></a>                <span class="n">tracking_state</span><span class="o">=</span><span class="s2">"normal"</span><span class="p">,</span> <span class="n">keyframe_hint</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-1-44" name="__codelineno-1-44" href="#__codelineno-1-44"></a>                <span class="n">rgb</span><span class="o">=</span><span class="n">EncodedImage</span><span class="p">(</span><span class="n">msg</span><span class="o">.</span><span class="n">jpeg</span><span class="p">,</span> <span class="s2">"jpeg"</span><span class="p">,</span> <span class="n">msg</span><span class="o">.</span><span class="n">w</span><span class="p">,</span> <span class="n">msg</span><span class="o">.</span><span class="n">h</span><span class="p">),</span>
+<a id="__codelineno-1-45" name="__codelineno-1-45" href="#__codelineno-1-45"></a>                <span class="n">depth</span><span class="o">=</span><span class="n">EncodedImage</span><span class="p">(</span><span class="n">msg</span><span class="o">.</span><span class="n">depth_u16_bytes</span><span class="p">,</span> <span class="s2">"uint16_mm"</span><span class="p">,</span> <span class="n">msg</span><span class="o">.</span><span class="n">w</span><span class="p">,</span> <span class="n">msg</span><span class="o">.</span><span class="n">h</span><span class="p">,</span> <span class="mf">0.001</span><span class="p">),</span>
+<a id="__codelineno-1-46" name="__codelineno-1-46" href="#__codelineno-1-46"></a>                <span class="n">intrinsics</span><span class="o">=</span><span class="n">msg</span><span class="o">.</span><span class="n">intrinsics</span><span class="p">,</span>
+<a id="__codelineno-1-47" name="__codelineno-1-47" href="#__codelineno-1-47"></a>                <span class="n">pose_raw</span><span class="o">=</span><span class="p">(</span><span class="n">msg</span><span class="o">.</span><span class="n">t_wc</span><span class="p">,</span> <span class="n">msg</span><span class="o">.</span><span class="n">q_wc_xyzw</span><span class="p">),</span> <span class="n">pose_format</span><span class="o">=</span><span class="n">POSE_FMT_PREPARED</span><span class="p">,</span>
+<a id="__codelineno-1-48" name="__codelineno-1-48" href="#__codelineno-1-48"></a>            <span class="p">))</span>
+<a id="__codelineno-1-49" name="__codelineno-1-49" href="#__codelineno-1-49"></a>            <span class="k">try</span><span class="p">:</span>
+<a id="__codelineno-1-50" name="__codelineno-1-50" href="#__codelineno-1-50"></a>                <span class="bp">self</span><span class="o">.</span><span class="n">_fe</span><span class="o">.</span><span class="n">offer</span><span class="p">(</span><span class="n">raw</span><span class="p">)</span>
+<a id="__codelineno-1-51" name="__codelineno-1-51" href="#__codelineno-1-51"></a>            <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>                          <span class="c1"># parse_error line already written</span>
+<a id="__codelineno-1-52" name="__codelineno-1-52" href="#__codelineno-1-52"></a>                <span class="n">logging</span><span class="o">.</span><span class="n">getLogger</span><span class="p">(</span><span class="vm">__name__</span><span class="p">)</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="s2">"bad frame </span><span class="si">%s</span><span class="s2">: </span><span class="si">%s</span><span class="s2">"</span><span class="p">,</span> <span class="n">msg</span><span class="o">.</span><span class="n">seq</span><span class="p">,</span> <span class="n">e</span><span class="p">)</span>
+</code></pre></div>
+<p>Register it:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1"># your package's pyproject.toml</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="k">[project.entry-points.</span><span class="s2">"rtsm.sources"</span><span class="k">]</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="n">mybag</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"my_package.rtsm_source:BagSource"</span>
+</code></pre></div>
+<p>then <code>io.receiver: mybag</code>. The factory signature is <code>factory(cfg, ctx, **options) -&gt; Source</code>; a class with that constructor works. In-process registration (<code>rtsm.io.sources.register_source("mybag", BagSource)</code>) does the same without packaging. A plug-in name that collides with a built-in is ignored with a warning.</p>
+<p>The runner passes these options today: <code>recording_dir</code> and <code>replay_speed</code> (from <code>--replay</code> / <code>--replay-speed</code>), <code>pair_window_s</code> and <code>pair_window_frames</code> (from <code>ingest.*</code>, used by the ZeroMQ source). Read what you need, ignore the rest.</p>
+<h3 id="choosing-a-policy">Choosing a policy<a class="headerlink" href="#choosing-a-policy" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Your source has no keyframe notion of its own and one pose per frame (a phone, a recording, most bags): <code>WEBSOCKET_POLICY</code>.</li>
+<li>Your source is a SLAM bridge that publishes poses and keyframes separately from camera frames, so you pair them yourself: <code>ZEROMQ_POLICY</code>, and drive <code>pose_event</code> / <code>is_repeat_stamp</code> / <code>throttle_due</code> / <code>reject</code> as <code>rtsm/io/zeromq.py</code> does.</li>
+<li>Anything else: <code>dataclasses.replace(WEBSOCKET_POLICY, ...)</code>. Each flag is documented on <code>FrontEndPolicy</code>. A new flavour is a new behaviour, so gate it (see below) before relying on it.</li>
+</ul>
+<h3 id="encodings-the-codec-layer-understands">Encodings the codec layer understands<a class="headerlink" href="#encodings-the-codec-layer-understands" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Payload</th>
+<th><code>encoding</code> values</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>RGB</td>
+<td><code>jpeg</code>, <code>png</code>, <code>bgra</code>, <code>nv12</code>, <code>raw_bgr</code> (an ndarray)</td>
+</tr>
+<tr>
+<td>Depth</td>
+<td><code>uint16_mm</code>, <code>float32_m</code>, <code>png_uint16</code> (zeros → invalid), <code>png_uint16_raw</code> (RTAB-Map bridge: zeros kept), <code>raw_depth_m</code> (an ndarray)</td>
+</tr>
+<tr>
+<td>Confidence</td>
+<td>a uint8 map (0 / 1 / 2) at the declared size</td>
+</tr>
+<tr>
+<td>Pose</td>
+<td><code>matrix4x4_col_major</code> (ARKit 16 floats), <code>quat_translation</code> (7 floats), <code>rtabmap_euler</code> (<code>[x, y, z, roll, pitch, yaw]</code>), <code>prepared</code> (<code>(t_wc, q_wc_xyzw)</code> from the adapter)</td>
+</tr>
+<tr>
+<td>Convention</td>
+<td><code>opencv</code> (identity) or <code>arkit</code> (flipped once at ingest)</td>
+</tr>
+</tbody>
+</table>
+<p>An unknown value raises <code>codecs.UnsupportedEncoding</code>, which the front-end reports as a <code>parse_error</code> line.</p>
+<h2 id="how-the-behaviour-is-pinned">How the behaviour is pinned<a class="headerlink" href="#how-the-behaviour-is-pinned" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Golden traces</strong> (<code>tests/test_ingest_golden.py</code>): two fixed message streams, one Lens-shaped and one bridge-shaped, recorded from the receivers <em>before</em> the extraction. Every receiver line, pose-mailbox call, pose-ledger line, packet digest and end state must match byte for byte. Regenerate only with <code>RTSM_WRITE_GOLDEN=1</code> and a reason in the commit.</li>
+<li><strong>Unit tests</strong> (<code>tests/test_ingest_frontend.py</code>): the chain's order (tracking filter before pose parse, refusal before decode, throttle before enqueue), the two policies, the throttle, the codecs, the registry.</li>
+<li><strong>The session1 anchor</strong> (124 objects / 65 confirmed at 53 processed frames, fingerprint <code>ad6f71a5b89c8506</code>, 86 dequeue + 240 receiver lines): the headless replay of the reference recording must reproduce the anchor fingerprint and the per-line receiver / dequeue trace. Run it after any change to the front-end, a policy, or a codec.</li>
+</ul>
+<p>A change that moves any of these is a behaviour change, not a refactor; it needs a new anchor and a note in the changelog.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div style="display: flex; gap: 4rem; padding: 1rem 0;">
+
+        <div>
+          <strong>Documentation</strong>
+          <ul style="list-style: none; padding: 0; margin: 0.5rem 0;">
+            <li><a href="/rtsm/getting-started/installation/">Getting Started</a></li>
+            <li><a href="/rtsm/concepts/architecture/">Key Concepts</a></li>
+          </ul>
+        </div>
+
+        <div>
+          <strong>Calabi Inc.</strong>
+          <ul style="list-style: none; padding: 0; margin: 0.5rem 0;">
+            <li><a href="https://calabi.com" target="_blank">Official Website</a></li>
+          </ul>
+        </div>
+
+      </div>
+      <div style="width: 100%; border-top: 1px solid var(--md-default-fg-color--lightest); padding-top: 1rem;">
+        Copyright &copy; 2025 Calabi Inc.
+      </div>
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.sections", "navigation.expand", "navigation.top", "search.highlight", "content.code.copy"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>

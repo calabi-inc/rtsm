@@ -1,0 +1,1729 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Real-Time Spatio-Semantic Memory for spatial AI and robotics">
+      
+      
+      
+        <link rel="canonical" href="https://calabi-inc.github.io/rtsm/guides/eval/">
+      
+      
+        <link rel="prev" href="../bags/">
+      
+      
+        <link rel="next" href="../rtabmap-setup/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Evaluating a Bag - RTSM Documentation</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#evaluating-a-bag-rtsm-eval" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="RTSM Documentation" class="md-header__button md-logo" aria-label="RTSM Documentation" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            RTSM Documentation
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Evaluating a Bag
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/calabi-inc/rtsm" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    calabi-inc/rtsm
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="RTSM Documentation" class="md-nav__button md-logo" aria-label="RTSM Documentation" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    RTSM Documentation
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/calabi-inc/rtsm" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    calabi-inc/rtsm
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting Started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/quick-start/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quick Start
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concepts
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Concepts
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/perception-pipeline/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Perception Pipeline
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/memory-model/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Memory Model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    API Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/rest-api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    REST API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/mcp/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MCP (AI Agents)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/websocket/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    WebSocket
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/python-client/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Python Client
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../benchmarks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Benchmarks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Use Cases
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Use Cases
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../use-cases/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../use-cases/tum-fr3-long-office/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    TUM fr3 / long office
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../use-cases/tum-fr1-desk/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    TUM fr1 / desk
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../use-cases/nvidia-r2b-cafe/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    NVIDIA r2b_cafe (refusal)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Guides
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_7">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Guides
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../record-replay/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Record & Replay
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../analytics-dashboard/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Analytics Dashboard
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../diagnostics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Diagnostics & Ledgers
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ingest-sources/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Ingest Sources
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../bags/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reading Bags
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Evaluating a Bag
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Evaluating a Bag
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#what-a-run-does" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What a run does
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#modes-cadences" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Modes (cadences)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-run-directory" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The run directory
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-report" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The report
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#your-own-detector" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Your own detector
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#options" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Options
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../rtabmap-setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    RTAB-Map Setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../realsense-setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    RealSense Setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../contributing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#what-a-run-does" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What a run does
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#modes-cadences" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Modes (cadences)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-run-directory" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The run directory
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-report" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The report
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#your-own-detector" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Your own detector
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#options" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Options
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="evaluating-a-bag-rtsm-eval">Evaluating a Bag (<code>rtsm eval</code>)<a class="headerlink" href="#evaluating-a-bag-rtsm-eval" title="Permanent link">&para;</a></h1>
+<p><code>rtsm eval</code> runs the pipeline headlessly on a recording — a ROS 1 <code>.bag</code>, a rosbag2 directory, a bare <code>.mcap</code> or a Lens recording — and writes everything a report needs: the frame-flow trace, the pose / observation / view ledgers, the final memory, and the settings that produced them. Then it writes the report: <code>metrics.json</code> (every per-object, per-cluster and per-frame result as data) and <code>report.md</code> (the number sheet). No server, no dashboard, no shared state: each run gets its own directory and its own vector store, and the packaged configuration is never written.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>pip<span class="w"> </span>install<span class="w"> </span><span class="s2">"rtsm[eval]"</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>rtsm<span class="w"> </span><span class="nb">eval</span><span class="w"> </span>recordings/session1_bag<span class="w">                       </span><span class="c1"># our own layout, deployed settings, one run</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>rtsm<span class="w"> </span><span class="nb">eval</span><span class="w"> </span>recordings/session1<span class="w"> </span>--repeats<span class="w"> </span><span class="m">3</span><span class="w">               </span><span class="c1"># a Lens recording, three same-input runs -&gt; every number carries its floor</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>rtsm<span class="w"> </span><span class="nb">eval</span><span class="w"> </span>rgbd_dataset_freiburg3_long_office_household.bag<span class="w"> </span>--mode<span class="w"> </span>dense<span class="w"> </span>--out<span class="w"> </span>eval_output/fr3
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>rtsm<span class="w"> </span><span class="nb">eval</span><span class="w"> </span>my_rosbag2<span class="w"> </span>--mode<span class="w"> </span>every_frame<span class="w"> </span>--max-frames<span class="w"> </span><span class="m">500</span><span class="w"> </span>--set<span class="w"> </span>io.bag.topics.depth<span class="o">=</span>/camera/aligned_depth_to_color/image_raw
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>rtsm<span class="w"> </span>report<span class="w"> </span>eval_output/fr3<span class="w">                             </span><span class="c1"># regenerate metrics.json + report.md from the run directories (no GPU)</span>
+</code></pre></div>
+<h2 id="what-a-run-does">What a run does<a class="headerlink" href="#what-a-run-does" title="Permanent link">&para;</a></h2>
+<ol>
+<li>Resolves the settings: the <strong>sensor clock</strong>, the <strong>lossless lane</strong> (nothing is dropped, the producer waits), the keyframe rule and the non-keyframe throttle for the chosen mode, the gate mode, and records the config fingerprint, the commit and the versions in <code>resolved.json</code>.</li>
+<li>Probes a bag first (<code>bag_probe.json</code>): topics, pose source, registration. A bag v1 cannot read is refused with the reason before any model loads (see <a href="../bags/">Reading Bags</a>).</li>
+<li>Loads the models once, then for each repeat builds a fresh runtime — memory, index, gate, sweep cache, queue, pipeline, event log — through the same factory the live runner uses (<code>rtsm/engine.py</code>).</li>
+<li>Feeds the input through the bag source (or the replay source) as fast as the queue accepts, runs the pipeline until the source is done and the queue is empty, force-flushes every object to the run's vector store, and writes <code>summary.json</code>.</li>
+<li><code>repeats.json</code> collects the per-run fingerprints and counts; <code>identical_fingerprints</code> says whether N runs agreed.</li>
+<li>Writes the report over the run directories (<code>metrics.json</code> + <code>report.md</code>, below). <code>--no-report</code> skips it; <code>rtsm report &lt;dir&gt;</code> writes it later.</li>
+</ol>
+<h2 id="modes-cadences">Modes (cadences)<a class="headerlink" href="#modes-cadences" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th></th>
+<th><code>as_deployed</code> (default)</th>
+<th><code>dense</code></th>
+<th><code>every_frame</code></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>cadence</td>
+<td><strong>deployed</strong></td>
+<td><strong>representative</strong></td>
+<td><strong>exhaustive</strong></td>
+</tr>
+<tr>
+<td>keyframes</td>
+<td>every <code>ingest.keyframe_every_n</code> admitted frames (the source's own keyframes when it flags them)</td>
+<td>every <code>eval.keyframe_interval_s</code> of sensor time (1.0 s)</td>
+<td>as <code>dense</code></td>
+</tr>
+<tr>
+<td>non-keyframe throttle</td>
+<td><code>ingest.nonkf_min_interval_s</code></td>
+<td><code>1 / eval.process_rate_hz</code> (5 Hz → 0.2 s)</td>
+<td><strong>none</strong> — every frame the input contains is admitted</td>
+</tr>
+<tr>
+<td>sweep gate</td>
+<td><strong>enforced</strong></td>
+<td><strong>shadow</strong>: the decision is logged as <code>gate_shadow</code> on the dequeue line, the frame is processed anyway</td>
+<td>shadow</td>
+</tr>
+<tr>
+<td>what it answers</td>
+<td>what the deployed system would have remembered — the determinism anchors are defined on it</td>
+<td>what the perception could have seen at a steady cadence</td>
+<td>whether a detector failure hides behind the throttle: the only frames not processed are the ones the frame-quality gate rejects or whose tracking is not normal, both logged with a reason</td>
+</tr>
+<tr>
+<td>cost</td>
+<td>53 frames on session1</td>
+<td>195 frames on session1</td>
+<td>every frame: a 5-minute 30 Hz bag is ~9 000 frames, about 30 min per repeat on a desktop GPU with the dual backend</td>
+</tr>
+</tbody>
+</table>
+<p><code>as_deployed</code> is exactly what <code>python -m rtsm --replay</code> / <code>--bag</code> does, so a run on <code>recordings/session1</code> reproduces the G1-B anchor (124 objects / 65 confirmed at 53 processed frames, fingerprint <code>ad6f71a5b89c8506</code>). Under <code>dense</code> and <code>every_frame</code> every view-based number in the report is also given <strong>masked</strong> — restricted to the frames the deployed gate would have admitted — so the observation metrics can be read at either cadence. The keyframe rule under <code>every_frame</code> stays the interval rule on purpose: the memory's position update trusts keyframes far more than other frames, so making every frame a keyframe (or none) would change what the memory does, not only how often it looks. The report always states the cadence that produced its numbers.</p>
+<h2 id="the-run-directory">The run directory<a class="headerlink" href="#the-run-directory" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>eval_output/&lt;input&gt;-&lt;mode&gt;-&lt;stamp&gt;/
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>  resolved.json      the resolved settings, cadence, config fingerprint, commit, versions
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>  bag_probe.json     (bags) topics, pose source, registration
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>  repeats.json       fingerprints / counts / wall time per run, identical_fingerprints
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>  metrics.json       every metric per run + the aggregate with floors; per-object / per-cluster / per-frame records
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>  report.md          the number sheet
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>  run_1/
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>    events.jsonl     the frame-flow trace + the pose / obs / view ledgers (schema 3, ledgers schema 1)
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>    summary.json     counts (receiver decisions, dequeue outcomes, gate shadows), the memory (every object in the /objects shape + the fingerprint), latency and segmentation aggregates, the source's statistics
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>    faiss/           this run's vector store
+<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>  run_2/ …
+</code></pre></div>
+<p><code>summary.json.memory.fingerprint</code> is the sha256 of the sorted multiset of <code>(label_primary, xyz rounded to 3 decimals, hits, confirmed)</code> — the same definition the determinism gates use (the session1 anchor above).</p>
+<h2 id="the-report">The report<a class="headerlink" href="#the-report" title="Permanent link">&para;</a></h2>
+<p>Every number is computed per run from the ledgers alone (<code>rtsm/evaluation/metrics.py</code>), then aggregated over the N same-input repeats (<code>rtsm/evaluation/report.py</code>). The <strong>floor</strong> of a number is its spread (max − min) across the runs: what the system shows on identical input, below which a difference between two bags or two versions means nothing. Fewer than three runs cannot establish a floor and the report says so at the top. The report is a pure function of the run directories — no wall-clock stamps — so <code>rtsm report</code> reproduces it byte for byte. No ground truth and no labels are needed; the label numbers use the detector's top-1 label per observation.</p>
+<table>
+<thead>
+<tr>
+<th>section</th>
+<th>what it measures</th>
+<th>how</th>
+<th>caveat</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Frames and admission</td>
+<td>how many frames the input had, how many the receiver admitted, throttled or dropped, how many the pipeline processed or rejected, the sensor-time gap between processed frames</td>
+<td>the <code>receiver</code> / <code>dequeue</code> lines</td>
+<td>under shadow: how many processed frames the deployed gate would have rejected</td>
+</tr>
+<tr>
+<td>Pose stream</td>
+<td>rate, span, jitter, gaps, tracking-limited episodes, discontinuities (a step larger than 0.5 m + 1 m/s · dt), depth-valid and confidence-2 fractions</td>
+<td><code>pose_health</code> over the <code>pose</code> ledger</td>
+<td>the discontinuity rule is a detector, nothing acts on it</td>
+</tr>
+<tr>
+<td>Memory</td>
+<td>objects and confirmed at the end, objects <strong>created</strong> over the run, <strong>transient</strong> objects (created but not in the final memory: an expired proto or an evicted object), survivors with a single hit, matches the associator made without scoring</td>
+<td>the <code>obs</code> ledger joined to <code>summary.json.memory</code></td>
+<td>the fingerprint covers the survivors only</td>
+</tr>
+<tr>
+<td>Spatial clusters</td>
+<td>groups of objects whose median raw positions lie within the cluster radius — the proxy for one physical object; duplicates = objects − clusters, over the run and in the final memory; counts at ½×, 1× and 2× the radius</td>
+<td>leader clustering in creation order: a track joins the nearest existing leader within the radius, else starts a cluster; deterministic, no chaining</td>
+<td>two real objects closer than the radius fall into one cluster; a duplicate farther than the radius is not seen; the default radius is the associator's own distance gate (<code>assoc.gate_dist_base_m</code>) so a duplicate inside it is one the associator could have matched by position</td>
+</tr>
+<tr>
+<td>Detection over in-frustum views</td>
+<td>for every processed frame whose <code>view</code> line lists a cluster member: <strong>re-identified</strong> (a member matched), <strong>duplicated</strong> (a member created instead — a segment was found there, the memory did not recognise it), <strong>missed</strong>; the detection rate (re-identified + duplicated) and the re-identification rate; by expected range</td>
+<td>the <code>view</code> ledger joined to the <code>obs</code> ledger on the frame stamp</td>
+<td>the frustum is occlusion-agnostic (<code>v1_occlusion_agnostic</code>): an object behind another counts as a view, so every rate is a lower bound</td>
+</tr>
+<tr>
+<td>Label disagreement</td>
+<td>per object <code>1 − modal share</code> of its top-1 labels, the distribution over objects with ≥ 2 observations, clusters whose surviving objects carry different primary labels</td>
+<td><code>label_topk[0]</code> per obs line</td>
+<td>vocabulary noise counts as disagreement</td>
+</tr>
+<tr>
+<td>Position scatter</td>
+<td>per object with ≥ 3 observations, the residual of each raw observation to the object's median, split into the component <strong>along</strong> the camera-to-object ray (depth) and the <strong>lateral</strong> remainder; pooled RMS, per range bin, and a least-squares line of |along| against range</td>
+<td><code>p_world</code> and <code>cam_t_wc</code> per obs line</td>
+<td>the median is the reference, not a ground-truth position</td>
+</tr>
+<tr>
+<td>Duplicate spawns</td>
+<td>a <code>created</code> line within the cluster radius of an earlier object that was <strong>alive</strong> at that stamp (a survivor, or observed less than <code>object.proto_ttl_s</code> earlier); how many happened while the original was in the frustum; the reason class from the created line's audit fields: <code>not_in_index</code> (the proximity index returned nothing), <code>gated</code> (nearby but no candidate passed the distance / z / reprojection gates), <code>low_similarity</code> (a candidate passed the gates, the best cosine was below <code>assoc.cos_min</code>), <code>other</code></td>
+<td>the <code>obs</code> ledger</td>
+<td>alive is approximated from the ledgers (no removal line exists)</td>
+</tr>
+<tr>
+<td>Revisits</td>
+<td>the presence frames of a cluster split into visits at gaps ≥ <code>eval.metrics.revisit_gap_s</code> of sensor time; every visit after the first is a revisit: <strong>re-identified</strong> (a member matched during it), <strong>duplicated</strong> (a member created and none matched), <strong>missed</strong>; the re-identification <strong>lower bound</strong> = re-identified / revisits</td>
+<td>the <code>view</code> + <code>obs</code> ledgers</td>
+<td>missed and duplicated revisits both count as failures — an occluded object is a miss here</td>
+</tr>
+<tr>
+<td>Worst moments</td>
+<td>processed frames scored by misses + 2 × duplicate spawns (+ 1 when the frame-quality gate rejected the frame), plus pose gaps, discontinuities and tracking-limited episodes, each with the sensor stamp and the seconds since the first pose line</td>
+<td>all of the above</td>
+<td>scrub to the stamp in your bag viewer</td>
+</tr>
+<tr>
+<td>Largest clusters</td>
+<td>the clusters with the most observations: members, survivors, first/last seen, re-identification rate, visits, top labels, surviving labels</td>
+<td></td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<p><code>metrics.json</code> holds, per run, <code>scalars</code> (every number above, flat), <code>clusters</code>, <code>objects</code>, <code>frames</code>, <code>duplicate_spawns</code>, <code>worst_moments</code> (each object and cluster carries the stamps of the frames it was seen and missed on — the object-anchored moment retrieval), and under <code>aggregate</code> the floors plus the clusters of run 1 matched across the other runs (<code>clusters_across_runs</code>: how many are present in every run). Comparing against a <em>stored</em> baseline — another bag, another model version, another site — is not part of the free report.</p>
+<p>Parameters live under <code>eval.metrics</code> in the configuration: <code>cluster_radius_m</code> (null = <code>assoc.gate_dist_base_m</code>), <code>cluster_radii_m</code> (the sensitivity radii), <code>revisit_gap_s</code>, <code>range_bin_m</code>, <code>min_obs_scatter</code>, <code>worst_n</code>, <code>moments_cap</code>. Override them like any other key (<code>--set eval.metrics.cluster_radius_m=0.3</code>), for <code>rtsm eval</code> and <code>rtsm report</code> alike.</p>
+<h2 id="your-own-detector">Your own detector<a class="headerlink" href="#your-own-detector" title="Permanent link">&para;</a></h2>
+<p>If the bag already carries a detector's output as a <code>vision_msgs/msg/Detection2DArray</code> (or <code>Detection3DArray</code>) topic, RTSM can run on <em>those</em> detections instead of its own: the memory, the ledgers and the report are then about your detector.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>rtsm<span class="w"> </span><span class="nb">eval</span><span class="w"> </span>my_bag<span class="w"> </span>--set<span class="w"> </span>segmentation.backend<span class="o">=</span>external<span class="w">                       </span><span class="c1"># the detections topic is auto-discovered</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>rtsm<span class="w"> </span><span class="nb">eval</span><span class="w"> </span>my_bag<span class="w"> </span>--set<span class="w"> </span>segmentation.backend<span class="o">=</span>external<span class="w"> </span>--set<span class="w"> </span>io.bag.topics.detections<span class="o">=</span>/perception/detections
+</code></pre></div>
+<p>How it works: the bag reader pairs each RGB frame with the detections message nearest in stamp (within <code>io.bag.pair_tolerance_s</code>; detectors publish after the image, so a frame waits up to a second for its message), the <code>external</code> backend turns the boxes into instance masks (the pixels within <code>segmentation.external.depth_band_m</code> of the box's median depth, or the box itself without depth), labels are the top hypothesis of each detection, CLIP embeddings are computed by RTSM from the crops exactly as for its own detectors, and everything downstream is unchanged. The <code>vision_msgs</code> definitions ship with RTSM (both the ROS 2 and the ROS 1 layouts), so a bag without embedded message definitions still reads. 3-D boxes are projected into the image through the bag's TF at the stamp and the camera intrinsics.</p>
+<p>Scores: a detector that reports no confidence (the 2026 VLM detectors, for instance) is a first-class case. Its labels are stored with <code>segmentation.external.unscored_label_prior</code>, the observation ledger records <code>score: null</code> for them, and the report header says <code>scores: absent</code> so no label-confidence number is read as measured. The header always names the detector the numbers came from: our backend, or the topic and message type, with how many frames had detections and how many messages matched no frame.</p>
+<p>Not supported in v1: masks from the detector (boxes only; a mask-refiner slot exists but only <code>none</code> is implemented), tracks (ids are carried, not used), proprietary formats (write an adapter against <code>rtsm.io.detections.DetectionsAdapter</code> and register it). <code>scripts/export_detections.py</code> writes a bag with RTSM's own detections as such a topic, which is how the path is gated and a demonstration of the format.</p>
+<h2 id="options">Options<a class="headerlink" href="#options" title="Permanent link">&para;</a></h2>
+<p><code>--mode</code>, <code>--repeats</code>, <code>--out</code>, <code>--label</code>, <code>--max-frames</code> (bag inputs), <code>--max-wall-s</code> (abort a run and record it), <code>--no-report</code>, plus the usual <code>--config</code> / <code>--profile</code> / <code>--set</code> overrides. Defaults live in the <code>eval:</code> block of the configuration.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div style="display: flex; gap: 4rem; padding: 1rem 0;">
+
+        <div>
+          <strong>Documentation</strong>
+          <ul style="list-style: none; padding: 0; margin: 0.5rem 0;">
+            <li><a href="/rtsm/getting-started/installation/">Getting Started</a></li>
+            <li><a href="/rtsm/concepts/architecture/">Key Concepts</a></li>
+          </ul>
+        </div>
+
+        <div>
+          <strong>Calabi Inc.</strong>
+          <ul style="list-style: none; padding: 0; margin: 0.5rem 0;">
+            <li><a href="https://calabi.com" target="_blank">Official Website</a></li>
+          </ul>
+        </div>
+
+      </div>
+      <div style="width: 100%; border-top: 1px solid var(--md-default-fg-color--lightest); padding-top: 1rem;">
+        Copyright &copy; 2025 Calabi Inc.
+      </div>
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.sections", "navigation.expand", "navigation.top", "search.highlight", "content.code.copy"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>
