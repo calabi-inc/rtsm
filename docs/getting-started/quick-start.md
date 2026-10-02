@@ -18,7 +18,7 @@ This launches:
 | Service | Address |
 |---------|---------|
 | REST API | `http://localhost:8002` |
-| WebSocket (visualization) | `ws://localhost:8002/ws`, only with `--viz` (headless by default) |
+| WebSocket (visualization) | `ws://localhost:8083/ws`, only with `--viz` (headless by default) |
 | MCP (if enabled) | `http://localhost:8002/mcp/sse` |
 
 RTSM listens for RGB-D frames via the configured receiver (WebSocket from Calabi Lens, or ZeroMQ from RealSense + RTABMap).

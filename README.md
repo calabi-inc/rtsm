@@ -159,6 +159,8 @@ No hardware needed — replay uses a bundled recording.
 
 ## Installation
 
+> What changed since the April release: [CHANGELOG.md](CHANGELOG.md). Current version: `rtsm version`.
+
 ### From PyPI (recommended)
 
 ```bash
@@ -350,6 +352,7 @@ scripts/
 - [x] Agent interface (MCP — 6 tools via SSE)
 - [x] Diagnostics ledgers + `rtsm eval` (ROS 1 / rosbag2 / MCAP bags, headless runs, a report with same-input floors)
 - [x] Python client (`rtsm.client`)
+- [x] Your own detector's `vision_msgs` detections through the memory (`segmentation.backend: external`)
 - [ ] More protocols (ROS 2 live node, gRPC)
 - [ ] LLM integration for high-level queries
 - [ ] Docker image
