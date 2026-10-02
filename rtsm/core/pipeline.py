@@ -1,6 +1,7 @@
 from __future__ import annotations
 from dataclasses import dataclass
 import logging
+import math
 from typing import List, Optional, Dict, Any, Tuple
 import time
 import numpy as np
@@ -1295,7 +1296,7 @@ class Pipeline:
                             raw_conf = float(raw_conf) if raw_conf is not None else None
                         except (TypeError, ValueError):
                             raw_conf = None
-                        if raw_conf is not None and raw_conf != raw_conf:      # NaN = unscored in a mixed message
+                        if raw_conf is not None and math.isnan(raw_conf):       # NaN = unscored in a mixed message
                             raw_conf = None
                         # An unscored detector label (external detectors without confidence) is stored with the
                         # configured prior and flagged so the observation ledger records score: null for it.

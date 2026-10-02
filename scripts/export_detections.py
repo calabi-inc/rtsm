@@ -21,18 +21,16 @@ GPU extras: the segmenter is the real one.
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import logging
-import math
 import sys
 import time
 from pathlib import Path
-from typing import Any, List, Optional
+from typing import List, Optional
 
 import numpy as np
 
-try:
-    import rtsm  # noqa: F401
-except ModuleNotFoundError:  # running from a checkout without an install: the repo root is one level up
+if importlib.util.find_spec("rtsm") is None:  # running from a checkout without an install: the repo root is one level up
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 logger = logging.getLogger("export_detections")

@@ -127,7 +127,10 @@ class DetectionsAdapter(Protocol):
 
     def convert(self, msg: Any, msgtype: str, *, rgb_hw: Tuple[int, int], intrinsics: Any = None,
                 tf_lookup: Optional[Callable[[str, int], np.ndarray]] = None, t_sensor_ns: Optional[int] = None,
-                source: str = SOURCE_EXTERNAL, image_hw: Optional[Tuple[int, int]] = None) -> Detections: ...
+                source: str = SOURCE_EXTERNAL, image_hw: Optional[Tuple[int, int]] = None) -> Detections:
+        """Convert ``msg`` (of ``msgtype``) for a frame of ``rgb_hw`` pixels; ``tf_lookup(frame_id, t_ns)``
+        returns T_cam_from_frame for 3-D boxes; ``image_hw`` is the size the 2-D boxes refer to when it is
+        not the RGB's."""
 
 
 _ADAPTERS: Dict[str, DetectionsAdapter] = {}

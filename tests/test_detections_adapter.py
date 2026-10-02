@@ -121,7 +121,6 @@ def test_registration_brings_the_standard_dependencies_a_bag_typestore_lacks():
     bare = get_typestore(Stores.EMPTY)
     added = register_vision_msgs(bare, "ros2")
     assert "geometry_msgs/msg/PoseWithCovariance" in added and "std_msgs/msg/Header" in added and DETECTION_2D in added
-    msg = arr2d([det2d(100, 50, 40, 20, [("cup", 0.9)])])
     raw = bare.serialize_cdr(bare.types[DETECTION_2D](header=bare.types["std_msgs/msg/Header"](stamp=bare.types["builtin_interfaces/msg/Time"](sec=1, nanosec=0), frame_id="c"),
                                                       detections=[]), DETECTION_2D)
     assert bare.deserialize_cdr(raw, DETECTION_2D).header.frame_id == "c"
@@ -266,7 +265,7 @@ def test_depth_band_keeps_the_component_nearest_the_median_not_the_largest():
 # ───────────────────────────── the external backend ─────────────────────────────
 
 def test_external_backend_passes_scores_none_through_and_drops_tiny_boxes():
-    torch = pytest.importorskip("torch")
+    pytest.importorskip("torch")
     from PIL import Image
     from rtsm.models.segmentation.external import ExternalDetectionsSegmenter
     seg = ExternalDetectionsSegmenter({"min_box_px": 64, "mask_from": "box", "class_names": {"3": "chair"}})
