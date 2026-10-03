@@ -23,5 +23,6 @@ logs
 model_store
 node_modules
 recordings
+repo_media
 reports
 tests/fixtures/*.jsonl
