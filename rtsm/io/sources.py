@@ -174,6 +174,17 @@ def unregister_source(name: str) -> None:
     _REGISTERED.pop(str(name).lower(), None)
 
 
+def _advertises_builtin(ep: Any, key: str) -> bool:
+    """True when an entry point named like a built-in points at that very built-in
+    (``pyproject.toml`` advertises ``websocket`` / ``zeromq`` / ``replay`` under the
+    group so tooling sees them). Compared by target, without loading the entry point."""
+    f = _BUILTIN[key]
+    try:
+        return str(getattr(ep, "value", "")).strip() == f"{f.__module__}:{f.__qualname__}"
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def _entry_point_sources() -> Dict[str, SourceFactory]:
     """Factories advertised under the ``rtsm.sources`` entry-point group. A
     plug-in that fails to load is skipped with a warning (never breaks the
@@ -188,6 +199,8 @@ def _entry_point_sources() -> Dict[str, SourceFactory]:
     for ep in eps:
         key = str(ep.name).lower()
         if key in _BUILTIN:
+            if _advertises_builtin(ep, key):
+                continue   # the package lists its own built-ins under the group; not a collision
             logger.warning("[sources] entry point %r collides with a built-in source; ignored", ep.name)
             continue
         try:

@@ -9,6 +9,7 @@ All notable changes to `rtsm`. The format follows [Keep a Changelog](https://kee
 
 ### Fixed
 - The installation page described a Docker image and two Dockerfiles that did not exist.
+- Every non-editable install logged `entry point 'replay' collides with a built-in source` at startup: the package advertises its own built-ins under the `rtsm.sources` group, and the registry now recognises them instead of warning (found by the Docker gate).
 
 ## [0.2.0] - 2026-10-03
 

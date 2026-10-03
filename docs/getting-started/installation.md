@@ -162,7 +162,7 @@ docker run --rm --gpus all -v rtsm-models:/models -p 8002:8002 -p 8083:8083 ghcr
 docker run --rm ghcr.io/calabi-inc/rtsm version
 ```
 
-The container's working directory is `/data`, so paths in commands are relative to what you mount there; output of `rtsm eval` lands next to the input. `docker compose -f docker/docker-compose.yml up` runs the server with the same ports and volume. To build the image yourself from a checkout: `docker build -f docker/Dockerfile -t rtsm .`
+The container's working directory is `/data`, so paths in commands are relative to what you mount there; output of `rtsm eval` lands next to the input. Runs inside the image are deterministic (three repeats of the TUM fr1 bag gave identical fingerprints, every floor 0), but a Linux container and a Windows install do not give identical numbers: the same bag ended with 203 objects in the image and 217 on a Windows install, with the same re-identification rate to within 0.3 points. Compare runs made on the same platform. `docker compose -f docker/docker-compose.yml up` runs the server with the same ports and volume. To build the image yourself from a checkout: `docker build -f docker/Dockerfile -t rtsm .`
 
 !!! note "What is not in the image"
     The AGPL backends (`dual`, `fastsam`, `yoloe`) and their weights: `pip install ultralytics` inside the container and mount the weights at `/data/model_store` if you opt in. The Jetson / ARM image is a separate build and is not published yet.
