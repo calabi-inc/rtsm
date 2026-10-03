@@ -7,51 +7,107 @@ RTSM processes RGB-D frames through a 10-stage pipeline that extracts, tracks, a
 ## System Overview
 
 ```
-┌──────────────────┐   ┌──────────────────┐   ┌──────────────────┐
-│  Calabi Lens     │   │   D435i + SLAM   │   │  Recorded        │
-│  (ARKit iOS)     │   │   (RTABMap)      │   │  Session         │
-└────────┬─────────┘   └────────┬─────────┘   └────────┬─────────┘
-         │ WebSocket            │ ZeroMQ               │ --replay
-         ▼                      ▼                       ▼
-┌─────────────────────────────────────────────────────────────────┐
-│  I/O Layer                                                      │
-│  WebSocket / ZMQ / Replay → ingest lanes → FramePacket          │
-└─────────────────────────────┬───────────────────────────────────┘
-                              │
-                    ┌─────────▼──────────┐
-                    │    Ingest Gate      │
-                    │ (keyframe priority, │
-                    │  sweep-based skip)  │
-                    └─────────┬──────────┘
-                              │
-┌─────────────────────────────▼───────────────────────────────────┐
-│  Perception Pipeline                                             │
-│                                                                  │
-│  Segmentation → Heuristics → Scoring → CLIP Encode → Vocab      │
-│  (swappable)   (depth,       (top-K)   (ViT-B/32)   Classify    │
-│                 border,                                          │
-│                 planarity)                                       │
-└─────────────────────────────┬───────────────────────────────────┘
-                              │
-┌─────────────────────────────▼───────────────────────────────────┐
-│  Association                                                     │
-│  Proximity Query → Embedding Cosine Sim → Match / Create         │
-└─────────────────────────────┬───────────────────────────────────┘
-                              │
-┌─────────────────────────────▼───────────────────────────────────┐
-│  Working Memory                                                  │
-│  Proto-Objects → Confirmed Objects (hits, stability, view bins)  │
-└─────────────────────────────┬───────────────────────────────────┘
-                              │
-┌─────────────────────────────▼───────────────────────────────────┐
-│  Long-Term Memory (FAISS / Milvus)                               │
-│  Semantic search: query(text) → CLIP → top-k objects             │
-└─────────────────────────────┬───────────────────────────────────┘
-                              │
-┌─────────────────────────────▼───────────────────────────────────┐
-│  API & Visualization                                             │
-│  REST API  |  MCP (agents)  |  WebSocket  |  3D Demo (Three.js)  │
-└─────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────────┐
+│  RTSM — Real-Time Spatio-Semantic Memory: the path of one frame              │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+ ┌────────────────┐  ┌────────────────┐  ┌────────────────┐  ┌────────────────┐
+ │ Calabi Lens    │  │ RealSense+SLAM │  │ ROS bag        │  │ Recording      │
+ │ (ARKit iPhone) │  │ (RTAB-Map ...) │  │ ROS 1, rosbag2,│  │ (Lens session) │
+ │                │  │                │  │ or MCAP        │  │                │
+ │ WebSocket      │  │ ZeroMQ         │  │ `--bag`        │  │ `--replay`     │
+ └────────────────┘  └────────────────┘  └────────────────┘  └────────────────┘
+          │                   │                   │                   │
+          ▼                   ▼                   ▼                   ▼
+┌──────────────────────────────────────────────────────────────────────────────┐
+│  I/O layer  (rtsm/io)                                                        │
+│                                                                              │
+│ ┌──────────────────────┐  ┌──────────────────────┐  ┌──────────────────────┐ │
+│ │ Transport adapters   │  │ Ingest front-end     │  │ Ingest lanes         │ │
+│ │ bytes -> RawFrame    │  │ sensor clock, pairing│  │ `latest`   (live)    │ │
+│ │ (one per source)     │  │ keyframes, throttle, │  │ `lossless` (replay)  │ │
+│ │                      │  │ admit before decode  │  │ bounded memory       │ │
+│ └──────────────────────┘  └──────────────────────┘  └──────────────────────┘ │
+│                                                                              │
+│  ->  FramePacket: RGB, depth, intrinsics, pose, external detections          │
+│      (the Recorder taps the raw stream: `--record`)                          │
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
+                                        │  same admission chain for every source
+                                        ▼
+┌──────────────────────────────────────────────────────────────────────────────┐
+│  Ingest gate                                                                 │
+│                                                                              │
+│  keyframes first; non-keyframes skipped while the camera sweeps;             │
+│  dark, flat or depth-less frames rejected before any model runs              │
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
+                                        │
+                                        ▼
+┌──────────────────────────────────────────────────────────────────────────────┐
+│  Perception pipeline  (rtsm/core/pipeline.py)                                │
+│                                                                              │
+│ ┌──────────────────────┐  ┌──────────────────────┐  ┌──────────────────────┐ │
+│ │ Segment              │  │ Filter               │  │ Score + top-K        │ │
+│ │ backend-swappable:   │  │ mask heuristics:     │  │ rank by coverage,    │ │
+│ │ default grounded_sam2│  │ area, border contact,│  │ depth quality,       │ │
+│ │ sam2 | dual | fastsam│  │ depth validity,      │  │ structure; keep K    │ │
+│ │ yoloe | external     │  │ planarity            │  │ (bounds CLIP work)   │ │
+│ └──────────────────────┘  └──────────────────────┘  └──────────────────────┘ │
+│                                                                              │
+│ ┌──────────────────────┐  ┌──────────────────────┐  ┌──────────────────────┐ │
+│ │ CLIP encode          │  │ Classify             │  │ `external` backend   │ │
+│ │ 224x224 crop per mask│  │ cosine vs vocabulary │  │ your detector's boxes│ │
+│ │ -> 512-D embedding   │  │ -> label + confidence│  │ stand in for Segment │ │
+│ └──────────────────────┘  └──────────────────────┘  └──────────────────────┘ │
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
+                                        │  mask, 3-D point, embedding, label
+                                        ▼
+┌──────────────────────────────────────────────────────────────────────────────┐
+│  Association  (rtsm/core/associator.py)                                      │
+│                                                                              │
+│ ┌──────────────────────┐  ┌──────────────────────┐  ┌──────────────────────┐ │
+│ │ Proximity query      │  │ Embedding match      │  │ Fusion               │ │
+│ │ nearby objects from  │  │ cosine similarity,   │  │ match an object, or  │ │
+│ │ the spatial grid     │  │ gate 0.90            │  │ create a proto       │ │
+│ └──────────────────────┘  └──────────────────────┘  └──────────────────────┘ │
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
+                                        │
+                                        ▼
+┌──────────────────────────────────────────────────────────────────────────────┐
+│  Working memory  (rtsm/core/working_memory.py)                               │
+│                                                                              │
+│  ObjectState: id, xyz_world, emb_mean + gallery, view_bins, label scores,    │
+│               stability, hits, confirmed, JPEG snapshots                     │
+│                                                                              │
+│  proto  ->  confirmed   (hits >= 2, stability >= 0.55, >= 1 view bin)        │
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
+                                        │  confirmed objects, periodically
+                                        ▼
+┌──────────────────────────────────────────────────────────────────────────────┐
+│  Long-term memory  (FAISS, or Milvus)                                        │
+│                                                                              │
+│  semantic search:  text -> CLIP -> top-k objects                             │
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
+                                        │
+                                        ▼
+┌──────────────────────────────────────────────────────────────────────────────┐
+│  Outputs                                                                     │
+│                                                                              │
+│ ┌──────────────────────┐  ┌──────────────────────┐  ┌──────────────────────┐ │
+│ │ REST API             │  │ MCP                  │  │ WebSocket + viewer   │ │
+│ │ /objects, /search/*, │  │ tools for agents     │  │ `--viz`: 3-D clouds, │ │
+│ │ /stats, /healthz     │  │ (SSE and stdio)      │  │ object updates       │ │
+│ └──────────────────────┘  └──────────────────────┘  └──────────────────────┘ │
+│                                                                              │
+│  Diagnostics: the frame-flow trace and the pose / obs / view ledgers         │
+│  feed `rtsm eval` -> metrics.json + report.md  (offline, on a bag)           │
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -65,6 +121,7 @@ Receives RGB-D frames and camera poses from multiple sources:
 - **WebSocket** — Calabi Lens (ARKit, iPhone)
 - **ZeroMQ** — Intel RealSense D435i + RTAB-Map
 - **Replay** — Recorded sessions for deterministic benchmarking
+- **Bag** — ROS 1 `.bag`, rosbag2 and MCAP files (`--bag`, `rtsm eval`), with an optional external-detections topic
 
 Each source is a transport adapter that turns bytes into a `RawFrame` (still-encoded payloads + header) or a pose event; the **ingest front-end** (`rtsm/io/ingest_frontend.py`) then runs the one admission chain for all of them — tracking filter, receive-time pose mailbox, keyframe rule, non-keyframe throttle on the ingest clock, lane admission before any pixel is decoded, decode on admit, `FramePacket`, frame-flow trace. New sources register by name (`rtsm/io/sources.py`, the `rtsm.sources` entry-point group); see the [Ingest Sources guide](../guides/ingest-sources.md).
 
