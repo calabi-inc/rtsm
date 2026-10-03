@@ -88,3 +88,55 @@ jobs:
           name: dist
           path: dist/
       - uses: pypa/gh-action-pypi-publish@release/v1
+
+  docker:
+    # The CUDA-ready image from the tagged source: ghcr.io/calabi-inc/rtsm:<version> and :latest.
+    # One-time: the package is private on first push; make it public in the org's package settings.
+    name: publish the Docker image
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: false
+      - name: Free disk space (the runner has ~14 GB; the image needs most of it)
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          docker system prune -af > /dev/null
+          df -h / | tail -1
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=raw,value=latest
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Verify the pushed image
+        shell: bash
+        run: |
+          V="${GITHUB_REF_NAME#v}"
+          IMG="ghcr.io/${{ github.repository }}:$V"
+          docker pull -q "$IMG"
+          OUT=$(docker run --rm "$IMG" version)
+          echo "$OUT"
+          test "$OUT" = "rtsm $V"
+          docker run --rm --entrypoint python "$IMG" -c "import torch, rtsm.core.pipeline; print('torch', torch.__version__)"

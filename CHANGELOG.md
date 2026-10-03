@@ -2,6 +2,14 @@
 
 All notable changes to `rtsm`. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [Semantic Versioning](https://semver.org/) with the caveat that anything before 1.0 may change between minor versions when the changelog says so.
 
+## [Unreleased]
+
+### Added
+- **Docker image** — `ghcr.io/calabi-inc/rtsm:<version>` / `:latest`, built from the tagged source by the release workflow: Python 3.12, PyTorch cu128, the `gpu`, `eval` and `mcp` extras, a non-root user, weights on a `/models` volume; `docker/docker-compose.yml` for the server; pull requests that touch the image build it without pushing.
+
+### Fixed
+- The installation page described a Docker image and two Dockerfiles that did not exist.
+
 ## [0.2.0] - 2026-10-03
 
 The release after the April 0.1.1: a deterministic, observable ingest; offline evaluation on bags; the first pieces of an SDK. Numbers in pull-request references are on [github.com/calabi-inc/rtsm](https://github.com/calabi-inc/rtsm/pulls?q=is%3Apr+is%3Amerged).

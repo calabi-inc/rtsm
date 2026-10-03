@@ -174,6 +174,15 @@ pip install "rtsm[gpu-ultralytics]" --extra-index-url https://download.pytorch.o
 pip install "rtsm[all]" --extra-index-url https://download.pytorch.org/whl/cu128
 ```
 
+### Docker
+
+```bash
+# CUDA-ready image, published with each release (needs the NVIDIA Container Toolkit)
+docker run --rm --gpus all -v rtsm-models:/models -v "$PWD":/data ghcr.io/calabi-inc/rtsm eval my_session.bag
+```
+
+See [Installation → Docker](docs/getting-started/installation.md#docker) for the server, the dashboard and compose.
+
 ### From Source
 
 ```bash
@@ -355,7 +364,7 @@ scripts/
 - [x] Your own detector's `vision_msgs` detections through the memory (`segmentation.backend: external`)
 - [ ] More protocols (ROS 2 live node, gRPC)
 - [ ] LLM integration for high-level queries
-- [ ] Docker image
+- [x] Docker image (`ghcr.io/calabi-inc/rtsm`, CUDA-ready, published per release)
 
 ---
 
