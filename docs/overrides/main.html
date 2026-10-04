@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+
+{#
+  The favicon pair from calabi.com: the dark mark on a light browser theme,
+  the light mark on a dark one. The `media` attribute does the switch where
+  the browser honours it on <link rel="icon">; the script does it everywhere
+  else and follows theme changes while the tab is open. The theme's own
+  favicon (set in mkdocs.yml) stays as the fallback.
+#}
+{% block extrahead %}
+  {{ super() }}
+  <link id="favicon-light" rel="icon" type="image/png" sizes="32x32"
+        href="{{ 'assets/favicon-for-light-tab.png' | url }}" media="(prefers-color-scheme: light)">
+  <link id="favicon-dark" rel="icon" type="image/png" sizes="32x32"
+        href="{{ 'assets/favicon-for-dark-tab.png' | url }}" media="(prefers-color-scheme: dark)">
+  <script>
+    (function () {
+      var light = document.getElementById('favicon-light');
+      var dark = document.getElementById('favicon-dark');
+      if (!light || !dark || !window.matchMedia) return;
+      function apply(mq) {
+        var pick = mq.matches ? dark : light;
+        pick.removeAttribute('media');
+        document.head.appendChild(pick);   /* last <link rel=icon> wins */
+      }
+      var mq = window.matchMedia('(prefers-color-scheme: dark)');
+      apply(mq);
+      if (mq.addEventListener) mq.addEventListener('change', apply);
+    })();
+  </script>
+{% endblock %}

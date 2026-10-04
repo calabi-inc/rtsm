@@ -1,4 +1,4 @@
-site_name: RTSM
+site_name: RTSM Documentation
 site_description: Real-Time Spatio-Semantic Memory for spatial AI and robotics
 site_url: https://calabi-inc.github.io/rtsm
 repo_url: https://github.com/calabi-inc/rtsm
@@ -7,26 +7,16 @@ edit_uri: edit/main/docs/
 
 theme:
   name: material
-  logo: assets/logo.png
-  favicon: assets/favicon.png
+  custom_dir: docs/overrides
+  logo: assets/calabi-wordmark-white.svg
+  favicon: assets/favicon-for-light-tab.png
   font:
-    text: Inter
-    code: JetBrains Mono
+    text: Geist
+    code: Geist Mono
   palette:
-    - media: "(prefers-color-scheme: light)"
-      scheme: default
-      primary: custom
-      accent: custom
-      toggle:
-        icon: material/brightness-7
-        name: Switch to dark mode
-    - media: "(prefers-color-scheme: dark)"
-      scheme: slate
-      primary: custom
-      accent: custom
-      toggle:
-        icon: material/brightness-4
-        name: Switch to light mode
+    scheme: slate
+    primary: custom
+    accent: custom
   features:
     - navigation.tabs
     - navigation.tabs.sticky
@@ -116,6 +106,15 @@ extra:
     - icon: fontawesome/brands/python
       link: https://pypi.org/project/rtsm/
       name: rtsm on PyPI
+    - icon: fontawesome/brands/linkedin
+      link: https://www.linkedin.com/company/calabi-inc
+      name: Calabi on LinkedIn
+    - icon: fontawesome/brands/youtube
+      link: https://www.youtube.com/@calabi-inc
+      name: Calabi on YouTube
+    - icon: fontawesome/solid/globe
+      link: https://www.calabi.com/
+      name: calabi.com
   generator: false
 
 copyright: Copyright &copy; 2025-2026 Calabi Inc. &middot; Apache-2.0

@@ -1,5 +1,5 @@
 ---
-title: RTSM
+title: Home
 hide:
   - navigation
   - toc
@@ -7,15 +7,19 @@ hide:
 
 <div class="rtsm-hero" markdown>
 
-<img class="rtsm-hero__mark" src="assets/logo.png" alt="">
+<div class="rtsm-hero__pill"><span class="dot"></span><span><strong>RTSM 0.2.0</strong> is on PyPI — <em>pip install rtsm</em></span></div>
 
-# Real-Time Spatio-Semantic Memory
+# Spatial memory for <span class="shine">robots and agents.</span>
 
-<p class="rtsm-hero__tagline">A persistent, queryable memory of the objects a robot has seen, built from RGB-D frames and poses. Ask <em>"where is the red mug?"</em> and get world coordinates back. Apache-2.0.</p>
+<p class="rtsm-hero__tagline">RTSM turns RGB-D frames and poses into a persistent, queryable 3-D world state. Ask <em>"where is the red mug?"</em> and get world coordinates back, over REST or MCP. Open source, Apache-2.0.</p>
 
-[Install](getting-started/installation.md){ .md-button .md-button--primary }
+<div class="rtsm-terminal"><div class="label">&gt;_ Terminal</div><code>pip install "rtsm[gpu]" &amp;&amp; rtsm demo</code></div>
+
+[Get started](getting-started/installation.md){ .md-button .md-button--primary }
 [Evaluate a bag](guides/eval.md){ .md-button }
-[GitHub](https://github.com/calabi-inc/rtsm){ .md-button }
+[View on GitHub](https://github.com/calabi-inc/rtsm){ .md-button }
+
+<div class="rtsm-hero__meta"><span class="ok">rtsm 0.2.0</span><span>pip install rtsm</span><span>Apache 2.0</span><span>5 backends</span><span>MCP + REST API</span><span>ROS bags in</span></div>
 
 </div>
 
@@ -134,4 +138,4 @@ Vision models detect objects. SLAM maps geometry. Language models reason. None o
 !!! info "A short video"
     A two-minute walkthrough is on [YouTube](https://www.youtube.com/watch?v=abhXsbvOLQg).
 
-Apache-2.0. Source, issues and releases on [GitHub](https://github.com/calabi-inc/rtsm); the package on [PyPI](https://pypi.org/project/rtsm/).
+Apache-2.0. Source, issues and releases on [GitHub](https://github.com/calabi-inc/rtsm); the package on [PyPI](https://pypi.org/project/rtsm/); the company at [calabi.com](https://www.calabi.com/).
