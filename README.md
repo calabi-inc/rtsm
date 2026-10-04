@@ -54,105 +54,107 @@ No hardware needed — replay uses a bundled recording.
 ## Architecture
 
 ```
-┌──────────────────────────────────────────────────────────────────────────┐
-│                 RTSM — Real-Time Spatio-Semantic Memory                  │
-└──────────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────────┐
+│  RTSM — Real-Time Spatio-Semantic Memory: the path of one frame              │
+└──────────────────────────────────────────────────────────────────────────────┘
 
-  ┌──────────────────┐   ┌──────────────────┐   ┌──────────────────┐
-  │  Calabi Lens     │   │   D435i + SLAM   │   │  Recorded        │
-  │  (ARKit iOS)     │   │   (RTABMap)      │   │  Session         │
-  └────────┬─────────┘   └────────┬─────────┘   └────────┬─────────┘
-           │ WebSocket            │ ZeroMQ               │ --replay
-           ▼                      ▼                       ▼
-┌──────────────────────────────────────────────────────────────────────────┐
-│  I/O Layer                                                               │
-│                                                                          │
-│  ┌─────────────┐  ┌─────────────┐  ┌──────────────┐  ┌──────────────┐   │
-│  │  WebSocket  │  │  ZMQ Bridge │  │   Replay     │  │  Recorder    │   │
-│  │  Receiver   │  │  (sensors)  │  │  Receiver    │  │  (--record)  │   │
-│  └──────┬──────┘  └──────┬──────┘  └──────┬───────┘  └──────────────┘   │
-│         └────────────────┴────────────────┘                              │
-│                          │                                               │
-│                   ┌──────▼───────┐     ┌──────────────┐                  │
-│                   │ ingest lanes │────>│ FramePacket  │                  │
-│                   │  (buffer)    │     │ (RGB,D,Pose) │                  │
-│                   └──────────────┘     └──────┬───────┘                  │
-│                                               │                          │
-└───────────────────────────────────────────────┼──────────────────────────┘
-                                                │
-                          ┌─────────────────────▼───────────────────────┐
-                          │              Ingest Gate                    │
-                          │   (keyframe priority, sweep-based skip)     │
-                          └─────────────────────┬───────────────────────┘
-                                                │
-┌───────────────────────────────────────────────▼──────────────────────────┐
-│  Perception Pipeline                                                     │
-│                                                                          │
-│  ┌────────────────┐  ┌────────────────┐                                   │
-│  │ Grounding DINO │  │     SAM2       │    Default: grounded_sam2          │
-│  │ (detection +   │─>│ (box-prompted  │    GDINO detects → SAM2 segments   │
-│  │  labels)       │  │  masks)        │    (Apache 2.0, no AGPL)           │
-│  └────────────────┘  └───────┬────────┘                                   │
-│                              │                                            │
-│                 ▼                                                        │
-│  ┌───────────────┐     ┌──────────────┐     ┌──────────────┐             │
-│  │ Mask Staging  │────>│ Top-K Select │────>│ CLIP Encode  │             │
-│  │ (heuristics)  │     │  (priority)  │     │(224x224 crop)│             │
-│  └───────────────┘     └──────────────┘     └──────┬───────┘             │
-│                                                    │                     │
-│                     ┌───────────────┐        ┌─────▼────────┐            │
-│                     │ Vocab Classify│<───────│  Embeddings  │            │
-│                     │ (label + conf)│        │  (512-D L2)  │            │
-│                     └───────┬───────┘        └──────────────┘            │
-│                             │                                            │
-└─────────────────────────────┼────────────────────────────────────────────┘
-                              │
-                              ▼
-┌──────────────────────────────────────────────────────────────────────────┐
-│  Association                                                             │
-│                                                                          │
-│  ┌─────────────┐     ┌─────────────┐     ┌───────────────┐               │
-│  │  Proximity  │────>│  Embedding  │────>│  Score Fusion │               │
-│  │   Query     │     │  Cosine Sim │     │ (match/create)│               │
-│  └─────────────┘     └─────────────┘     └───────────────┘               │
-│                                                                          │
-└───────────────┬──────────────────────────────────────────────────────────┘
-                │
-                ▼
-┌──────────────────────────────────────────────────────────────────────────┐
-│  Working Memory                                                          │
-│                                                                          │
-│  ObjectState:                                                            │
-│    - id, xyz_world (3D position)                                         │
-│    - emb_mean, emb_gallery (CLIP embeddings)                             │
-│    - view_bins (multi-view fusion)                                       │
-│    - label_scores (EWMA label confidence)                                │
-│    - stability, hits, confirmed                                          │
-│    - image_crops (JPEG snapshots)                                        │
-│                                                                          │
-│  Proto -> Confirmed (hits >= 2, stability >= 0.55, views >= 1)           │
-│                                                                          │
-└───────────────┬──────────────────────────────────────────────────────────┘
-                │
-                ▼
-┌──────────────────────────────────────────────────────────────────────────┐
-│  Long-Term Memory (FAISS / Milvus)                                       │
-│                                                                          │
-│  Semantic Search: query(text) -> CLIP -> top-k objects                   │
-│                                                                          │
-└───────────────┬──────────────────────────────────────────────────────────┘
-                │
-                ▼
-┌──────────────────────────────────────────────────────────────────────────┐
-│  API & Visualization                                                     │
-│                                                                          │
-│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐           │
-│  │    REST API     │  │    WebSocket    │  │     3D Demo     │           │
-│  │    /objects     │  │  point clouds   │  │    (Three.js)   │           │
-│  │    /search      │  │  objects_update │  │                 │           │
-│  └─────────────────┘  └─────────────────┘  └─────────────────┘           │
-│                                                                          │
-└──────────────────────────────────────────────────────────────────────────┘
+ ┌────────────────┐  ┌────────────────┐  ┌────────────────┐  ┌────────────────┐
+ │ Calabi Lens    │  │ RealSense+SLAM │  │ ROS bag        │  │ Recording      │
+ │ (ARKit iPhone) │  │ (RTAB-Map ...) │  │ ROS 1, rosbag2,│  │ (Lens session) │
+ │                │  │                │  │ or MCAP        │  │                │
+ │ WebSocket      │  │ ZeroMQ         │  │ `--bag`        │  │ `--replay`     │
+ └────────────────┘  └────────────────┘  └────────────────┘  └────────────────┘
+          │                   │                   │                   │
+          ▼                   ▼                   ▼                   ▼
+┌──────────────────────────────────────────────────────────────────────────────┐
+│  I/O layer  (rtsm/io)                                                        │
+│                                                                              │
+│ ┌──────────────────────┐  ┌──────────────────────┐  ┌──────────────────────┐ │
+│ │ Transport adapters   │  │ Ingest front-end     │  │ Ingest lanes         │ │
+│ │ bytes -> RawFrame    │  │ sensor clock, pairing│  │ `latest`   (live)    │ │
+│ │ (one per source)     │  │ keyframes, throttle, │  │ `lossless` (replay)  │ │
+│ │                      │  │ admit before decode  │  │ bounded memory       │ │
+│ └──────────────────────┘  └──────────────────────┘  └──────────────────────┘ │
+│                                                                              │
+│  ->  FramePacket: RGB, depth, intrinsics, pose, external detections          │
+│      (the Recorder taps the raw stream: `--record`)                          │
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
+                                        │  same admission chain for every source
+                                        ▼
+┌──────────────────────────────────────────────────────────────────────────────┐
+│  Ingest gate                                                                 │
+│                                                                              │
+│  keyframes first; non-keyframes skipped while the camera sweeps;             │
+│  dark, flat or depth-less frames rejected before any model runs              │
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
+                                        │
+                                        ▼
+┌──────────────────────────────────────────────────────────────────────────────┐
+│  Perception pipeline  (rtsm/core/pipeline.py)                                │
+│                                                                              │
+│ ┌──────────────────────┐  ┌──────────────────────┐  ┌──────────────────────┐ │
+│ │ Segment              │  │ Filter               │  │ Score + top-K        │ │
+│ │ backend-swappable:   │  │ mask heuristics:     │  │ rank by coverage,    │ │
+│ │ default grounded_sam2│  │ area, border contact,│  │ depth quality,       │ │
+│ │ sam2 | dual | fastsam│  │ depth validity,      │  │ structure; keep K    │ │
+│ │ yoloe | external     │  │ planarity            │  │ (bounds CLIP work)   │ │
+│ └──────────────────────┘  └──────────────────────┘  └──────────────────────┘ │
+│                                                                              │
+│ ┌──────────────────────┐  ┌──────────────────────┐  ┌──────────────────────┐ │
+│ │ CLIP encode          │  │ Classify             │  │ `external` backend   │ │
+│ │ 224x224 crop per mask│  │ cosine vs vocabulary │  │ your detector's boxes│ │
+│ │ -> 512-D embedding   │  │ -> label + confidence│  │ stand in for Segment │ │
+│ └──────────────────────┘  └──────────────────────┘  └──────────────────────┘ │
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
+                                        │  mask, 3-D point, embedding, label
+                                        ▼
+┌──────────────────────────────────────────────────────────────────────────────┐
+│  Association  (rtsm/core/associator.py)                                      │
+│                                                                              │
+│ ┌──────────────────────┐  ┌──────────────────────┐  ┌──────────────────────┐ │
+│ │ Proximity query      │  │ Embedding match      │  │ Fusion               │ │
+│ │ nearby objects from  │  │ cosine similarity,   │  │ match an object, or  │ │
+│ │ the spatial grid     │  │ gate 0.90            │  │ create a proto       │ │
+│ └──────────────────────┘  └──────────────────────┘  └──────────────────────┘ │
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
+                                        │
+                                        ▼
+┌──────────────────────────────────────────────────────────────────────────────┐
+│  Working memory  (rtsm/core/working_memory.py)                               │
+│                                                                              │
+│  ObjectState: id, xyz_world, emb_mean + gallery, view_bins, label scores,    │
+│               stability, hits, confirmed, JPEG snapshots                     │
+│                                                                              │
+│  proto  ->  confirmed   (hits >= 2, stability >= 0.55, >= 1 view bin)        │
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
+                                        │  confirmed objects, periodically
+                                        ▼
+┌──────────────────────────────────────────────────────────────────────────────┐
+│  Long-term memory  (FAISS, or Milvus)                                        │
+│                                                                              │
+│  semantic search:  text -> CLIP -> top-k objects                             │
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
+                                        │
+                                        ▼
+┌──────────────────────────────────────────────────────────────────────────────┐
+│  Outputs                                                                     │
+│                                                                              │
+│ ┌──────────────────────┐  ┌──────────────────────┐  ┌──────────────────────┐ │
+│ │ REST API             │  │ MCP                  │  │ WebSocket + viewer   │ │
+│ │ /objects, /search/*, │  │ tools for agents     │  │ `--viz`: 3-D clouds, │ │
+│ │ /stats, /healthz     │  │ (SSE and stdio)      │  │ object updates       │ │
+│ └──────────────────────┘  └──────────────────────┘  └──────────────────────┘ │
+│                                                                              │
+│  Diagnostics: the frame-flow trace and the pose / obs / view ledgers         │
+│  feed `rtsm eval` -> metrics.json + report.md  (offline, on a bag)           │
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
