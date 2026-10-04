@@ -1,31 +1,43 @@
 {% extends "base.html" %}
 
 {#
-  The favicon pair from calabi.com: the dark mark on a light browser theme,
-  the light mark on a dark one. The `media` attribute does the switch where
-  the browser honours it on <link rel="icon">; the script does it everywhere
-  else and follows theme changes while the tab is open. The theme's own
-  favicon (set in mkdocs.yml) stays as the fallback.
+  Favicon that follows the browser's colour scheme, the way calabi.com does it:
+  the dark mark on a light theme, the light mark on a dark theme.
+
+  Browsers differ in how they pick among several <link rel="icon">: Chrome
+  ignores the `media` attribute and ranks by declared size, then takes the
+  last one. So the script leaves exactly ONE icon link in the document, the
+  one for the current scheme, re-applies on theme changes and on Material's
+  instant navigations, and the hrefs carry a version so a cached icon is
+  refetched. The theme's own favicon (mkdocs.yml) is the no-JS fallback.
 #}
 {% block extrahead %}
   {{ super() }}
-  <link id="favicon-light" rel="icon" type="image/png" sizes="32x32"
-        href="{{ 'assets/favicon-for-light-tab.png' | url }}" media="(prefers-color-scheme: light)">
-  <link id="favicon-dark" rel="icon" type="image/png" sizes="32x32"
-        href="{{ 'assets/favicon-for-dark-tab.png' | url }}" media="(prefers-color-scheme: dark)">
+  <link id="favicon-light" rel="icon" sizes="any" type="image/png"
+        href="{{ 'assets/favicon-for-light-tab.png' | url }}?v=2" media="(prefers-color-scheme: light)">
+  <link id="favicon-dark" rel="icon" sizes="any" type="image/png"
+        href="{{ 'assets/favicon-for-dark-tab.png' | url }}?v=2" media="(prefers-color-scheme: dark)">
   <script>
     (function () {
+      if (!window.matchMedia) return;
       var light = document.getElementById('favicon-light');
       var dark = document.getElementById('favicon-dark');
-      if (!light || !dark || !window.matchMedia) return;
-      function apply(mq) {
-        var pick = mq.matches ? dark : light;
-        pick.removeAttribute('media');
-        document.head.appendChild(pick);   /* last <link rel=icon> wins */
-      }
+      if (!light || !dark) return;
       var mq = window.matchMedia('(prefers-color-scheme: dark)');
-      apply(mq);
+      function apply() {
+        var keep = mq.matches ? dark : light;
+        document.querySelectorAll('link[rel~="icon"]').forEach(function (l) {
+          if (l !== keep && l.parentNode) l.parentNode.removeChild(l);
+        });
+        keep.removeAttribute('media');
+        document.head.appendChild(keep);          /* the only icon link, and the last head child */
+      }
+      apply();
       if (mq.addEventListener) mq.addEventListener('change', apply);
+      else if (mq.addListener) mq.addListener(apply);
+      document.addEventListener('DOMContentLoaded', function () {
+        if (window.document$ && window.document$.subscribe) window.document$.subscribe(apply);
+      });
     })();
   </script>
 {% endblock %}
