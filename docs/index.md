@@ -7,67 +7,76 @@ hide:
 
 <div class="rtsm-hero" markdown>
 
-<div class="rtsm-hero__pill"><span class="dot"></span><span><strong>RTSM 0.2.0</strong> is on PyPI — <em>pip install rtsm</em></span></div>
+<div class="rtsm-hero__pill"><span class="dot"></span><span><strong>RTSM 0.2.0</strong> on PyPI — <em>pip install rtsm</em></span></div>
 
-# Spatial memory for <span class="shine">robots and agents.</span>
+# Real-Time Spatio-Semantic <span class="shine">Memory</span>
 
-<p class="rtsm-hero__tagline">RTSM turns RGB-D frames and poses into a persistent, queryable 3-D world state. Ask <em>"where is the red mug?"</em> and get world coordinates back, over REST or MCP. Open source, Apache-2.0.</p>
+<p class="rtsm-hero__tagline">RTSM maintains a persistent, queryable memory of objects from an RGB-D stream with camera poses: for each object a world-frame position, a visual embedding and a label distribution, updated as the camera moves and queried over REST or MCP. Open source, Apache-2.0.</p>
 
 <div class="rtsm-terminal"><div class="label">&gt;_ Terminal</div><code>pip install "rtsm[gpu]" &amp;&amp; rtsm demo</code></div>
 
-[Get started](getting-started/installation.md){ .md-button .md-button--primary }
+[Install](getting-started/installation.md){ .md-button .md-button--primary }
 [Evaluate a bag](guides/eval.md){ .md-button }
-[View on GitHub](https://github.com/calabi-inc/rtsm){ .md-button }
+[Source](https://github.com/calabi-inc/rtsm){ .md-button }
 
-<div class="rtsm-hero__meta"><span class="ok">rtsm 0.2.0</span><span>pip install rtsm</span><span>Apache 2.0</span><span>5 backends</span><span>MCP + REST API</span><span>ROS bags in</span></div>
+<div class="rtsm-hero__meta"><span class="ok">rtsm 0.2.0</span><span>Apache-2.0</span><span>Python 3.10–3.13</span><span>5 segmentation backends + external detections</span><span>REST + MCP</span><span>ROS 1 / rosbag2 / MCAP in</span></div>
 
 </div>
 
-<img class="rtsm-demo" src="https://raw.githubusercontent.com/calabi-inc/rtsm/main/repo_media/rtsm-demo-gif.gif" alt="RTSM placing objects in 3-D as a handheld camera moves through a room">
+<img class="rtsm-demo" src="https://raw.githubusercontent.com/calabi-inc/rtsm/main/repo_media/rtsm-demo-gif.gif" alt="The dashboard during a replay: a point cloud of a room with detected objects labelled in place">
 
-## The missing layer
+## What RTSM is
 
-Vision models detect objects. SLAM maps geometry. Language models reason. None of them remember where things are. RTSM sits between perception and reasoning: SLAM supplies poses, a segmentation model supplies masks and labels, and RTSM fuses them into a world state that stays inspectable, queryable and reusable across robots, agents and applications, whichever model or SLAM you use.
+A SLAM system or a tracking camera supplies poses; a segmentation model supplies masks and labels per frame. RTSM takes both, lifts each mask to a 3-D point with the depth, and associates it with the objects it already holds by position and visual similarity. A match updates an existing object; a miss creates a candidate that is promoted on repeated, consistent observation. The result is a world state that can be queried while the camera is still moving, by text, by coordinate, or by an agent through MCP.
+
+It is not a SLAM system and not a detector: it depends on both, and the report it writes attributes its numbers to the detector in use.
 
 <div class="grid cards" markdown>
 
--   :material-cube-scan:{ .lg .middle } **Persistent object memory**
+-   :material-cube-scan:{ .lg .middle } **Object memory**
 
     ---
 
-    Objects keep stable ids across views, promoted from proto to confirmed on repeated, consistent observation; a long-term index outlives the session.
+    Stable ids across views; proto objects promoted to confirmed on repeated observation; a long-term vector index that outlives the session.
 
--   :material-magnify:{ .lg .middle } **Semantic and spatial search**
-
-    ---
-
-    Natural-language queries through CLIP embeddings and FAISS; coordinate and radius queries on the same memory.
-
--   :material-swap-horizontal:{ .lg .middle } **Model-agnostic**
+-   :material-magnify:{ .lg .middle } **Semantic and spatial queries**
 
     ---
 
-    Swappable segmentation backends, permissive or AGPL. Already run a detector? Its `vision_msgs` detections become the memory's input.
+    Text queries through CLIP embeddings and FAISS; coordinate and radius queries on the same memory.
+
+-   :material-swap-horizontal:{ .lg .middle } **Pluggable perception**
+
+    ---
+
+    Five segmentation backends (Apache-2.0 or AGPL), or the output of a detector you already run, read from a `vision_msgs` topic.
 
 -   :material-clipboard-check-outline:{ .lg .middle } **Offline evaluation**
 
     ---
 
-    `rtsm eval` runs the whole pipeline on ROS 1, rosbag2 or MCAP bags and writes a report where every number carries its same-input floor.
+    `rtsm eval` runs the pipeline on ROS 1, rosbag2 or MCAP bags and writes a report; each number carries its spread over repeated runs of the same input.
 
--   :material-robot-outline:{ .lg .middle } **Built for agents**
+-   :material-robot-outline:{ .lg .middle } **Interfaces**
 
     ---
 
-    REST, a Python client, and six MCP tools so Claude, Cursor or a LangGraph agent can ask where things are.
+    A REST API, a Python client with no perception dependencies, and six MCP tools for agent frameworks.
 
 -   :material-record-rec:{ .lg .middle } **Record and replay**
 
     ---
 
-    Capture a live session, replay it deterministically on the sensor clock, compare runs with their floors.
+    Live sessions recorded to disk and replayed on the sensor clock, so two runs of one recording are comparable.
 
 </div>
+
+## Known limitations
+
+- **Poses come from outside.** ARKit, RTAB-Map, or a bag's TF or odometry. RTSM does no localisation and cannot recover from a pose source that drifts or resets.
+- **Re-identification is the weak point.** On the 2012 TUM RGB-D sequences the appearance gate (cosine 0.90) rejects most returns to an already-known object: 95 % of created objects are duplicates of something in memory. The [use-case pages](use-cases/index.md) report this in full.
+- **One session, one world frame.** Objects carry no session identity yet; a second session into the same server adds to the same map in whatever frame its poses arrive in.
+- **Numbers depend on the platform.** The same bag gives slightly different object counts under Linux and Windows PyTorch builds; each is deterministic on its own. Compare runs made on the same platform.
 
 ## Start here
 
@@ -83,7 +92,7 @@ Vision models detect objects. SLAM maps geometry. Language models reason. None o
 
     ---
 
-    The bundled demo and a first query in five minutes.
+    The bundled demo and a first query.
 
 -   :material-package-variant:{ .lg .middle } **[Evaluating a Bag](guides/eval.md)**
 
@@ -95,7 +104,7 @@ Vision models detect objects. SLAM maps geometry. Language models reason. None o
 
     ---
 
-    What the report says about public recordings nobody at Calabi made, numbers and all.
+    Results on public datasets we did not record, TUM RGB-D and NVIDIA r2b, every number included.
 
 -   :material-api:{ .lg .middle } **[API](api/index.md)**
 
@@ -111,13 +120,15 @@ Vision models detect objects. SLAM maps geometry. Language models reason. None o
 
 </div>
 
-## Measured, not promised
+## Measurements
+
+The figures below come from the [benchmark page](benchmarks.md) and the [use-case runs](use-cases/index.md). Each use-case number is reported with its spread over three runs of the same input; a difference smaller than that spread means nothing.
 
 <div class="rtsm-stats" markdown>
-<div markdown><span class="rtsm-stats__value">210 ms</span><span class="rtsm-stats__label">mean pipeline latency, dual backend, RTX 5090</span></div>
-<div markdown><span class="rtsm-stats__value">510 ms</span><span class="rtsm-stats__label">mean latency, grounded_sam2 (Apache-2.0 default)</span></div>
-<div markdown><span class="rtsm-stats__value">0</span><span class="rtsm-stats__label">floor on every scalar over three same-input runs of a public bag</span></div>
-<div markdown><span class="rtsm-stats__value">1 s</span><span class="rtsm-stats__label">to refuse a bag that lacks poses or registered depth, before any model loads</span></div>
+<div markdown><span class="rtsm-stats__value">210 ms</span><span class="rtsm-stats__label">mean pipeline latency per processed frame, dual backend, RTX 5090</span></div>
+<div markdown><span class="rtsm-stats__value">510 ms</span><span class="rtsm-stats__label">mean latency, grounded_sam2 (the Apache-2.0 default)</span></div>
+<div markdown><span class="rtsm-stats__value">31 %</span><span class="rtsm-stats__label">re-identification of in-view objects on the TUM fr3 office loop (2012 Kinect)</span></div>
+<div markdown><span class="rtsm-stats__value">0</span><span class="rtsm-stats__label">spread on every reported scalar over three same-input runs</span></div>
 </div>
 
 | | dual (FastSAM + YOLOE) | grounded_sam2 (Grounding DINO + SAM2) |
@@ -128,7 +139,7 @@ Vision models detect objects. SLAM maps geometry. Language models reason. None o
 | Objects confirmed | 60 | 35 |
 | License | AGPL-3.0 | Apache-2.0 |
 
-*RTX 5090, an iPhone ARKit recording of an indoor scene (162 frames). [Full benchmarks](benchmarks.md); the [use-case pages](use-cases/index.md) show the same code on recordings we did not make, including where it falls short.*
+*RTX 5090, an iPhone ARKit recording of an indoor scene (162 frames). The two backends differ in what they detect, so the object counts are not comparable as accuracy; they describe the backends' behaviour on this recording.*
 
 ```json
 // "Where is the red backpack?"
@@ -136,6 +147,6 @@ Vision models detect objects. SLAM maps geometry. Language models reason. None o
 ```
 
 !!! info "A short video"
-    A two-minute walkthrough is on [YouTube](https://www.youtube.com/watch?v=abhXsbvOLQg).
+    A two-minute walkthrough of the dashboard is on [YouTube](https://www.youtube.com/watch?v=abhXsbvOLQg).
 
-Apache-2.0. Source, issues and releases on [GitHub](https://github.com/calabi-inc/rtsm); the package on [PyPI](https://pypi.org/project/rtsm/); the company at [calabi.com](https://www.calabi.com/).
+Apache-2.0. Source and issues on [GitHub](https://github.com/calabi-inc/rtsm), releases on [PyPI](https://pypi.org/project/rtsm/). Developed by [Calabi Inc.](https://www.calabi.com/)
