@@ -368,8 +368,8 @@ def test_registry_builtins_registration_and_errors(clean_registry):
 
 def test_registry_discovers_entry_points_and_protects_builtins(monkeypatch, caplog):
     class EP:
-        def __init__(self, name, obj=None, fail=False):
-            self.name, self._obj, self._fail = name, obj, fail
+        def __init__(self, name, obj=None, fail=False, value=""):
+            self.name, self._obj, self._fail, self.value = name, obj, fail, value
         def load(self):
             if self._fail:
                 raise ImportError("boom")
@@ -377,7 +377,9 @@ def test_registry_discovers_entry_points_and_protects_builtins(monkeypatch, capl
 
     def fake_entry_points(*, group):
         assert group == sources.ENTRY_POINT_GROUP
-        return [EP("bagfake", FakeSource), EP("websocket", FakeSource), EP("broken", fail=True)]
+        return [EP("bagfake", FakeSource), EP("websocket", FakeSource), EP("broken", fail=True),
+                # the package advertises its own built-ins under the group (pyproject): silent, not a collision
+                EP("replay", sources.replay_source, value="rtsm.io.sources:replay_source")]
 
     monkeypatch.setattr("importlib.metadata.entry_points", fake_entry_points)
     with caplog.at_level("WARNING", logger="rtsm.io.sources"):
@@ -386,6 +388,8 @@ def test_registry_discovers_entry_points_and_protects_builtins(monkeypatch, capl
     assert avail["websocket"] is sources.websocket_source      # the built-in wins over a colliding plug-in
     assert "broken" not in avail
     assert "collides with a built-in" in caplog.text and "failed to load" in caplog.text
+    assert avail["replay"] is sources.replay_source
+    assert caplog.text.count("collides with a built-in") == 1   # websocket only; the self-advertised replay is silent
 
 
 def test_builtin_factories_build_the_adapters(tmp_path):

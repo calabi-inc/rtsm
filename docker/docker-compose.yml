@@ -1,0 +1,34 @@
+# docker compose -f docker/docker-compose.yml up
+# The headless server: REST + MCP on 8002, the Calabi Lens WebSocket on 8765.
+# Add `--viz` to `command` for the dashboard on 8083. Weights persist in the
+# rtsm-models volume; ./data is the working directory inside the container.
+services:
+  rtsm:
+    image: ghcr.io/calabi-inc/rtsm:latest
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    command: []
+    ports:
+      - "8002:8002"
+      - "8083:8083"
+      - "8765:8765"
+    volumes:
+      - rtsm-models:/models
+      - ./data:/data
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8002/healthz', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 180s
+      retries: 3
+
+volumes:
+  rtsm-models: {}

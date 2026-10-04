@@ -143,16 +143,29 @@ python -c "from rtsm.models.segmentation import get_segmenter; print('Segmentati
 
 ## Docker
 
+A CUDA-ready image is published with every release: `ghcr.io/calabi-inc/rtsm:<version>` and `:latest`. Python 3.12, PyTorch cu128, the `gpu`, `eval` and `mcp` extras, no model weights (the default tier, about 2.5 GB, downloads on first use into the `/models` volume). It needs an NVIDIA driver on the host and the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html) for `--gpus`.
+
 ```bash
-# GPU pipeline (requires nvidia-docker)
-docker run --gpus all calabi/rtsm demo
+# the report on a bag or recording in the current directory
+docker run --rm --gpus all -v rtsm-models:/models -v "$PWD":/data   ghcr.io/calabi-inc/rtsm eval my_session.bag --repeats 3
+
+# the headless server: REST + MCP on 8002, the Calabi Lens WebSocket on 8765
+docker run --rm --gpus all -v rtsm-models:/models -p 8002:8002 -p 8765:8765 ghcr.io/calabi-inc/rtsm
+
+# with the 3-D dashboard on 8083
+docker run --rm --gpus all -v rtsm-models:/models -p 8002:8002 -p 8765:8765 -p 8083:8083 ghcr.io/calabi-inc/rtsm --viz
+
+# the bundled demo (replays a packaged clip; dashboard on 8083)
+docker run --rm --gpus all -v rtsm-models:/models -p 8002:8002 -p 8083:8083 ghcr.io/calabi-inc/rtsm demo
+
+# any subcommand works the same way
+docker run --rm ghcr.io/calabi-inc/rtsm version
 ```
 
-!!! note "Docker Images"
-    Pre-built Docker images are planned for a future release. For now, use the Dockerfiles in `tests/` for reference:
+The container's working directory is `/data`, so paths in commands are relative to what you mount there; output of `rtsm eval` lands next to the input. Runs inside the image are deterministic (three repeats of the TUM fr1 bag gave identical fingerprints, every floor 0), but a Linux container and a Windows install do not give identical numbers: the same bag ended with 203 objects in the image and 217 on a Windows install, with the same re-identification rate to within 0.3 points. Compare runs made on the same platform. `docker compose -f docker/docker-compose.yml up` runs the server with the same ports and volume. To build the image yourself from a checkout: `docker build -f docker/Dockerfile -t rtsm .`
 
-    - `tests/Dockerfile.deptest` — Dependency verification (core, GPU, full)
-    - `tests/Dockerfile.gpu-test` — GPU pipeline replay test
+!!! note "What is not in the image"
+    The AGPL backends (`dual`, `fastsam`, `yoloe`) and their weights: `pip install ultralytics` inside the container and mount the weights at `/data/model_store` if you opt in. The Jetson / ARM image is a separate build and is not published yet.
 
 !!! note "What CI verifies"
     Every push and pull request runs the core CPU suite on Linux and Windows (Python 3.12, CPU torch, no model weights, no LFS) and installs the built wheel into a clean environment without torch (`.github/workflows/ci.yml`). The GPU gates (the session1 anchor, the eval runs) stay local.
