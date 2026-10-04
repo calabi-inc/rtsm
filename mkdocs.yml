@@ -1,75 +1,109 @@
-site_name: RTSM Documentation
+site_name: RTSM
 site_description: Real-Time Spatio-Semantic Memory for spatial AI and robotics
 site_url: https://calabi-inc.github.io/rtsm
 repo_url: https://github.com/calabi-inc/rtsm
 repo_name: calabi-inc/rtsm
+edit_uri: edit/main/docs/
 
 theme:
   name: material
-  custom_dir: docs/overrides
+  logo: assets/logo.png
+  favicon: assets/favicon.png
+  font:
+    text: Inter
+    code: JetBrains Mono
   palette:
-    - scheme: default
-      primary: indigo
-      accent: indigo
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: custom
+      accent: custom
       toggle:
         icon: material/brightness-7
         name: Switch to dark mode
-    - scheme: slate
-      primary: indigo
-      accent: indigo
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: custom
+      accent: custom
       toggle:
         icon: material/brightness-4
         name: Switch to light mode
   features:
+    - navigation.tabs
+    - navigation.tabs.sticky
     - navigation.sections
-    - navigation.expand
+    - navigation.indexes
     - navigation.top
+    - navigation.footer
+    - navigation.instant
+    - navigation.tracking
+    - toc.follow
+    - search.suggest
     - search.highlight
     - content.code.copy
+    - content.code.annotate
+    - content.tabs.link
+    - content.action.edit
+  icon:
+    repo: fontawesome/brands/github
+
+extra_css:
+  - stylesheets/extra.css
 
 nav:
   - Home: index.md
   - Getting Started:
+      - getting-started/index.md
       - Installation: getting-started/installation.md
       - Quick Start: getting-started/quick-start.md
       - Configuration: getting-started/configuration.md
   - Concepts:
+      - concepts/index.md
       - Architecture: concepts/architecture.md
       - Perception Pipeline: concepts/perception-pipeline.md
       - Memory Model: concepts/memory-model.md
-  - API Reference:
-      - REST API: api/rest-api.md
-      - MCP (AI Agents): api/mcp.md
-      - WebSocket: api/websocket.md
-      - Python Client: api/python-client.md
-  - Benchmarks: benchmarks.md
+  - Guides:
+      - guides/index.md
+      - Record & Replay: guides/record-replay.md
+      - Reading Bags: guides/bags.md
+      - Evaluating a Bag: guides/eval.md
+      - Ingest Sources: guides/ingest-sources.md
+      - Diagnostics & Ledgers: guides/diagnostics.md
+      - Analytics Dashboard: guides/analytics-dashboard.md
+      - RTAB-Map Setup: guides/rtabmap-setup.md
+      - RealSense Setup: guides/realsense-setup.md
   - Use Cases:
-      - Overview: use-cases/index.md
+      - use-cases/index.md
       - TUM fr3 / long office: use-cases/tum-fr3-long-office.md
       - TUM fr1 / desk: use-cases/tum-fr1-desk.md
       - NVIDIA r2b_cafe (refusal): use-cases/nvidia-r2b-cafe.md
-  - Guides:
-      - Record & Replay: guides/record-replay.md
-      - Analytics Dashboard: guides/analytics-dashboard.md
-      - Diagnostics & Ledgers: guides/diagnostics.md
-      - Ingest Sources: guides/ingest-sources.md
-      - Reading Bags: guides/bags.md
-      - Evaluating a Bag: guides/eval.md
-      - RTAB-Map Setup: guides/rtabmap-setup.md
-      - RealSense Setup: guides/realsense-setup.md
+  - API:
+      - api/index.md
+      - REST API: api/rest-api.md
+      - Python Client: api/python-client.md
+      - MCP (AI Agents): api/mcp.md
+      - WebSocket: api/websocket.md
+  - Benchmarks: benchmarks.md
   - Contributing: contributing.md
 
 markdown_extensions:
-  - pymdownx.highlight:
-      anchor_linenums: true
-  - pymdownx.superfences
-  - pymdownx.tabbed:
-      alternate_style: true
+  - attr_list
+  - md_in_html
   - admonition
-  - pymdownx.details
   - tables
   - toc:
       permalink: true
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
 
 plugins:
   - search
@@ -78,6 +112,10 @@ extra:
   social:
     - icon: fontawesome/brands/github
       link: https://github.com/calabi-inc/rtsm
+      name: RTSM on GitHub
+    - icon: fontawesome/brands/python
+      link: https://pypi.org/project/rtsm/
+      name: rtsm on PyPI
   generator: false
 
-copyright: Copyright &copy; 2025-2026 Calabi Inc.
+copyright: Copyright &copy; 2025-2026 Calabi Inc. &middot; Apache-2.0

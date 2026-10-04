@@ -1,0 +1,107 @@
+/* RTSM docs — brand and landing-page styles for Material for MkDocs.
+   The colours come from the Calabi visuals: a deep indigo-blue primary and a
+   cyan accent. Change them here and nothing else. */
+
+:root {
+  --md-primary-fg-color:        #3448a8;
+  --md-primary-fg-color--light: #5a6fd1;
+  --md-primary-fg-color--dark:  #253281;
+  --md-accent-fg-color:         #1aa8c9;
+  --md-accent-fg-color--transparent: rgba(26, 168, 201, 0.12);
+}
+
+[data-md-color-scheme="slate"] {
+  --md-primary-fg-color:        #2b3c96;
+  --md-primary-fg-color--light: #5a6fd1;
+  --md-primary-fg-color--dark:  #1d2a6e;
+  --md-accent-fg-color:         #39c4e3;
+  --md-accent-fg-color--transparent: rgba(57, 196, 227, 0.14);
+  --md-default-bg-color:        #11141f;
+  --md-code-bg-color:           #181c2a;
+}
+
+/* header logo: the mark is white on a transparent background */
+.md-header__button.md-logo img,
+.md-nav__button.md-logo img {
+  height: 1.7rem;
+  width: auto;
+}
+
+/* ---- landing page hero --------------------------------------------------- */
+.rtsm-hero {
+  text-align: center;
+  padding: 2.4rem 0 1.2rem;
+}
+.rtsm-hero img.rtsm-hero__mark {
+  height: 5.5rem;
+  width: auto;
+  margin-bottom: 0.4rem;
+  filter: drop-shadow(0 6px 18px rgba(52, 72, 168, 0.35));
+}
+[data-md-color-scheme="default"] .rtsm-hero img.rtsm-hero__mark {
+  /* the mark is white; give it the primary colour on light backgrounds */
+  filter: brightness(0) saturate(100%) invert(26%) sepia(45%) saturate(1800%) hue-rotate(221deg) brightness(90%) contrast(95%)
+          drop-shadow(0 6px 18px rgba(52, 72, 168, 0.25));
+}
+.rtsm-hero h1 {
+  font-size: 2.2rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin: 0.2rem 0 0.4rem;
+}
+.rtsm-hero .rtsm-hero__tagline {
+  font-size: 1.05rem;
+  max-width: 38rem;
+  margin: 0 auto 1.2rem;
+  color: var(--md-default-fg-color--light);
+}
+.rtsm-hero .md-button {
+  margin: 0.25rem 0.3rem;
+}
+.rtsm-demo {
+  display: block;
+  max-width: 46rem;
+  margin: 0.6rem auto 2rem;
+  border-radius: 0.5rem;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+}
+
+/* ---- cards ------------------------------------------------------------- */
+.md-typeset .grid.cards > ul > li {
+  border-radius: 0.5rem;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.md-typeset .grid.cards > ul > li:hover {
+  border-color: var(--md-accent-fg-color);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.10);
+}
+.md-typeset .grid.cards > ul > li .twemoji,
+.md-typeset .grid.cards > ul > li .lg {
+  color: var(--md-accent-fg-color);
+}
+
+/* ---- small numbers strip on the landing page -------------------------- */
+.rtsm-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+  gap: 0.8rem;
+  margin: 1rem 0 1.6rem;
+}
+.rtsm-stats > div {
+  border: 1px solid var(--md-default-fg-color--lightest);
+  border-radius: 0.5rem;
+  padding: 0.8rem 1rem;
+}
+.rtsm-stats .rtsm-stats__value {
+  display: block;
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--md-primary-fg-color);
+}
+[data-md-color-scheme="slate"] .rtsm-stats .rtsm-stats__value {
+  color: var(--md-accent-fg-color);
+}
+.rtsm-stats .rtsm-stats__label {
+  font-size: 0.72rem;
+  color: var(--md-default-fg-color--light);
+}
