@@ -77,6 +77,9 @@ def main(argv: "list[str] | None" = None):
     parser.add_argument("--bag", type=str, default=None, metavar="PATH",
                         help="Read a ROS 1 .bag, a rosbag2 directory (sqlite3 | mcap) or a bare .mcap through the bag source "
                              "(sets io.receiver=bag; the ingest clock and policy resolve as under --replay)")
+    parser.add_argument("--ros2", action="store_true",
+                        help="Subscribe to a live ROS 2 graph through the ros2 source (sets io.receiver=ros2; needs a sourced ROS 2 "
+                             "environment with rclpy; topics by rule or io.ros2.topics; `rtsm ros2 probe` shows what would be used)")
     parser.add_argument("--bag-speed", type=float, default=None, metavar="X",
                         help="Pace bag frames by their header stamps at X times real time (default: as fast as the ingest queue accepts)")
     parser.add_argument("--replay-speed", type=float, default=1.0,
@@ -142,6 +145,10 @@ def main(argv: "list[str] | None" = None):
     if args.bag:
         cfg.setdefault("io", {})["receiver"] = "bag"
         cfg["io"].setdefault("bag", {})["path"] = args.bag
+    if args.ros2:
+        if args.bag or args.replay:
+            parser.error("--ros2 cannot be combined with --bag or --replay")
+        cfg.setdefault("io", {})["receiver"] = "ros2"
     if not args.replay:
         _rt = str((cfg.get("io") or {}).get("receiver", "zeromq")).lower()
         _known = available_sources()
@@ -227,7 +234,7 @@ def main(argv: "list[str] | None" = None):
     # Determine world-frame up axis from receiver type (ARKit=Y-up, D435i/ROS=Z-up)
     io_cfg = cfg.get("io", {})
     receiver_type = str(io_cfg.get("receiver", "zeromq")).lower()
-    up_axis_default = "y" if receiver_type in ("websocket", "bag") or args.replay else "z"
+    up_axis_default = "y" if receiver_type in ("websocket", "bag", "ros2") or args.replay else "z"
     event_log = EventLogWriter(
         enabled=ledger_cfg.enabled,
         configured_path=ledger_cfg.event_log_path,
@@ -344,6 +351,9 @@ def main(argv: "list[str] | None" = None):
         logger.info(f"Replay receiver started from {args.replay} (speed={args.replay_speed}x)")
     elif source.name == "bag":
         logger.info(f"Bag source started: {getattr(source, 'path', '?')} (speed={args.bag_speed or 'as fast as accepted'})")
+    elif source.name == "ros2":
+        logger.info("ROS 2 source started: node %s (io.ros2; `rtsm ros2 probe` shows the topics and QoS it will use)",
+                    ((cfg.get("io") or {}).get("ros2") or {}).get("node_name", "rtsm"))
     elif source.name == "websocket":
         ws_port = int(ws_cfg.get("port", 8765))
         print_server_addresses(ws_port)

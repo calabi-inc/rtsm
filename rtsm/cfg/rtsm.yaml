@@ -145,6 +145,33 @@ io:
       seq: null
       detections: null            # a vision_msgs Detection2DArray / Detection3DArray topic (segmentation.backend: external)
 
+  # The minimal live ROS 2 subscriber (io.receiver: ros2, or --ros2). Runs inside a sourced
+  # ROS 2 environment on Linux (rclpy); `rtsm ros2 probe` shows the topics, the publishers'
+  # QoS and the TF / CameraInfo state it would use, before any model loads.
+  ros2:
+    node_name: rtsm
+    qos: auto                      # auto = match the publishers' reliability | reliable | best_effort (tf_static is always transient-local)
+    discovery_timeout_s: 10.0      # how long to wait for RGB, depth and CameraInfo topics to be advertised
+    ready_timeout_s: 10.0          # ... then for a CameraInfo message and a moving TF chain to the camera frame
+    pair_tolerance_s: 0.02         # RGB <-> depth nearest-stamp pairing window
+    tf_extrapolation_s: 0.05       # as io.bag
+    tf_wait_s: 0.5                 # a paired frame waits this long for its TF before it counts as pose_missing
+    world_frame: null              # default: the TF root that reaches the camera (map | world | odom preferred)
+    camera_frame: null             # default: the RGB CameraInfo frame_id
+    assume_aligned: false          # accept depth whose K differs from the RGB K (only if it IS registered to the RGB)
+    session_id: null               # default: ros2-<start time>
+    topics:                        # role -> topic overrides; null = discovered by the bag reader's rules
+      rgb: null
+      depth: null
+      rgb_info: null
+      depth_info: null
+      confidence: null
+      tf: null
+      tf_static: null
+      odom: null
+      tracking: null
+      seq: null
+
 # -------------------- Ingest (frame admission timing) --------------------
 ingest:
   # Which clock drives frame admission and memory timing: the receiver's

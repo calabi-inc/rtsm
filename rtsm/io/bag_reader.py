@@ -526,6 +526,27 @@ def _build_pose_source(stream, tm: TopicMap, *, world_frame: Optional[str], came
     if not cam:
         reasons.append(("no_camera_frame", "CameraInfo carries no frame_id; set io.bag.camera_frame"))
         return buf, None, "", rgb_info, depth_info, reasons
+    world, chain, pose_kind, why = choose_world_frame(buf, cam, world_frame=world_frame, odom_frames=odom_frames,
+                                                       tf_topic=tm.tf, odom_topic=tm.odom, setting="io.bag", what="bag")
+    if world is None:
+        reasons.extend(why)
+        return buf, None, cam, rgb_info, depth_info, reasons
+    stats.pose_kind = pose_kind
+    stats.world_frame, stats.camera_frame = world, cam
+    stats.tf_chain = [f"{p} -> {c}" for p, c in chain]
+    logger.info("[bag] pose source: %s, chain %s (%d transforms)", stats.pose_kind, " | ".join(stats.tf_chain), n_tf)
+    return buf, world, cam, rgb_info, depth_info, reasons
+
+
+def choose_world_frame(buf: TfBuffer, cam: str, *, world_frame: Optional[str], odom_frames: Optional[Tuple[str, str]],
+                       tf_topic: Optional[str] = None, odom_topic: Optional[str] = None, setting: str = "io.bag",
+                       what: str = "bag") -> Tuple[Optional[str], List[Tuple[str, str]], str, List[Tuple[str, str]]]:
+    """The one rule for the pose source, shared by the bag reader and the live
+    ``ros2`` source: the configured world frame, else the odometry parent when
+    it reaches the camera, else the first reachable root in PREFERRED_WORLD_FRAMES
+    order, and the chain must contain a moving hop. Returns
+    ``(world | None, chain, pose_kind, reasons)``; ``reasons`` holds the refusal
+    when ``world`` is None (``setting`` names the config block in the hint)."""
     world = norm_frame(world_frame) if world_frame else ""
     if not world:
         candidates = []
@@ -541,24 +562,18 @@ def _build_pose_source(stream, tm: TopicMap, *, world_frame: Optional[str], came
             candidates.sort(key=lambda r: (PREFERRED_WORLD_FRAMES.index(r) if r in PREFERRED_WORLD_FRAMES else 99, r))
             world = candidates[0] if candidates else ""
     if not world:
-        reasons.append(("no_pose_source",
-                        f"no TF chain from camera frame {cam!r} to a root (roots {buf.roots()}, hops {[(p, c) for p, c, _s in buf.hops()]}, "
-                        f"odometry topic {tm.odom!r}); set io.bag.topics.tf / odom or io.bag.world_frame"))
-        return buf, None, cam, rgb_info, depth_info, reasons
+        return None, [], "", [("no_pose_source",
+                               f"no TF chain from camera frame {cam!r} to a root (roots {buf.roots()}, hops {[(p, c) for p, c, _s in buf.hops()]}, "
+                               f"odometry topic {odom_topic!r}); set {setting}.topics.tf / odom or {setting}.world_frame")]
     try:
         chain = buf.chain(world, cam)
     except TfLookupError as e:
-        reasons.append(("no_pose_source", f"world frame {world!r}: {e}"))
-        return buf, None, cam, rgb_info, depth_info, reasons
+        return None, [], "", [("no_pose_source", f"world frame {world!r}: {e}")]
     if all(buf.span((p, c)) is None for p, c in chain):
-        reasons.append(("no_pose_source", f"the TF chain {world} -> {cam} has only static hops: no moving pose in this bag "
-                                          f"(tf {tm.tf!r}, odometry {tm.odom!r})"))
-        return buf, None, cam, rgb_info, depth_info, reasons
-    stats.pose_kind = "odometry" if (odom_frames and odom_frames in chain) else "tf"
-    stats.world_frame, stats.camera_frame = world, cam
-    stats.tf_chain = [f"{p} -> {c}" for p, c in chain]
-    logger.info("[bag] pose source: %s, chain %s (%d transforms)", stats.pose_kind, " | ".join(stats.tf_chain), n_tf)
-    return buf, world, cam, rgb_info, depth_info, reasons
+        return None, chain, "", [("no_pose_source", f"the TF chain {world} -> {cam} has only static hops: no moving pose in this {what} "
+                                                     f"(tf {tf_topic!r}, odometry {odom_topic!r})")]
+    pose_kind = "odometry" if (odom_frames and odom_frames in chain) else "tf"
+    return world, chain, pose_kind, []
 
 
 def _image_size(msg) -> Tuple[int, int]:

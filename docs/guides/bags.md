@@ -14,6 +14,10 @@ To evaluate a bag offline rather than run it live, use [`rtsm eval`](eval.md). `
 
 ## What the reader needs, and how it finds it
 
+!!! note "Live ROS 2"
+    The same roles, rules, registration check and refusals apply to the live [`ros2` source](ingest-sources.md#ros-2-live), which subscribes to a running graph instead of reading a file.
+
+
 | Role | Discovery rule | Override (`io.bag.topics.*`) |
 |---|---|---|
 | RGB | a `sensor_msgs/Image` or `CompressedImage` topic matching `color`, `rgb`, `image_raw`… and not `depth`, `ir`, `mono`, `left`, `right` | `rgb` |

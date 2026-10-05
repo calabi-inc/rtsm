@@ -2,6 +2,14 @@
 
 All notable changes to `rtsm`. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [Semantic Versioning](https://semver.org/) with the caveat that anything before 1.0 may change between minor versions when the changelog says so.
 
+## [Unreleased]
+
+### Added
+- **`ros2` live source** (`io.receiver: ros2`, `--ros2`) — a minimal rclpy subscriber on the same ingest front-end as the bag reader: topic roles by the bag reader's rules or `io.ros2.topics`, QoS matched to the publishers (`io.ros2.qos: auto`), TF composed at the image stamp, the registration check and the same refusals; a spin thread decoupled from the pairing/admission worker; `rtsm ros2 probe` prints the topics, the publishers' QoS and the TF / CameraInfo state before any model loads. Runs inside a sourced ROS 2 environment on Linux; refuses with a hint elsewhere. The live path reproduces the bag reader frame for frame on session1 (test).
+
+### Changed
+- The bag reader's world-frame rule is a shared function (`choose_world_frame`), used by bags and the live source alike.
+
 ## [0.2.1] - 2026-10-04
 
 ### Added

@@ -33,6 +33,45 @@ It never decodes pixels, never applies keyframe or throttle logic, never touches
 
 The adapter then calls `fe.admit(raw)` (or `fe.offer(raw)` = admit + enqueue). `admit` returns the `FramePacket` to enqueue, `None` when the chain dropped the frame (the drop line is already written), and re-raises after writing a `parse_error` line when the pose or a payload fails to parse: the adapter logs and continues, as the receivers always did. Transport-level drops the front-end never saw (malformed framing, no camera frame to pair with) are reported with `fe.reject(reason, ...)` so the frame-flow trace stays complete.
 
+## ROS 2 (live)
+
+`io.receiver: ros2` (or `python -m rtsm --ros2`) subscribes to a live ROS 2 graph. It is the bag reader's twin on the same ingest front-end: the topic roles are found by the [bag reader's rules](bags.md#what-the-reader-needs-and-how-it-finds-it) or set under `io.ros2.topics`, the `sensor_msgs` encodings go onto the codec layer without decoding, RGB and depth are paired by header stamp, the camera pose is composed from `/tf` (or odometry) at the image stamp, depth must be registered to the RGB, and the refusals carry the same codes. A frame built live is the frame the bag reader builds from a recording of the same stream; `tests/test_ros2_source.py` pins that on `session1_bag`.
+
+**Environment.** rclpy only exists inside a sourced ROS 2 environment on Linux (Humble on Ubuntu 22.04, Jazzy on 24.04). Install RTSM into that interpreter's view:
+
+```bash
+source /opt/ros/jazzy/setup.bash
+python3 -m venv ~/rtsm-env --system-site-packages        # the venv sees rclpy and the message packages
+source ~/rtsm-env/bin/activate
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
+pip install "rtsm[gpu,eval]"
+```
+
+Anywhere else the source refuses at start with a one-line hint. The Windows development box runs none of this; WSL2 with a ROS 2 distribution does.
+
+**Before the models load: `rtsm ros2 probe`.** The two classic silent failures of a ROS 2 subscriber are a QoS mismatch (the callback never fires) and a TF chain that never reaches the camera frame. The probe listens for a few seconds and prints what the node would use:
+
+```text
+$ rtsm ros2 probe --seconds 5
+ros2 probe (5.0 s): OK
+topics:
+  rgb        /camera/color/image_raw  [image topic matching color|rgb|image_raw and not depth|ir|mono|left|right]  subscribe reliable/volatile depth 100  (offered: rosbag2_player:reliable)
+  depth      /camera/depth/image_rect_raw  [image topic matching depth (aligned_depth_to_color preferred)]  subscribe reliable/volatile depth 100  (offered: rosbag2_player:reliable)
+  rgb_info   /camera/color/camera_info  [...]
+  tf         /tf  [TF message topic]  subscribe reliable/volatile depth 200  (offered: rosbag2_player:reliable)
+camera info: rgb seen, depth not seen
+tf: roots ['world']; 1 hops; chain world -> camera_color_optical_frame; pose tf
+registration: no depth CameraInfo: registration assumed
+```
+
+Exit code 0 when the stream is usable, 1 with the refusal otherwise, 2 without rclpy. `--json` prints everything as data; `--topic ROLE=TOPIC` overrides a role for the probe only.
+
+**QoS.** `io.ros2.qos: auto` reads the publishers' offered QoS per topic and subscribes reliable when any publisher is reliable, best-effort otherwise; `reliable` and `best_effort` force it. `tf_static` always subscribes transient-local. Image subscriptions keep a depth of 100 so a reliable publisher is not dropped while the lane admits; TF keeps 200.
+
+**Threads and timing.** The executor only appends messages to a queue; a worker thread pairs, looks the pose up, admits and enqueues, so a lossless lane that blocks never stalls the executor. A pair whose TF has not arrived waits up to `io.ros2.tf_wait_s` (0.5 s) with later frames behind it, then counts as `pose_missing`. Pairs resolved before the camera info, the world frame and the registration check are known are held (256) and flushed in order. Discovery waits `discovery_timeout_s` for the RGB, depth and CameraInfo topics to be advertised and `ready_timeout_s` for a CameraInfo message and a moving TF chain, then refuses with the reasons.
+
+**What it is not.** Not an `ament` package, no launch files, no publishing of RTSM's outputs onto ROS topics, no ROS 2 container in CI. Those are the next step when a live-ROS user needs them; the source's stats (`frames_seen`, `paired`, `unpaired_rgb`, `pose_missing`, `enqueued`, the chosen QoS) are on `/stats` like the bag source's.
+
 ## Writing a source
 
 ```python
