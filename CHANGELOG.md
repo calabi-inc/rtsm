@@ -2,14 +2,18 @@
 
 All notable changes to `rtsm`. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [Semantic Versioning](https://semver.org/) with the caveat that anything before 1.0 may change between minor versions when the changelog says so.
 
-## [Unreleased]
+## [0.2.1] - 2026-10-04
 
 ### Added
-- **Docker image** — `ghcr.io/calabi-inc/rtsm:<version>` / `:latest`, built from the tagged source by the release workflow: Python 3.12, PyTorch cu128, the `gpu`, `eval` and `mcp` extras, a non-root user, weights on a `/models` volume; `docker/docker-compose.yml` for the server; pull requests that touch the image build it without pushing.
+- **Docker image** — `ghcr.io/calabi-inc/rtsm:<version>` / `:latest`, built from the tagged source by the release workflow: Python 3.12, PyTorch cu128, the `gpu`, `eval` and `mcp` extras, a non-root user, weights on a `/models` volume; `docker/docker-compose.yml` for the server; pull requests that touch the image build it without pushing (#55).
+
+### Changed
+- Documentation site redesigned in the calabi.com design language, with section landing pages, a factual landing page that states the known limitations, and the architecture diagram redrawn and brought up to date (#54, #56, #58). The favicon follows the browser's colour scheme (#57).
+- The installation page says that a Linux container and a Windows install give slightly different numbers on the same bag, each deterministic on its own (#55).
 
 ### Fixed
-- The installation page described a Docker image and two Dockerfiles that did not exist.
-- Every non-editable install logged `entry point 'replay' collides with a built-in source` at startup: the package advertises its own built-ins under the `rtsm.sources` group, and the registry now recognises them instead of warning (found by the Docker gate).
+- Every non-editable install logged `entry point 'replay' collides with a built-in source` at startup: the package advertises its own built-ins under the `rtsm.sources` group, and the registry now recognises them instead of warning (#55).
+- The installation page described a Docker image and two Dockerfiles that did not exist (#55).
 
 ## [0.2.0] - 2026-10-03
 
