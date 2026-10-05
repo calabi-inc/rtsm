@@ -1,6 +1,6 @@
 # API
 
-Everything RTSM knows is reachable over HTTP on one port, plus a WebSocket for the dashboard and an MCP endpoint for agents.
+The memory is served over HTTP on one port; a WebSocket carries the dashboard stream and an MCP endpoint exposes the same queries to agent frameworks.
 
 | service | address | notes |
 |---|---|---|
@@ -31,7 +31,7 @@ Everything RTSM knows is reachable over HTTP on one port, plus a WebSocket for t
 
     ---
 
-    Six tools over SSE or stdio, so Claude, Cursor or a LangGraph agent can ask where things are.
+    Six tools over SSE or stdio for MCP clients (Claude, Cursor, LangGraph): the object, search and statistics queries of the REST API.
 
     [:octicons-arrow-right-24: MCP](mcp.md)
 

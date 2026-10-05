@@ -1,6 +1,6 @@
 # Use Cases
 
-What `rtsm eval` says about public recordings nobody at Calabi made. Each page gives the command, what the bag reader decided (which topic plays which role, where the poses come from, whether the depth is registered), the report's numbers with their same-input floors over three runs, and an honest reading. The numbers are produced by the released code on the released defaults; the pages are regenerated for each release.
+Results of `rtsm eval` on public recordings that we did not record. Each page gives the command, what the bag reader decided (which topic plays which role, where the poses come from, whether the depth is registered), the report's numbers with their same-input floors over three runs, and an honest reading. The numbers are produced by the released code on the released defaults; the pages are regenerated for each release.
 
 | recording | what it is | what it shows |
 |---|---|---|
