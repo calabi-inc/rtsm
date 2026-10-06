@@ -9,6 +9,11 @@ All notable changes to `rtsm`. The format follows [Keep a Changelog](https://kee
 
 ### Changed
 - The bag reader's world-frame rule is a shared function (`choose_world_frame`), used by bags and the live source alike.
+- `/stats` carries a `source` object with the ingest source's own counters for sources that keep them (`bag`, `ros2`).
+- The runner stops the ingest source on exit (`source.stop()`), so a live rclpy node is torn down before the interpreter finalises.
+
+### Fixed
+- `python -m rtsm.cli ...` ran nothing (no main guard); it now behaves like the `rtsm` console script.
 
 ## [0.2.1] - 2026-10-04
 

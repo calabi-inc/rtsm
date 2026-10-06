@@ -70,6 +70,18 @@ registration: no depth CameraInfo: registration assumed
 
 Exit code 0 when the stream is usable, 1 with the refusal otherwise, 2 without rclpy. `--json` prints everything as data; `--topic ROLE=TOPIC` overrides a role for the probe only.
 
+**Probe reference.**
+
+| option | meaning |
+|---|---|
+| `--seconds N` | how long to listen for CameraInfo and TF after discovery (default 5) |
+| `--qos {auto, reliable, best_effort}` | the subscription reliability to evaluate (default `auto`) |
+| `--topic ROLE=TOPIC` | override a role for this probe only (repeatable) |
+| `--world-frame`, `--camera-frame`, `--assume-aligned` | as the `io.ros2` keys |
+| `--json` | the full result as data: `topics`, `msgtypes`, `qos` (chosen + offered per role), `advertised`, `camera_info_seen`, `tf` (roots, hops, chain, world/camera frame, pose kind), `registration`, `refusal`, `ok` |
+
+Exit codes: 0 the stream is usable, 1 not usable (the refusal is printed), 2 rclpy not importable.
+
 **QoS.** `io.ros2.qos: auto` reads the publishers' offered QoS per topic and subscribes reliable when any publisher is reliable, best-effort otherwise; `reliable` and `best_effort` force it. `tf_static` always subscribes transient-local. Image subscriptions keep a depth of 100 so a reliable publisher is not dropped while the lane admits; TF keeps 200.
 
 **Threads and timing.** The executor only appends messages to a queue; a worker thread pairs, looks the pose up, admits and enqueues, so a lossless lane that blocks never stalls the executor. A pair whose TF has not arrived waits up to `io.ros2.tf_wait_s` (0.5 s) with later frames behind it, then counts as `pose_missing`. Pairs resolved before the camera info, the world frame and the registration check are known are held (256) and flushed in order. Discovery waits `discovery_timeout_s` for the RGB, depth and CameraInfo topics to be advertised and `ready_timeout_s` for a CameraInfo message and a moving TF chain, then refuses with the reasons.
