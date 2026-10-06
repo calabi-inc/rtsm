@@ -47,7 +47,7 @@ class SegmentationResult:
 
     # Where the detection labels come from (2026-10-05). "vocab": drawn from the vocabulary rtsm supplied (grounded
     # phrases, prompted classes, an external detector's names). "builtin": the model's own built-in vocabulary
-    # (prompt-free YOLOE, 1200+ categories including abstract words). None: unspecified, treated as "vocab".
+    # (prompt-free YOLOE, 4 585 categories, a tag list that includes abstract words). None: unspecified, treated as "vocab".
     # The pipeline keeps a "builtin" label out of the scored label list (see rtsm.core.pipeline.apply_detection_labels).
     label_source: Optional[str] = None
 

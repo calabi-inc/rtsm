@@ -19,7 +19,7 @@ Benchmark script: [`scripts/benchmark_backends.py`](https://github.com/calabi-in
 | Confirmation rate | 52.2% | 45.5% |
 | License | AGPL-3.0 | Apache-2.0 |
 
-The dual backend is **2.4x faster** and discovers **71% more confirmed objects**, primarily because it runs two CNN-based models versus transformer-based models, and operates prompt-free (1200+ LVIS categories vs 30-class text prompt).
+The dual backend is **2.4x faster** and discovers **71% more confirmed objects**, primarily because it runs two CNN-based models versus transformer-based models, and operates prompt-free (4 585 built-in categories vs 30-class text prompt).
 
 ---
 
@@ -113,7 +113,7 @@ Both backends process the same 38 frames (out of 162 total) — the remainder ar
 |-----------|------------------------|------------------------------|
 | **Architecture** | CNN (YOLOv8 backbone) | Transformer (Swin + Hiera ViT) |
 | **License** | AGPL-3.0 | Apache-2.0 |
-| **Vocabulary** | 1200+ LVIS (prompt-free) | Configurable text prompt |
+| **Vocabulary** | 4 585 built-in tags (prompt-free) | Configurable text prompt |
 | **Mask quality** | Two-model IoU consensus | SAM2 high-quality masks |
 | **Latency** | 210 ms mean | 510 ms mean |
 | **Detection strategy** | Class-agnostic + open-vocab merge | Text-prompted detection |

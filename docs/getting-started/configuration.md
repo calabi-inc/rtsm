@@ -147,7 +147,7 @@ segmentation:
 |---------|-------------|---------|-------------|
 | `grounded_sam2` | Grounding DINO + SAM2 (text-prompted) | Apache-2.0 | ~510 ms |
 | `sam2` | SAM2 auto-mask (class-agnostic, no labels) | Apache-2.0 | ~860 ms |
-| `dual` | FastSAM + YOLOE IoU merge (prompt-free, 1200+ categories) | AGPL-3.0 | ~210 ms |
+| `dual` | FastSAM + YOLOE IoU merge (prompt-free, 4 585 built-in categories) | AGPL-3.0 | ~210 ms |
 | `fastsam` | FastSAM only (class-agnostic) | AGPL-3.0 | ~50 ms |
 | `yoloe` | YOLOE only (open-vocab, prompt-free) | AGPL-3.0 | ~60 ms |
 
@@ -155,7 +155,7 @@ segmentation:
     Backends using FastSAM or YOLOE require the `ultralytics` package (AGPL-3.0). Install with: `pip install "rtsm[gpu-ultralytics]"`
 
 !!! note "Labels under a prompt-free detector"
-    The packaged YOLOE weights are prompt-free: they name objects from their own 1200+ built-in categories, not from your vocabulary. Under `dual` and `yoloe` an object's labels therefore come from the CLIP vocabulary classifier (`rtsm/cfg/clip/vocab.yaml`), and the detector's own name is kept on each observation as `detector_label` in the ledger. Under `grounded_sam2` the grounded phrase is the primary label.
+    The packaged YOLOE weights are prompt-free: they name objects from their own 4 585 built-in categories (a tag list that includes abstract words such as "heat" or "adaptation"), not from your vocabulary. Under `dual` and `yoloe` an object's labels therefore come from the CLIP vocabulary classifier (`rtsm/cfg/clip/vocab.yaml`), and the detector's own name is kept on each observation as `detector_label` in the ledger. Under `grounded_sam2` the grounded phrase is the primary label.
 
 ### Backend-Specific Settings
 

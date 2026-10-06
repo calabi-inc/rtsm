@@ -6,7 +6,7 @@ Supports both prompted (set_classes) and prompt-free (-pf) model variants.
 
 YOLOE26 provides:
   - Instance masks at native resolution
-  - Open-vocabulary labels from text prompts or 1200+ built-in categories (PF)
+  - Open-vocabulary labels from text prompts or 4 585 built-in categories (PF)
   - Detection confidence scores
   - Single-pass inference (no separate SAM head needed)
 """
@@ -29,7 +29,7 @@ class YOLOESegmenter(SegmentationAdapter):
     Model variants:
     - yoloe-26s-seg.pt   — small, fast iteration (~8-12ms on consumer GPU)
     - yoloe-26l-seg.pt   — large, best mask quality (36.8% LVIS mAP, ~2-3ms on RTX 5090)
-    - yoloe-26s-seg-pf.pt — prompt-free (1200+ built-in categories, no vocab setup)
+    - yoloe-26s-seg-pf.pt — prompt-free (4 585 built-in categories, no vocab setup)
 
     Vocabulary can be:
     - Set at initialization (default_vocab)

@@ -34,13 +34,13 @@ segmentation:
     max_det: 100                                        # indoor rooms rarely have 300 objects
 
   yoloe:
-    model_path: model_store/yolo/yoloe-26s-seg-pf.pt   # prompt-free: 1200+ LVIS categories, no vocab needed
+    model_path: model_store/yolo/yoloe-26s-seg-pf.pt   # prompt-free: 4 585 built-in categories (a tag list incl. abstract words), no vocab needed
     device: cuda
     imgsz: 640
     conf: 0.25                                          # permissive so YOLOE confirms more FastSAM masks
     iou: 0.5                                            # stricter NMS for cluttered indoor scenes
     max_det: 100                                        # cap detections per frame
-    # vocab is ignored for -pf models (1200+ built-in categories)
+    # vocab is ignored for -pf models (4 585 built-in categories)
     vocab: null
 
   sam2:

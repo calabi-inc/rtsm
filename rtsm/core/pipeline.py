@@ -74,7 +74,7 @@ def apply_detection_labels(cands, seg, unscored_prior):
     specific label, and label search must match it (2026-08-28: grounded labels were silently dropped here, so a
     GDINO-detected 'tissue box' kept only the classifier's 'card box').
 
-    A label from a model's own built-in vocabulary (``seg.label_source == "builtin"``: prompt-free YOLOE, 1200+
+    A label from a model's own built-in vocabulary (``seg.label_source == "builtin"``: prompt-free YOLOE, 4 585
     categories including abstract words) is NOT merged. Its confidence (0.3-0.9) outscores every CLIP cosine in the
     memory's label accumulation (max at creation, EWMA after) and would become the primary label; on an office
     recording that named shelves 'heat' and boxes 'razor blade' (2026-10-05). The vocabulary classifier's labels

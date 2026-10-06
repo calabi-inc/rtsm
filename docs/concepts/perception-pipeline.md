@@ -31,7 +31,7 @@ The first stage produces instance masks from the RGB image. RTSM supports multip
 Two CNN models run independently, then masks are cross-validated via IoU:
 
 - **FastSAM**: Class-agnostic segmentation (~24 masks/frame)
-- **YOLOE**: Open-vocabulary detection + segmentation (~11 masks/frame, 1200+ LVIS categories)
+- **YOLOE**: Open-vocabulary detection + segmentation (~11 masks/frame, 4 585 built-in categories)
 - **Merge**: IoU > 0.40 = dual-confirmed, remainder kept as single-source
 - **Output**: ~29 masks/frame (merged)
 - **Seg time**: 116 ms mean
