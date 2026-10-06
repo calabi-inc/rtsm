@@ -37,7 +37,7 @@ rtsm report eval_output/fr3                             # regenerate metrics.jso
 
 ```
 eval_output/<input>-<mode>-<stamp>/
-  resolved.json      the resolved settings, cadence, config fingerprint, commit, versions
+  resolved.json      the resolved settings, cadence, config fingerprint, commit (+ dirty flag and diff digest), versions
   bag_probe.json     (bags) topics, pose source, registration
   repeats.json       fingerprints / counts / wall time per run, identical_fingerprints
   metrics.json       every metric per run + the aggregate with floors; per-object / per-cluster / per-frame records
@@ -46,6 +46,7 @@ eval_output/<input>-<mode>-<stamp>/
     events.jsonl     the frame-flow trace + the pose / obs / view ledgers (schema 3, ledgers schema 1)
     summary.json     counts (receiver decisions, dequeue outcomes, gate shadows), the memory (every object in the /objects shape + the fingerprint), latency and segmentation aggregates, the source's statistics
     faiss/           this run's vector store
+    crops/           (--save-crops) the memory's per-object JPEG snapshots, <id>/<k>.jpg + index.json
   run_2/ …
 ```
 
@@ -90,4 +91,8 @@ Not supported in v1: masks from the detector (boxes only; a mask-refiner slot ex
 
 ## Options
 
-`--mode`, `--repeats`, `--out`, `--label`, `--max-frames` (bag inputs), `--max-wall-s` (abort a run and record it), `--no-report`, plus the usual `--config` / `--profile` / `--set` overrides. Defaults live in the `eval:` block of the configuration.
+`--mode`, `--repeats`, `--out`, `--label`, `--max-frames` (bag inputs), `--max-wall-s` (abort a run and record it), `--no-report`, `--save-crops` (write each object's JPEG snapshots into `run_N/crops/`, for report renderers), plus the usual `--config` / `--profile` / `--set` overrides. Defaults live in the `eval:` block of the configuration.
+
+## For tooling built on the run directory
+
+Other tools, including Calabi's paid compare, build on three things that are versioned and changelogged: the run-directory layout above, the ledger schema (1) and the `metrics_schema` in `metrics.json`, and the modules `rtsm.evaluation.metrics` (`MetricParams`, `compute_metrics`, `object_tracks`, `leader_clusters`), `rtsm.evaluation.report` (`run_dirs`, `run_metrics`, `aggregate`, `render_markdown`, `write_report`) and `rtsm.evaluation.ledger` (`read_events`, `by_kind`). A computation a tool needs that is missing here belongs in these modules, not in the tool.

@@ -6,6 +6,10 @@ All notable changes to `rtsm`. The format follows [Keep a Changelog](https://kee
 
 ### Added
 - **`ros2` live source** (`io.receiver: ros2`, `--ros2`) — a minimal rclpy subscriber on the same ingest front-end as the bag reader: topic roles by the bag reader's rules or `io.ros2.topics`, QoS matched to the publishers (`io.ros2.qos: auto`), TF composed at the image stamp, the registration check and the same refusals; a spin thread decoupled from the pairing/admission worker; `rtsm ros2 probe` prints the topics, the publishers' QoS and the TF / CameraInfo state before any model loads. Runs inside a sourced ROS 2 environment on Linux; refuses with a hint elsewhere. The live path reproduces the bag reader frame for frame on session1 (test).
+- `rtsm eval --save-crops`: writes each object's JPEG snapshots into `run_N/crops/<id>/<k>.jpg` with an `index.json`, for report renderers; off by default.
+- Provenance: `resolved.git_dirty` and `resolved.tree_digest` (a digest of `git diff HEAD` when the checkout has uncommitted tracked changes); the report's header marks a dirty commit.
+- The report's method notes define *engine-confirmed*, *re-identified* (a reassociation) and the fingerprint.
+- The eval guide names the run-directory layout, the schemas and the `rtsm.evaluation` modules as the surface other tools build on.
 
 ### Changed
 - The bag reader's world-frame rule is a shared function (`choose_world_frame`), used by bags and the live source alike.

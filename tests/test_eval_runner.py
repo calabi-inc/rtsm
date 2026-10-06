@@ -41,6 +41,7 @@ class FakeObject:
     created_wall_utc: float = 0.0
     created_mono: float = 0.0
     last_seen_mono: float = 0.0
+    image_crops: list = field(default_factory=list)
 
 
 class FakeWM:
@@ -311,3 +312,42 @@ def test_cli_dispatch_reaches_the_runner(monkeypatch, capsys):
     with pytest.raises(SystemExit) as ex:
         cli.main()
     assert ex.value.code == 0 and "--mode" in capsys.readouterr().out
+
+
+def test_save_crops_writes_snapshots_and_index(cfg, bag, tmp_path):
+    """--save-crops writes run_N/crops/<id>/<k>.jpg + index.json from the objects' image_crops;
+    the default run writes no crops directory; resolved carries the dirty flag."""
+    jpeg_a, jpeg_b = b"\xff\xd8\xff\xe0" + b"a" * 16, b"\xff\xd8\xff\xe0" + b"b" * 16
+
+    def crops_factory(cfg_, models, *, clock, lane_cfg, event_log, up_axis_default):
+        rt = fake_runtime_factory(cfg_, models, clock=clock, lane_cfg=lane_cfg, event_log=event_log, up_axis_default=up_axis_default)
+        orig = rt.wm.iter_objects
+
+        def with_crops():
+            objs = orig()
+            for i, o in enumerate(objs):
+                o.image_crops = [jpeg_a, jpeg_b] if i % 2 == 0 else []     # half the objects carry two snapshots
+            return objs
+
+        rt.wm.iter_objects = with_crops
+        return rt
+
+    opts = R.EvalOptions(input=str(bag), repeats=1, out=str(tmp_path / "out"), save_crops=True, report=False)
+    result = R.run_eval(cfg, opts, models=object(), runtime_factory=crops_factory)
+    rd = tmp_path / "out" / "run_1"
+    idx = json.loads((rd / "crops" / "index.json").read_text(encoding="utf-8"))
+    assert idx["schema"] == 1 and idx["n_objects"] == 2 and idx["n_files"] == 4      # 4 objects, 2 with crops, 2 crops each
+    for oid, paths in idx["objects"].items():
+        assert paths == [f"{oid}/000.jpg", f"{oid}/001.jpg"]
+        assert (rd / "crops" / paths[0]).read_bytes() == jpeg_a and (rd / "crops" / paths[1]).read_bytes() == jpeg_b
+    s = result.runs[0]
+    assert s["crops"] == {"path": "crops", "objects": 2, "files": 4}
+    assert s["resolved"]["git_dirty"] in (True, False, None) and "tree_digest" in s["resolved"]
+    # default: no crops directory, summary says None
+    opts2 = R.EvalOptions(input=str(bag), repeats=1, out=str(tmp_path / "out2"), report=False)
+    result2 = R.run_eval(cfg, opts2, models=object(), runtime_factory=crops_factory)
+    assert not (tmp_path / "out2" / "run_1" / "crops").exists() and result2.runs[0]["crops"] is None
+
+
+def test_git_state_outside_a_checkout(tmp_path):
+    assert R._git_state(tmp_path) == (None, None)
