@@ -104,6 +104,8 @@ class ResolvedEval:
     detector: str = "model"                  # model (our segmenter) | external (the input's own detections topic)
     git_dirty: Optional[bool] = None         # uncommitted tracked changes in the checkout at run start (None = not a checkout)
     tree_digest: Optional[str] = None        # sha256[:16] of `git diff HEAD` when dirty, so two dirty runs can be told apart
+    model_files: Optional[Dict[str, Dict[str, Any]]] = None   # config key -> {path, exists, bytes, sha256}: the weight files the config names
+    hf_models: Optional[Dict[str, str]] = None                # config key -> hub id, for models fetched from a hub cache
 
 
 def input_kind(path: str | os.PathLike) -> str:
@@ -152,6 +154,44 @@ def _rtsm_version() -> Optional[str]:
             return __version__
         except Exception:  # noqa: BLE001
             return None
+
+
+def _walk_cfg(node: Any, prefix: str = ""):
+    if isinstance(node, dict):
+        for k, v in node.items():
+            yield from _walk_cfg(v, f"{prefix}.{k}" if prefix else str(k))
+    else:
+        yield prefix, node
+
+
+def _model_files(cfg: dict, root: Optional[Path] = None) -> Dict[str, Dict[str, Any]]:
+    """Every ``*model_path`` string in the config: the file's size and sha256 when it exists, ``exists: false`` when it
+    does not (a backend then downloads whatever its library serves, which the config fingerprint cannot tell apart:
+    two runs with one fingerprint and one commit gave different labels on 2026-10-05 because one worktree had no
+    model_store and ultralytics fetched other weights)."""
+    out: Dict[str, Dict[str, Any]] = {}
+    base = root or Path.cwd()
+    for key, val in _walk_cfg(cfg):
+        if not key.endswith("model_path") or not isinstance(val, str) or not val:
+            continue
+        p = Path(val)
+        if not p.is_absolute():
+            p = base / p
+        rec: Dict[str, Any] = {"path": val, "exists": p.is_file()}
+        if rec["exists"]:
+            h = hashlib.sha256()
+            with open(p, "rb") as f:
+                for chunk in iter(lambda: f.read(1 << 20), b""):
+                    h.update(chunk)
+            rec["bytes"] = p.stat().st_size
+            rec["sha256"] = h.hexdigest()
+        out[key] = rec
+    return out
+
+
+def _hf_models(cfg: dict) -> Dict[str, str]:
+    """Every ``*model_id`` string in the config (hub-fetched models; the cache, not the config, holds the files)."""
+    return {key: val for key, val in _walk_cfg(cfg) if key.endswith("model_id") and isinstance(val, str) and val}
 
 
 def resolve_eval(cfg: dict, opts: EvalOptions) -> ResolvedEval:
@@ -212,6 +252,7 @@ def resolve_eval(cfg: dict, opts: EvalOptions) -> ResolvedEval:
         repeats=int(opts.repeats), max_frames=opts.max_frames, max_wall_s=opts.max_wall_s,
         detector=("external" if str((cfg.get("segmentation") or {}).get("backend", "")).lower() == "external" else "model"),
         git_dirty=git_dirty, tree_digest=tree_digest,
+        model_files=_model_files(cfg), hf_models=_hf_models(cfg),
     )
 
 

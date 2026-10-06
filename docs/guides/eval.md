@@ -37,7 +37,7 @@ rtsm report eval_output/fr3                             # regenerate metrics.jso
 
 ```
 eval_output/<input>-<mode>-<stamp>/
-  resolved.json      the resolved settings, cadence, config fingerprint, commit (+ dirty flag and diff digest), versions
+  resolved.json      the resolved settings, cadence, config fingerprint, commit (+ dirty flag and diff digest), versions, the model files the config names (size, sha256, or exists: false) and the hub model ids
   bag_probe.json     (bags) topics, pose source, registration
   repeats.json       fingerprints / counts / wall time per run, identical_fingerprints
   metrics.json       every metric per run + the aggregate with floors; per-object / per-cluster / per-frame records
