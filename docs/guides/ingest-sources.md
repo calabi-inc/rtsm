@@ -37,17 +37,21 @@ The adapter then calls `fe.admit(raw)` (or `fe.offer(raw)` = admit + enqueue). `
 
 `io.receiver: ros2` (or `python -m rtsm --ros2`) subscribes to a live ROS 2 graph. It is the bag reader's twin on the same ingest front-end: the topic roles are found by the [bag reader's rules](bags.md#what-the-reader-needs-and-how-it-finds-it) or set under `io.ros2.topics`, the `sensor_msgs` encodings go onto the codec layer without decoding, RGB and depth are paired by header stamp, the camera pose is composed from `/tf` (or odometry) at the image stamp, depth must be registered to the RGB, and the refusals carry the same codes. A frame built live is the frame the bag reader builds from a recording of the same stream; `tests/test_ros2_source.py` pins that on `session1_bag`.
 
-**Environment.** rclpy only exists inside a sourced ROS 2 environment on Linux (Humble on Ubuntu 22.04, Jazzy on 24.04). Install RTSM into that interpreter's view:
+**Environment.** rclpy only exists inside a sourced ROS 2 environment on Linux (Humble on Ubuntu 22.04 with Python 3.10, Jazzy on 24.04 with 3.12). Give an isolated venv a view of the ROS packages through a `.pth` file rather than `--system-site-packages`: the latter also pulls in apt's numpy and scipy and anything under `~/.local`, and a numpy-1 build next to torch's numpy 2 ends in `_ARRAY_API not found`.
 
 ```bash
-source /opt/ros/jazzy/setup.bash
-python3 -m venv ~/rtsm-env --system-site-packages        # the venv sees rclpy and the message packages
+source /opt/ros/humble/setup.bash                                  # or jazzy
+python3 -m venv ~/rtsm-env                                         # add --without-pip and run get-pip.py if ensurepip is missing
 source ~/rtsm-env/bin/activate
+printf '%s
+' /opt/ros/$ROS_DISTRO/local/lib/python3.*/dist-packages /opt/ros/$ROS_DISTRO/lib/python3.*/site-packages   > "$(python -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')/ros.pth"
+export PYTHONNOUSERSITE=1
 pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
 pip install "rtsm[gpu,eval]"
+python -c "import rclpy, torch, rtsm; print(torch.cuda.is_available())"
 ```
 
-Anywhere else the source refuses at start with a one-line hint. The Windows development box runs none of this; WSL2 with a ROS 2 distribution does.
+Anywhere else the source refuses at start with a one-line hint. The Windows development box runs none of this; WSL2 with a ROS 2 distribution does. Live runs use `ingest.policy: latest` (the default) or `legacy`; `lossless` is replay-only. To replay one of RTSM's own MCAP recordings into a Humble graph with `ros2 bag play`, convert it to sqlite3 storage with metadata version 5 first: `rosbags-convert --src <bag> --dst <out> --dst-storage sqlite3 --dst-version 5`.
 
 **Before the models load: `rtsm ros2 probe`.** The two classic silent failures of a ROS 2 subscriber are a QoS mismatch (the callback never fires) and a TF chain that never reaches the camera frame. The probe listens for a few seconds and prints what the node would use:
 

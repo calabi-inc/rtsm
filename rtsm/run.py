@@ -59,6 +59,14 @@ logging.getLogger("rtsm.core.association").setLevel(logging.INFO)
 logger = logging.getLogger(__name__)
 
 
+
+def _source_stats(source) -> dict:
+    """``source.stats()`` for /stats, never raising into the API."""
+    try:
+        return dict(source.stats() or {})
+    except Exception as e:  # noqa: BLE001
+        return {"error": str(e)}
+
 def main(argv: "list[str] | None" = None):
     # argv: the console entries (rtsm.cli) call main() bare -> sys.argv; tests
     # pass a list, so the startup block below is executable on CPU (P1 task 6).
@@ -424,6 +432,8 @@ def main(argv: "list[str] | None" = None):
             "ingest_q": ingest_q.qsize(),
             "ingest_lanes": ingest_q.stats(),
             "pose_conversion_failures": pipe.pose_conversion_failures,
+            # the source's own counters when it keeps some (bag, ros2: frames_seen, paired, pose_missing, enqueued, ...)
+            **({"source": _source_stats(source)} if hasattr(source, "stats") else {}),
         },
         reset_components=reset_components,
         seg_analytics=seg_analytics,

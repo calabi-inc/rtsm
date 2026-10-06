@@ -27,3 +27,7 @@ def main() -> None:
     else:
         from rtsm.run import main as run_main
         run_main()
+
+
+if __name__ == "__main__":      # `python -m rtsm.cli ...` behaves like the `rtsm` console script
+    main()

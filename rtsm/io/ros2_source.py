@@ -456,6 +456,18 @@ def _import_rclpy():
     return rclpy
 
 
+def _rclpy_init(rclpy) -> None:
+    """``rclpy.init`` WITHOUT rclpy's own signal handlers: by default they swallow
+    SIGINT (the context shuts down, no KeyboardInterrupt reaches the main
+    thread) and ``python -m rtsm`` never leaves ``run_forever`` on Ctrl-C --
+    found by the WSL gate. Our ``stop()`` shuts the context down instead."""
+    try:
+        from rclpy.signals import SignalHandlerOptions
+        rclpy.init(args=None, signal_handler_options=SignalHandlerOptions.NO)
+    except (ImportError, TypeError):                 # very old rclpy: no option; accept the default
+        rclpy.init(args=None)
+
+
 def _qos_profile(choice: QosChoice):
     from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
     return QoSProfile(
@@ -621,7 +633,7 @@ class Ros2Source:
         rclpy = self._rclpy
         try:
             if not rclpy.ok():
-                rclpy.init(args=None)
+                _rclpy_init(rclpy)
                 self._we_initialised = True
             from rclpy.executors import SingleThreadedExecutor
             from rosidl_runtime_py.utilities import get_message
@@ -686,7 +698,10 @@ class Ros2Source:
             while not self._stop_event.is_set() and self._rclpy.ok():
                 self._executor.spin_once(timeout_sec=0.1)
         except Exception as e:  # noqa: BLE001
-            if not self._stop_event.is_set():
+            if type(e).__name__ == "ExternalShutdownException":   # the rclpy context was shut down from outside: a stop, not a fault
+                logger.info("[ros2] rclpy context shut down; executor leaving")
+                self._stop_event.set()
+            elif not self._stop_event.is_set():
                 self._error = e
                 logger.exception("[ros2] executor stopped")
 
@@ -716,7 +731,7 @@ def probe(*, topics: Optional[Dict[str, str]] = None, world_frame: Optional[str]
     from rosidl_runtime_py.utilities import get_message
     we_init = False
     if not rclpy.ok():
-        rclpy.init(args=None)
+        _rclpy_init(rclpy)
         we_init = True
     node = rclpy.create_node(node_name)
     out: Dict[str, Any] = {"seconds": seconds, "ok": False}
