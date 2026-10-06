@@ -73,6 +73,7 @@ class EvalOptions:
     max_wall_s: Optional[float] = None
     label: Optional[str] = None
     report: bool = True                      # write metrics.json + report.md after the repeats
+    save_crops: bool = False                 # write the memory's per-object JPEG snapshots into run_N/crops/
 
 
 @dataclass
@@ -101,6 +102,8 @@ class ResolvedEval:
     max_frames: Optional[int]
     max_wall_s: Optional[float]
     detector: str = "model"                  # model (our segmenter) | external (the input's own detections topic)
+    git_dirty: Optional[bool] = None         # uncommitted tracked changes in the checkout at run start (None = not a checkout)
+    tree_digest: Optional[str] = None        # sha256[:16] of `git diff HEAD` when dirty, so two dirty runs can be told apart
 
 
 def input_kind(path: str | os.PathLike) -> str:
@@ -117,6 +120,25 @@ def _git_commit(repo_root: Optional[Path] = None) -> Optional[str]:
         return out.stdout.strip() or None if out.returncode == 0 else None
     except Exception:  # noqa: BLE001 -- provenance only
         return None
+
+
+def _git_state(repo_root: Optional[Path] = None) -> tuple[Optional[bool], Optional[str]]:
+    """``(dirty, digest)``: whether the checkout has uncommitted tracked changes, and a
+    16-hex digest of ``git diff HEAD`` when it does (untracked files are not covered).
+    ``(None, None)`` outside a checkout. Provenance only: never raises."""
+    try:
+        root = repo_root or Path(__file__).resolve().parents[2]
+        st = subprocess.run(["git", "-C", str(root), "status", "--porcelain", "--untracked-files=no"],
+                            capture_output=True, text=True, timeout=10)
+        if st.returncode != 0:
+            return None, None
+        if not st.stdout.strip():
+            return False, None
+        diff = subprocess.run(["git", "-C", str(root), "diff", "HEAD"], capture_output=True, timeout=20)
+        digest = hashlib.sha256(diff.stdout).hexdigest()[:16] if diff.returncode == 0 else None
+        return True, digest
+    except Exception:  # noqa: BLE001 -- provenance only
+        return None, None
 
 
 def _rtsm_version() -> Optional[str]:
@@ -179,6 +201,7 @@ def resolve_eval(cfg: dict, opts: EvalOptions) -> ResolvedEval:
         except Exception:  # noqa: BLE001
             up_axis_default = "z"
     diag = cfg.get("diagnostics") or {}
+    git_dirty, tree_digest = _git_state()
     return ResolvedEval(
         mode=mode, cadence=CADENCE[mode], input=str(opts.input), input_kind=kind, clock=clock, policy=lane_cfg.policy, keyframe_rule=keyframe_rule,
         nonkf_min_interval_s=throttle, gate_mode=gate_mode,
@@ -188,6 +211,7 @@ def resolve_eval(cfg: dict, opts: EvalOptions) -> ResolvedEval:
         git_commit=_git_commit(), rtsm_version=_rtsm_version(), python=platform.python_version(), platform=platform.platform(),
         repeats=int(opts.repeats), max_frames=opts.max_frames, max_wall_s=opts.max_wall_s,
         detector=("external" if str((cfg.get("segmentation") or {}).get("backend", "")).lower() == "external" else "model"),
+        git_dirty=git_dirty, tree_digest=tree_digest,
     )
 
 
@@ -233,6 +257,37 @@ def fingerprint(objects: List[Dict[str, Any]]) -> str:
     ms = Counter((o.get("label_primary"), tuple(round(float(v), 3) for v in (o.get("xyz_world") or [])),
                   int(o.get("hits") or 0), bool(o.get("confirmed"))) for o in objects)
     return hashlib.sha256(json.dumps(sorted(map(list, ms.elements())), default=str).encode()).hexdigest()[:16]
+
+
+def save_object_crops(wm: Any, run_dir: Path) -> Dict[str, Any]:
+    """Write every object's JPEG snapshots (``image_crops``, oldest first, the list the
+    ``/objects/{oid}/snapshots`` endpoint serves) to ``run_dir/crops/<id>/<k>.jpg`` plus
+    ``crops/index.json``. Opt-in (``--save-crops``): the ledgers stay the artefact; the crops
+    are for the deliverable renderer. Objects without snapshots are skipped."""
+    out = run_dir / "crops"
+    index: Dict[str, List[str]] = {}
+    n_files = 0
+    for o in wm.iter_objects():
+        crops = getattr(o, "image_crops", None) or []
+        if not crops:
+            continue
+        oid = str(getattr(o, "id", ""))
+        d = out / oid
+        d.mkdir(parents=True, exist_ok=True)
+        paths = []
+        for k, jpeg in enumerate(crops):
+            if not isinstance(jpeg, (bytes, bytearray)) or not jpeg:
+                continue
+            rel = f"{oid}/{k:03d}.jpg"
+            (out / rel).write_bytes(bytes(jpeg))
+            paths.append(rel)
+            n_files += 1
+        if paths:
+            index[oid] = paths
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "index.json").write_text(json.dumps({"schema": 1, "n_objects": len(index), "n_files": n_files, "objects": index},
+                                               indent=1), encoding="utf-8")
+    return {"path": "crops", "objects": len(index), "files": n_files}
 
 
 def summarize_memory(wm: Any) -> Dict[str, Any]:
@@ -373,6 +428,13 @@ def run_once(cfg: dict, models: Any, resolved: ResolvedEval, run_dir: Path, run_
     except Exception as e:  # noqa: BLE001
         logger.warning("[eval] force flush failed: %s", e)
     memory = summarize_memory(rt.wm)
+    crops = None
+    if opts.save_crops:
+        try:
+            crops = save_object_crops(rt.wm, run_dir)
+        except Exception as e:  # noqa: BLE001 -- the run's records matter more than the crops
+            logger.warning("[eval] saving crops failed: %s", e)
+            crops = {"path": "crops", "objects": 0, "files": 0, "error": str(e)}
     stop_analytics = getattr(rt.analytics, "stop", None)
     if callable(stop_analytics):
         stop_analytics()
@@ -415,7 +477,7 @@ def run_once(cfg: dict, models: Any, resolved: ResolvedEval, run_dir: Path, run_
                    "outcomes": dict(outcome_histogram(rows)), "gate_shadow": dict(shadow),
                    "processed": sum(n for (o, _r), n in dequeue.items() if o == "processed"),
                    "kinds": {k: len(v) for k, v in kinds.items()}},
-        "memory": memory, "flushed_to_vectors": flushed,
+        "memory": memory, "flushed_to_vectors": flushed, "crops": crops,
         "detector": detector,
         "latency": latency, "segmentation": seg,
         "events_path": str(run_dir / "events.jsonl"),
@@ -518,6 +580,8 @@ def build_parser():
     ap.add_argument("--max-frames", type=int, default=None, help="stop after this many paired frames (bag inputs)")
     ap.add_argument("--max-wall-s", type=float, default=None, help="abort a run after this many seconds of wall time")
     ap.add_argument("--label", type=str, default=None, help="name for the output directory instead of the input's")
+    ap.add_argument("--save-crops", action="store_true",
+                    help="write the memory's per-object JPEG snapshots into run_N/crops/ (+ index.json) for report renderers")
     ap.add_argument("--no-report", action="store_true", help="do not write metrics.json + report.md after the repeats (`rtsm report <dir>` writes them later)")
     add_config_arguments(ap)
     return ap
@@ -540,6 +604,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         out=(args.out or ev.get("out") or None), max_frames=args.max_frames,
         max_wall_s=(args.max_wall_s if args.max_wall_s is not None else ev.get("max_wall_s")), label=args.label,
         report=(False if args.no_report else bool(ev.get("report", True))),
+        save_crops=bool(getattr(args, "save_crops", False)),
     )
     if not Path(opts.input).exists():
         ap.error(f"input not found: {opts.input}")

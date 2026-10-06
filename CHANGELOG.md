@@ -2,6 +2,14 @@
 
 All notable changes to `rtsm`. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [Semantic Versioning](https://semver.org/) with the caveat that anything before 1.0 may change between minor versions when the changelog says so.
 
+## [Unreleased]
+
+### Added
+- `rtsm eval --save-crops`: writes each object's JPEG snapshots into `run_N/crops/<id>/<k>.jpg` with an `index.json`, for report renderers; off by default.
+- Provenance: `resolved.git_dirty` and `resolved.tree_digest` (a digest of `git diff HEAD` when the checkout has uncommitted tracked changes); the report's header marks a dirty commit.
+- The report's method notes define *engine-confirmed*, *re-identified* (a reassociation) and the fingerprint.
+- The eval guide names the run-directory layout, the schemas and the `rtsm.evaluation` modules as the surface other tools build on.
+
 ## [0.2.1] - 2026-10-04
 
 ### Added
