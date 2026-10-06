@@ -205,6 +205,13 @@ def render_markdown(agg: dict, ref: dict, *, resolved: Optional[dict], input_nam
     dirty = r.get("git_dirty")
     commit_txt = f"{r.get('git_commit', '–')}" + (f" (dirty, diff {r.get('tree_digest')})" if dirty else "")
     L.append(f"| commit / rtsm / python | `{commit_txt}` / {r.get('rtsm_version', '–')} / {r.get('python', '–')} |")
+    mf = r.get("model_files")
+    if isinstance(mf, dict) and mf:
+        parts = []
+        for key, rec in mf.items():
+            name = str((rec or {}).get("path", key)).replace(chr(92), "/").rsplit("/", 1)[-1]
+            parts.append(f"{name} `{str((rec or {}).get('sha256', ''))[:16]}`" if (rec or {}).get("exists") else f"{name} **missing at run start (downloaded by the backend's library)**")
+        L.append(f"| model files | {'; '.join(parts)} |")
     L.append(f"| cluster radius | {params.cluster_radius_m} m (the associator's distance gate); sensitivity at {', '.join(f'{x:g}' for x in params.cluster_radii_m)} m |")
     L.append(f"| detector | {_detector_line(ref.get('detector'))} |")
     if repeats:
