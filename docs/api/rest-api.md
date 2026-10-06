@@ -332,6 +332,20 @@ one non-keyframe slot, so it never exceeds `keyframe_lane_depth + 1`; under
 `lossless` / `legacy` it is the FIFO depth. `ingest_lanes` carries the policy,
 per-lane depth and the lane counters (see the configuration guide).
 
+Sources that keep their own counters (`bag`, `ros2`) add a `source` object:
+
+```json
+"source": {"frames_seen": 237, "paired": 232, "unpaired_rgb": 4, "unpaired_depth": 0, "pose_missing": 0,
+           "skipped_zero_stamp": 0, "decode_errors": 0, "yielded": 232, "pair_dt_ms_max": 0.0, "pose_kind": "tf",
+           "world_frame": "map", "camera_frame": "camera_optical", "tf_chain": ["map -> camera_optical"],
+           "registration": "no depth CameraInfo: registration assumed", "topics": {"rgb": "/camera/color/image_raw", "...": "..."},
+           "ready": true, "enqueued": 84, "admit_errors": 0, "before_ready_dropped": 0, "pending": 0, "queued": 0,
+           "session_id": "ros2-20261005-222912", "error": null, "refusal_codes": null,
+           "node": "rtsm", "graph": {"topics": {}, "qos": {}, "advertised": [], "refusal": null}}
+```
+
+`frames_seen` counts RGB messages with a usable stamp, `paired` those that found a depth within the pairing window, `pose_missing` paired frames whose TF never arrived, `enqueued` frames the front-end admitted; `graph` (ros2 only) is the discovery result the probe prints, with the chosen and offered QoS per role; `refusal_codes` is set when the source refused (same codes as the bag reader).
+
 ### Detailed Stats
 
 ```http

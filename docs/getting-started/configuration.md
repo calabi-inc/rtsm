@@ -204,11 +204,11 @@ segmentation:
 
 ## I/O & Receiver
 
-RTSM ships two input receiver backends, both transport adapters on the one ingest front-end (a plug-in can register a third under the `rtsm.sources` entry-point group; see the [Ingest Sources guide](../guides/ingest-sources.md)), plus the **bag source** for recorded data (`rtsm --bag PATH`; ROS 1 bags, rosbag2, MCAP — see [Reading Bags](../guides/bags.md)):
+RTSM ships three live receiver backends (`websocket`, `zeromq`, `ros2`) and the offline `bag` source, all transport adapters on the one ingest front-end (a plug-in can register a third under the `rtsm.sources` entry-point group; see the [Ingest Sources guide](../guides/ingest-sources.md)), plus the **bag source** for recorded data (`rtsm --bag PATH`; ROS 1 bags, rosbag2, MCAP — see [Reading Bags](../guides/bags.md)):
 
 ```yaml
 io:
-  receiver: websocket               # websocket | zeromq
+  receiver: websocket               # websocket | zeromq | ros2 | bag
 ```
 
 ### WebSocket Receiver (Calabi Lens / ARKit)
@@ -259,6 +259,52 @@ io:
 ```
 
 The subscriber pairs each RTABMap pose with the nearest camera frame (30 ms slop) from a window of **encoded** JPEG/PNG frames — `ingest.pair_window_s` (2 s) or at most `ceil(pair_window_s × pair_window_fps × 1.5)` frames (90 at the defaults, ≈ 30 MB worst case; `pair_window_fps` is read by nothing else) — and decodes a frame only once its pose has been admitted to the ingest queue. Its non-keyframe throttle reads `ingest.nonkf_min_interval_s` like the other receivers (it was a fixed 0.5 s before). The window has to outlast the latency of a keyframe pose stamp behind the newest camera frame (RTABMap can trail by more than a second during loop closure); an unpaired keyframe is dropped as `no_camera_frame`, not retried.
+
+### ROS 2 Receiver (live graph)
+
+```yaml
+io:
+  receiver: ros2                    # or: python -m rtsm --ros2
+  ros2:
+    node_name: rtsm
+    qos: auto                       # auto | reliable | best_effort
+    discovery_timeout_s: 10.0
+    ready_timeout_s: 10.0
+    pair_tolerance_s: 0.02
+    tf_extrapolation_s: 0.05
+    tf_wait_s: 0.5
+    world_frame: null
+    camera_frame: null
+    assume_aligned: false
+    session_id: null
+    topics:                         # role -> topic; null = discovered by the bag reader's rules
+      rgb: null
+      depth: null
+      rgb_info: null
+      depth_info: null
+      confidence: null
+      tf: null
+      tf_static: null
+      odom: null
+      tracking: null
+      seq: null
+```
+
+| key | meaning |
+|---|---|
+| `node_name` | the rclpy node name (`rtsm`) |
+| `qos` | subscription reliability: `auto` follows the publishers (reliable when any publisher is reliable, else best effort); `reliable` / `best_effort` force it; `tf_static` is always transient-local |
+| `discovery_timeout_s` | how long to wait for RGB, depth and CameraInfo topics to be advertised before refusing |
+| `ready_timeout_s` | then how long to wait for a CameraInfo message and a moving TF chain to the camera frame |
+| `pair_tolerance_s` | RGB-depth nearest-stamp pairing window |
+| `tf_extrapolation_s` | a TF hop clamps to its nearest sample up to this far outside them |
+| `tf_wait_s` | a paired frame waits this long for its TF (newer frames wait behind it) before counting as `pose_missing` |
+| `world_frame`, `camera_frame` | override the TF root / the camera frame (defaults: the root that reaches the camera, preferring `map`, `world`, `odom`; the RGB CameraInfo `frame_id`) |
+| `assume_aligned` | accept depth whose K differs from the RGB K (only if it is registered to the RGB) |
+| `session_id` | the session id written to the ledgers (default `ros2-<start time>`) |
+| `topics.<role>` | role overrides; a role naming a topic that is not advertised refuses with `no_<role>_topic` |
+
+Live runs use `ingest.policy: latest` (the default) or `legacy`; `lossless` is replay-only. `rtsm ros2 probe` shows what these settings resolve to on the running graph before any model loads. Environment, QoS and threading notes: the [Ingest Sources guide](../guides/ingest-sources.md#ros-2-live).
 
 ### Unit Conversion
 

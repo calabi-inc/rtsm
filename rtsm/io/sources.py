@@ -96,6 +96,23 @@ def zeromq_source(cfg: dict, ctx: SourceContext, **options: Any):
     return ZeroMQSubscriber(**kwargs)
 
 
+def ros2_source(cfg: dict, ctx: SourceContext, **options: Any):
+    """The minimal live ROS 2 subscriber (``rtsm/io/ros2_source.py``), configured
+    by ``io.ros2``. rclpy is imported when the source starts, with a one-line
+    hint when it is not importable (anything but a sourced ROS 2 environment)."""
+    from rtsm.io.ros2_source import Ros2Source
+    r = dict((cfg.get("io") or {}).get("ros2") or {})
+    topics = {k: v for k, v in (r.get("topics") or {}).items() if v}
+    return Ros2Source(
+        cfg, ctx, topics=(topics or None), world_frame=r.get("world_frame"), camera_frame=r.get("camera_frame"),
+        assume_aligned=bool(r.get("assume_aligned", False)), pair_tolerance_s=float(r.get("pair_tolerance_s", 0.02)),
+        tf_extrapolation_s=float(r.get("tf_extrapolation_s", 0.05)), tf_wait_s=float(r.get("tf_wait_s", 0.5)),
+        qos=str(r.get("qos", "auto")), node_name=str(r.get("node_name", "rtsm")),
+        discovery_timeout_s=float(r.get("discovery_timeout_s", 10.0)), ready_timeout_s=float(r.get("ready_timeout_s", 10.0)),
+        session_id=r.get("session_id"),
+    )
+
+
 def replay_source(cfg: dict, ctx: SourceContext, **options: Any):
     """The recording replayer (``rtsm/io/replayer.py``). Options:
     ``recording_dir`` (required), ``replay_speed`` (default 1.0). The replayer
@@ -153,6 +170,7 @@ _BUILTIN: Dict[str, SourceFactory] = {
     "zeromq": zeromq_source,
     "replay": replay_source,
     "bag": bag_source,
+    "ros2": ros2_source,
 }
 _REGISTERED: Dict[str, SourceFactory] = {}
 

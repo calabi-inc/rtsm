@@ -364,7 +364,8 @@ scripts/
 - [x] Diagnostics ledgers + `rtsm eval` (ROS 1 / rosbag2 / MCAP bags, headless runs, a report with same-input floors)
 - [x] Python client (`rtsm.client`)
 - [x] Your own detector's `vision_msgs` detections through the memory (`segmentation.backend: external`)
-- [ ] More protocols (ROS 2 live node, gRPC)
+- [x] ROS 2 live source, minimal (`--ros2`: rclpy subscriber on the same ingest front-end as bags; `rtsm ros2 probe`)
+- [ ] More protocols (an `rtsm_ros` package with launch files, gRPC)
 - [ ] LLM integration for high-level queries
 - [x] Docker image (`ghcr.io/calabi-inc/rtsm`, CUDA-ready, published per release)
 

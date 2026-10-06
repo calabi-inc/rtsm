@@ -97,6 +97,8 @@ rtsm-mcp = "rtsm.io.mcp_server:main_sync"
 websocket = "rtsm.io.sources:websocket_source"
 zeromq = "rtsm.io.sources:zeromq_source"
 replay = "rtsm.io.sources:replay_source"
+bag = "rtsm.io.sources:bag_source"
+ros2 = "rtsm.io.sources:ros2_source"
 
 [build-system]
 requires = ["setuptools>=64", "wheel"]

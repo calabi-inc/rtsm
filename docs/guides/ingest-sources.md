@@ -33,6 +33,61 @@ It never decodes pixels, never applies keyframe or throttle logic, never touches
 
 The adapter then calls `fe.admit(raw)` (or `fe.offer(raw)` = admit + enqueue). `admit` returns the `FramePacket` to enqueue, `None` when the chain dropped the frame (the drop line is already written), and re-raises after writing a `parse_error` line when the pose or a payload fails to parse: the adapter logs and continues, as the receivers always did. Transport-level drops the front-end never saw (malformed framing, no camera frame to pair with) are reported with `fe.reject(reason, ...)` so the frame-flow trace stays complete.
 
+## ROS 2 (live)
+
+`io.receiver: ros2` (or `python -m rtsm --ros2`) subscribes to a live ROS 2 graph. It is the bag reader's twin on the same ingest front-end: the topic roles are found by the [bag reader's rules](bags.md#what-the-reader-needs-and-how-it-finds-it) or set under `io.ros2.topics`, the `sensor_msgs` encodings go onto the codec layer without decoding, RGB and depth are paired by header stamp, the camera pose is composed from `/tf` (or odometry) at the image stamp, depth must be registered to the RGB, and the refusals carry the same codes. A frame built live is the frame the bag reader builds from a recording of the same stream; `tests/test_ros2_source.py` pins that on `session1_bag`.
+
+**Environment.** rclpy only exists inside a sourced ROS 2 environment on Linux (Humble on Ubuntu 22.04 with Python 3.10, Jazzy on 24.04 with 3.12). Give an isolated venv a view of the ROS packages through a `.pth` file rather than `--system-site-packages`: the latter also pulls in apt's numpy and scipy and anything under `~/.local`, and a numpy-1 build next to torch's numpy 2 ends in `_ARRAY_API not found`.
+
+```bash
+source /opt/ros/humble/setup.bash                                  # or jazzy
+python3 -m venv ~/rtsm-env                                         # add --without-pip and run get-pip.py if ensurepip is missing
+source ~/rtsm-env/bin/activate
+printf '%s
+' /opt/ros/$ROS_DISTRO/local/lib/python3.*/dist-packages /opt/ros/$ROS_DISTRO/lib/python3.*/site-packages   > "$(python -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')/ros.pth"
+export PYTHONNOUSERSITE=1
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
+pip install "rtsm[gpu,eval]"
+python -c "import rclpy, torch, rtsm; print(torch.cuda.is_available())"
+```
+
+Anywhere else the source refuses at start with a one-line hint. The Windows development box runs none of this; WSL2 with a ROS 2 distribution does. Live runs use `ingest.policy: latest` (the default) or `legacy`; `lossless` is replay-only. To replay one of RTSM's own MCAP recordings into a Humble graph with `ros2 bag play`, convert it to sqlite3 storage with metadata version 5 first: `rosbags-convert --src <bag> --dst <out> --dst-storage sqlite3 --dst-version 5`.
+
+**Before the models load: `rtsm ros2 probe`.** The two classic silent failures of a ROS 2 subscriber are a QoS mismatch (the callback never fires) and a TF chain that never reaches the camera frame. The probe listens for a few seconds and prints what the node would use:
+
+```text
+$ rtsm ros2 probe --seconds 5
+ros2 probe (5.0 s): OK
+topics:
+  rgb        /camera/color/image_raw  [image topic matching color|rgb|image_raw and not depth|ir|mono|left|right]  subscribe reliable/volatile depth 100  (offered: rosbag2_player:reliable)
+  depth      /camera/depth/image_rect_raw  [image topic matching depth (aligned_depth_to_color preferred)]  subscribe reliable/volatile depth 100  (offered: rosbag2_player:reliable)
+  rgb_info   /camera/color/camera_info  [...]
+  tf         /tf  [TF message topic]  subscribe reliable/volatile depth 200  (offered: rosbag2_player:reliable)
+camera info: rgb seen, depth not seen
+tf: roots ['world']; 1 hops; chain world -> camera_color_optical_frame; pose tf
+registration: no depth CameraInfo: registration assumed
+```
+
+Exit code 0 when the stream is usable, 1 with the refusal otherwise, 2 without rclpy. `--json` prints everything as data; `--topic ROLE=TOPIC` overrides a role for the probe only.
+
+**Probe reference.**
+
+| option | meaning |
+|---|---|
+| `--seconds N` | how long to listen for CameraInfo and TF after discovery (default 5) |
+| `--qos {auto, reliable, best_effort}` | the subscription reliability to evaluate (default `auto`) |
+| `--topic ROLE=TOPIC` | override a role for this probe only (repeatable) |
+| `--world-frame`, `--camera-frame`, `--assume-aligned` | as the `io.ros2` keys |
+| `--json` | the full result as data: `topics`, `msgtypes`, `qos` (chosen + offered per role), `advertised`, `camera_info_seen`, `tf` (roots, hops, chain, world/camera frame, pose kind), `registration`, `refusal`, `ok` |
+
+Exit codes: 0 the stream is usable, 1 not usable (the refusal is printed), 2 rclpy not importable.
+
+**QoS.** `io.ros2.qos: auto` reads the publishers' offered QoS per topic and subscribes reliable when any publisher is reliable, best-effort otherwise; `reliable` and `best_effort` force it. `tf_static` always subscribes transient-local. Image subscriptions keep a depth of 100 so a reliable publisher is not dropped while the lane admits; TF keeps 200.
+
+**Threads and timing.** The executor only appends messages to a queue; a worker thread pairs, looks the pose up, admits and enqueues, so a lossless lane that blocks never stalls the executor. A pair whose TF has not arrived waits up to `io.ros2.tf_wait_s` (0.5 s) with later frames behind it, then counts as `pose_missing`. Pairs resolved before the camera info, the world frame and the registration check are known are held (256) and flushed in order. Discovery waits `discovery_timeout_s` for the RGB, depth and CameraInfo topics to be advertised and `ready_timeout_s` for a CameraInfo message and a moving TF chain, then refuses with the reasons.
+
+**What it is not.** Not an `ament` package, no launch files, no publishing of RTSM's outputs onto ROS topics, no ROS 2 container in CI. Those are the next step when a live-ROS user needs them; the source's stats (`frames_seen`, `paired`, `unpaired_rgb`, `pose_missing`, `enqueued`, the chosen QoS) are on `/stats` like the bag source's.
+
 ## Writing a source
 
 ```python
