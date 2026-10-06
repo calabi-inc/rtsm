@@ -123,6 +123,18 @@ Open the visualization frontend in your browser. The 3D viewer connects to the W
 
 ---
 
+### Navigating the 3D view
+
+The View row has a mouse-scheme switch, remembered by the browser:
+
+| scheme | orbit | pan | zoom |
+|---|---|---|---|
+| three.js (default) | left drag | right drag, or Shift + left drag | wheel, middle drag |
+| Blender | middle drag (Alt + left drag on a trackpad) | Shift + middle drag; Shift + wheel up/down, Ctrl + wheel left/right | wheel; Ctrl + middle drag |
+| Maya | Alt + left drag | Alt + middle drag | wheel; Alt + right drag |
+
+In every scheme the wheel zooms towards the cursor, an orbit pivots at the depth under the cursor without moving the view, and a double-click sets the pivot on a point. Keys: numpad 1 / 3 / 7 for front / right / top (Ctrl for the opposite side), 9 for the opposite side of the current view, 2 / 4 / 6 / 8 to orbit 15°, **F** to frame the selected object (everything when nothing is selected), **Home** to frame everything, arrows to pan, **H** for the key panel. The up axis stays locked (turntable); use Flip X / Y / Z when a recording's world is Z-up. There is no orthographic view.
+
 ## 7. Record and Replay Sessions
 
 Record a live session for later replay and benchmarking:
