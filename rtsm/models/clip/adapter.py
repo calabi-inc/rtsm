@@ -29,6 +29,16 @@ class CLIPAdapter:
     def encode_images_batch(self, images, batch_size=16):  # images: paths, PIL, or np.ndarrays
         return _encode_images_batch(images, self.artifacts.model, self.artifacts.preprocess, device=self.device, batch_size=batch_size, keep_on_device=True)
 
+    def close(self) -> None:
+        """Release the model at shutdown: drop the references so the weights can
+        be collected and give the CUDA cache back; idempotent."""
+        self.artifacts = ClipArtifacts(model=None, preprocess=None, tokenizer=None)
+        if torch.cuda.is_available():
+            try:
+                torch.cuda.empty_cache()
+            except Exception:  # noqa: BLE001 -- a failing cache release must not fail shutdown
+                pass
+
     def encode_text(self, text: str) -> np.ndarray:
         """Encode text query to L2-normalized embedding for semantic search."""
         tokens = self.artifacts.tokenizer([text]).to(self.device)

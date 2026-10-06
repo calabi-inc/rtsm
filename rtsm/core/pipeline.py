@@ -1380,15 +1380,15 @@ class Pipeline:
                 close()
             except Exception:
                 logger.warning("Failed to close ingest queue during shutdown", exc_info=True)
-        # free heavy models if desired
-        try:
-            self.segmenter.close()
-        except Exception:
-            logger.warning("Failed to close segmenter during shutdown", exc_info=True)
-        try:
-            self.clip.close()
-        except Exception:
-            logger.warning("Failed to close CLIP adapter during shutdown", exc_info=True)
+        # free heavy models; an adapter without close() (third-party, stub) is not an error
+        for name, obj in (("segmenter", self.segmenter), ("CLIP adapter", self.clip)):
+            close_model = getattr(obj, "close", None)
+            if not callable(close_model):
+                continue
+            try:
+                close_model()
+            except Exception:
+                logger.warning("Failed to close %s during shutdown", name, exc_info=True)
         try:
             self._event_log.close()
         except Exception:
