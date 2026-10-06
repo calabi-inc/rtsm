@@ -10,10 +10,8 @@ All notable changes to `rtsm`. The format follows [Keep a Changelog](https://kee
 - The report's method notes define *engine-confirmed*, *re-identified* (a reassociation) and the fingerprint.
 - The eval guide names the run-directory layout, the schemas and the `rtsm.evaluation` modules as the surface other tools build on.
 - Observation ledger: `detector_label` / `detector_score`, the backend's own per-mask label and raw confidence (additive).
+- `segmentation.labels.prompt_free_primary` (`detector`, the default and the behaviour so far, or `classifier`): under a prompt-free detector (`dual`, `yoloe` with `-pf` weights) the model's own class name leads an object's scored labels by default; `classifier` keeps it out so the CLIP vocabulary classifier's label decides. A mitigation for weights that label badly: the `yoloe-26s-seg-pf.pt` that ultralytics 8.4.31 downloads from its v8.4.0 assets named shelves `heat` and boxes `razor blade` on TUM fr3 (82 % of tracks disagreeing on label), while the March export the dev box uses labels the same scene `bottle`, `cup`, `keyboard`. `SegmentationResult.label_source` records where a backend's labels come from. No default behaviour changes.
 - Provenance: `resolved.model_files` (every `*model_path` in the config with the file's size and sha256, or `exists: false`) and `resolved.hf_models` (every `*model_id`). The config fingerprint covers the path, not the file: two runs with one fingerprint and one commit differed because one checkout had no `model_store/` and ultralytics downloaded other `yoloe-26s-seg-pf.pt` weights, whose labels are unusable (`heat`, `array`, `Prague Castle` at 0.86 confidence).
-
-### Changed
-- Under a prompt-free detector (`dual`, `yoloe` with the packaged `-pf` weights) the detector's class name no longer enters an object's scored labels: its confidence outscored every CLIP cosine and became the primary label, which named shelves `heat` and boxes `razor blade` on an office recording. Labels now come from the CLIP vocabulary classifier; the detector's name is recorded per observation. Prompted backends (`grounded_sam2`, prompted YOLOE, external detectors) are unchanged.
 
 ## [0.2.1] - 2026-10-04
 

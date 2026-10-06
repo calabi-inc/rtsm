@@ -357,7 +357,7 @@ def render_markdown(agg: dict, ref: dict, *, resolved: Optional[dict], input_nam
 
     L.append("## Method notes")
     L.append("")
-    L.append("- Everything above is computed from the run's ledgers (`events.jsonl`: pose / obs / view lines, the frame-flow trace) and the final memory in `summary.json`. No ground truth, no labels required; label numbers use each observation's top-1 scored label (the detector's when it comes from the supplied vocabulary, otherwise the CLIP vocabulary classifier's).")
+    L.append("- Everything above is computed from the run's ledgers (`events.jsonl`: pose / obs / view lines, the frame-flow trace) and the final memory in `summary.json`. No ground truth, no labels required; label numbers use each observation's top-1 scored label (the detector's label first; under `segmentation.labels.prompt_free_primary: classifier` a prompt-free model's name stays out and the CLIP vocabulary classifier's label leads).")
     L.append("- Objects = every id the associator matched or created; a **transient** object was created and is not in the final memory (a proto that expired, or one the memory evicted).")
     L.append("- **Engine-confirmed** (\"confirmed\" above) means the memory promoted the object under its own rules (hits, stability, view bins); it is not ground-truth confirmation. **Re-identified** means the associator matched an existing object (a reassociation), not a verified identity.")
     L.append("- The fingerprint is the sha256 of the sorted multiset of (label_primary, xyz rounded to 3 decimals, hits, confirmed), 16 hex characters: identical fingerprints mean the same final memory at that resolution, not bit-identical runs.")

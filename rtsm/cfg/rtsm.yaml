@@ -61,6 +61,14 @@ segmentation:
     text_threshold: 0.15             # GDINO text matching threshold
     vocab: null                      # null = use default indoor vocab (40+ classes)
 
+  # Object labels under a prompt-free detector (dual / yoloe with -pf weights). The model's own class name leads an
+  # object's scored labels by default ("detector"); "classifier" keeps it out so the CLIP vocabulary classifier's label
+  # decides, a mitigation when the weights in use label badly (the v8.4.0 yoloe-26s-seg-pf.pt asset that ultralytics
+  # 8.4.31 downloads named shelves 'heat'; the March export labels the same scene 'bottle', 'cup', 'keyboard').
+  # The detector's own name is recorded per observation (detector_label) either way.
+  labels:
+    prompt_free_primary: detector     # detector | classifier
+
   # Dual-confirmation settings (only used when backend: dual)
   dual:
     iou_confirm_threshold: 0.40       # IoU to consider FastSAM+YOLOE masks "confirmed"

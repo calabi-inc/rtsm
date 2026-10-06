@@ -48,7 +48,8 @@ class SegmentationResult:
     # Where the detection labels come from (2026-10-05). "vocab": drawn from the vocabulary rtsm supplied (grounded
     # phrases, prompted classes, an external detector's names). "builtin": the model's own built-in vocabulary
     # (prompt-free YOLOE, 4 585 categories, a tag list that includes abstract words). None: unspecified, treated as "vocab".
-    # The pipeline keeps a "builtin" label out of the scored label list (see rtsm.core.pipeline.apply_detection_labels).
+    # Under segmentation.labels.prompt_free_primary: classifier the pipeline keeps a "builtin" label out of the scored
+    # label list (see rtsm.core.pipeline.apply_detection_labels); by default it leads, as any detector label does.
     label_source: Optional[str] = None
 
     # Pre-merge raw model output counts (populated by DualConfirmationSegmenter)

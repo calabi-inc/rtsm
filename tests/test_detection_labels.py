@@ -1,8 +1,9 @@
 """The backend label merge (``rtsm.core.pipeline.apply_detection_labels``) and the dual segmenter's ``label_source``.
 
 A label drawn from the supplied vocabulary (grounded phrases, prompted classes) goes first in the scored list with
-its raw confidence. A label from a model's own built-in vocabulary (prompt-free YOLOE) stays out of the scored list,
-so the CLIP vocabulary classifier's labels decide the primary label, and is kept as ``detector_label`` for the ledger.
+its raw confidence, and so does a prompt-free model's own label by default (``prompt_free_primary="detector"``). Under
+``prompt_free_primary="classifier"`` the prompt-free label stays out of the scored list, so the CLIP vocabulary
+classifier's labels decide the primary label. The detector's label is kept as ``detector_label`` for the ledger either way.
 """
 from types import SimpleNamespace
 
@@ -30,12 +31,23 @@ def test_vocab_label_goes_first_with_its_raw_confidence():
     assert c.detector_label == "tissue box" and c.detector_score == 0.62 and c.label_unscored is None
 
 
-def test_builtin_label_stays_out_of_the_scored_list():
+def test_builtin_label_leads_by_default():
     c = _cand(0, [("shelf", 0.23), ("box", 0.20)])
-    apply_detection_labels([c], _seg(["heat"], [0.71], "builtin"), unscored_prior=1.0)
+    apply_detection_labels([c], _seg(["bottle"], [0.61], "builtin"), unscored_prior=1.0)
+    assert c.label_topk[0] == ("bottle", 0.61) and c.label_topk[1:] == [("shelf", 0.23), ("box", 0.20)]
+    assert c.detector_label == "bottle" and c.detector_score == 0.61
+
+
+def test_builtin_label_stays_out_under_classifier_mode():
+    c = _cand(0, [("shelf", 0.23), ("box", 0.20)])
+    apply_detection_labels([c], _seg(["heat"], [0.71], "builtin"), unscored_prior=1.0, prompt_free_primary="classifier")
     assert c.label_topk == [("shelf", 0.23), ("box", 0.20)]            # the vocabulary classifier's labels stand
     assert c.detector_label == "heat" and c.detector_score == 0.71     # kept for the observation ledger
     assert getattr(c, "label_unscored", None) is None
+    # a vocabulary label is unaffected by the mode
+    v = _cand(0, [("box", 0.21)])
+    apply_detection_labels([v], _seg(["tissue box"], [0.62], "vocab"), unscored_prior=1.0, prompt_free_primary="classifier")
+    assert v.label_topk[0] == ("tissue box", 0.62)
 
 
 def test_unknown_source_behaves_as_vocab():
@@ -47,7 +59,7 @@ def test_unknown_source_behaves_as_vocab():
 def test_base_labels_are_used_when_detection_labels_are_absent():
     c = _cand(0, [("cup", 0.3)])
     seg = SimpleNamespace(detection_labels=None, label_confidence=None, labels=["heat"], scores=torch.tensor([0.9]), label_source="builtin")
-    apply_detection_labels([c], seg, unscored_prior=1.0)
+    apply_detection_labels([c], seg, unscored_prior=1.0, prompt_free_primary="classifier")
     assert c.label_topk == [("cup", 0.3)] and c.detector_label == "heat" and c.detector_score == pytest.approx(0.9)
     seg2 = SimpleNamespace(detection_labels=None, label_confidence=None, labels=["mug"], scores=torch.tensor([0.9]), label_source="vocab")
     apply_detection_labels([c], seg2, unscored_prior=1.0)

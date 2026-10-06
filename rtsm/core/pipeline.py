@@ -60,13 +60,13 @@ class Candidate:
     # destroying all context.
     crop_hires: Optional[np.ndarray] = None
     # The segmentation backend's own per-mask label and raw confidence, whatever its vocabulary (2026-10-05).
-    # Recorded in the observation ledger; present in label_topk only when the backend's labels come from the
-    # supplied vocabulary (see apply_detection_labels).
+    # Recorded in the observation ledger; absent from label_topk only for a prompt-free backend under
+    # segmentation.labels.prompt_free_primary: classifier (see apply_detection_labels).
     detector_label: Optional[str] = None
     detector_score: Optional[float] = None
 
 
-def apply_detection_labels(cands, seg, unscored_prior):
+def apply_detection_labels(cands, seg, unscored_prior, prompt_free_primary="detector"):
     """Merge the segmentation backend's per-mask label into each candidate's scored label list.
 
     The detection head's label goes ahead of the CLIP vocabulary-classifier labels when it was drawn from the
@@ -75,11 +75,13 @@ def apply_detection_labels(cands, seg, unscored_prior):
     GDINO-detected 'tissue box' kept only the classifier's 'card box').
 
     A label from a model's own built-in vocabulary (``seg.label_source == "builtin"``: prompt-free YOLOE, 4 585
-    categories including abstract words) is NOT merged. Its confidence (0.3-0.9) outscores every CLIP cosine in the
-    memory's label accumulation (max at creation, EWMA after) and would become the primary label; on an office
-    recording that named shelves 'heat' and boxes 'razor blade' (2026-10-05). The vocabulary classifier's labels
-    stand, and the detector's label is kept on the candidate as ``detector_label`` / ``detector_score`` for the
-    observation ledger.
+    categories including abstract words) is merged the same way by default (``prompt_free_primary="detector"``): with
+    the known-good weights those names are specific and sensible (bottle, cup, keyboard, file cabinet). Under
+    ``prompt_free_primary="classifier"`` it is NOT merged: its confidence (0.3-0.9) outscores every CLIP cosine in the
+    memory's label accumulation (max at creation, EWMA after) and would become the primary label, and with weights
+    that label badly (the v8.4.0 yoloe-26s-seg-pf.pt asset named shelves 'heat' and boxes 'razor blade' on an office
+    recording, 2026-10-05) the vocabulary classifier's labels are the better primary. Either way the detector's label
+    is kept on the candidate as ``detector_label`` / ``detector_score`` for the observation ledger.
 
     Confidence is the RAW measured value; ``unscored_prior`` applies only when the backend reports none, flagged
     through ``label_unscored`` so the ledger records score: null for it. A floor here would saturate label_scores
@@ -94,7 +96,7 @@ def apply_detection_labels(cands, seg, unscored_prior):
         det_conf = ([float(s) for s in seg.scores] if getattr(seg, "scores", None) is not None else None)
     if det_labels is None:
         return
-    builtin = getattr(seg, "label_source", None) == "builtin"
+    builtin = (getattr(seg, "label_source", None) == "builtin") and prompt_free_primary == "classifier"
     for c in cands:
         src_idx = c.stats.idx  # original mask index from segmentation output
         if not (src_idx < len(det_labels) and det_labels[src_idx]):
@@ -260,6 +262,13 @@ class Pipeline:
         # 0.5 keeps the historical substitution for the model backends; the external backend's prior is configurable
         # (the observation ledger writes score: null for such a label either way).
         _seg = cfg.get("segmentation") or {}
+        # Which label leads an object's scored labels under a prompt-free detector (2026-10-05): "detector" keeps the
+        # model's own class name first (the behaviour so far; sensible with the known-good weights); "classifier" keeps
+        # it out so the CLIP vocabulary classifier's label decides, a mitigation when the weights in use label badly
+        # (the v8.4.0 yoloe-26s-seg-pf.pt asset). The detector's name is recorded per observation either way.
+        self._prompt_free_primary = str((_seg.get("labels") or {}).get("prompt_free_primary", "detector")).lower()
+        if self._prompt_free_primary not in ("detector", "classifier"):
+            raise ValueError(f"segmentation.labels.prompt_free_primary must be 'detector' or 'classifier', got {self._prompt_free_primary!r}")
         self._unscored_label_prior = (float((_seg.get("external") or {}).get("unscored_label_prior", 1.0))
                                       if str(_seg.get("backend", "")).lower() == "external" else 0.5)
         # Frame-flow heartbeat read by the watchdog (see rtsm/core/watchdog.py)
@@ -1329,7 +1338,7 @@ class Pipeline:
         # the supplied vocabulary; a prompt-free model's own label stays out of the scored list (module function,
         # unit-tested; the history of this block is in its docstring). Sources: dual/YOLOE fill
         # detection_labels/label_confidence; grounded_sam2 and standalone yoloe fill the base labels/scores fields.
-        apply_detection_labels(cands, getattr(self, '_last_seg_result', None), self._unscored_label_prior)
+        apply_detection_labels(cands, getattr(self, '_last_seg_result', None), self._unscored_label_prior, self._prompt_free_primary)
 
         # Single boundary cast: move whole batch to CPU numpy float32 for association/WM
         try:
