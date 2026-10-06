@@ -154,6 +154,9 @@ segmentation:
 !!! note "AGPL backends require `ultralytics`"
     Backends using FastSAM or YOLOE require the `ultralytics` package (AGPL-3.0). Install with: `pip install "rtsm[gpu-ultralytics]"`
 
+!!! note "Labels under a prompt-free detector"
+    The packaged YOLOE weights are prompt-free: they name objects from their own 1200+ built-in categories, not from your vocabulary. Under `dual` and `yoloe` an object's labels therefore come from the CLIP vocabulary classifier (`rtsm/cfg/clip/vocab.yaml`), and the detector's own name is kept on each observation as `detector_label` in the ledger. Under `grounded_sam2` the grounded phrase is the primary label.
+
 ### Backend-Specific Settings
 
 Each backend has its own configuration block:

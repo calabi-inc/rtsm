@@ -192,6 +192,7 @@ class YOLOESegmenter(SegmentationAdapter):
             class_ids=class_ids,
             embeddings=None,
             vocab=vocab if not self._is_prompt_free else None,
+            label_source=("builtin" if self._is_prompt_free else "vocab"),
         )
 
     def warmup(self) -> None:

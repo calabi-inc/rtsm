@@ -9,6 +9,10 @@ All notable changes to `rtsm`. The format follows [Keep a Changelog](https://kee
 - Provenance: `resolved.git_dirty` and `resolved.tree_digest` (a digest of `git diff HEAD` when the checkout has uncommitted tracked changes); the report's header marks a dirty commit.
 - The report's method notes define *engine-confirmed*, *re-identified* (a reassociation) and the fingerprint.
 - The eval guide names the run-directory layout, the schemas and the `rtsm.evaluation` modules as the surface other tools build on.
+- Observation ledger: `detector_label` / `detector_score`, the backend's own per-mask label and raw confidence (additive).
+
+### Changed
+- Under a prompt-free detector (`dual`, `yoloe` with the packaged `-pf` weights) the detector's class name no longer enters an object's scored labels: its confidence outscored every CLIP cosine and became the primary label, which named shelves `heat` and boxes `razor blade` on an office recording. Labels now come from the CLIP vocabulary classifier; the detector's name is recorded per observation. Prompted backends (`grounded_sam2`, prompted YOLOE, external detectors) are unchanged.
 
 ## [0.2.1] - 2026-10-04
 

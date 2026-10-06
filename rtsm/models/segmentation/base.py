@@ -45,6 +45,12 @@ class SegmentationResult:
     detection_labels: Optional[List[str]] = None      # [N] YOLOE label per mask (None if fastsam_only)
     label_confidence: Optional[List[float]] = None    # [N] YOLOE detection confidence per mask
 
+    # Where the detection labels come from (2026-10-05). "vocab": drawn from the vocabulary rtsm supplied (grounded
+    # phrases, prompted classes, an external detector's names). "builtin": the model's own built-in vocabulary
+    # (prompt-free YOLOE, 1200+ categories including abstract words). None: unspecified, treated as "vocab".
+    # The pipeline keeps a "builtin" label out of the scored label list (see rtsm.core.pipeline.apply_detection_labels).
+    label_source: Optional[str] = None
+
     # Pre-merge raw model output counts (populated by DualConfirmationSegmenter)
     fastsam_raw_count: Optional[int] = None
     yoloe_raw_count: Optional[int] = None

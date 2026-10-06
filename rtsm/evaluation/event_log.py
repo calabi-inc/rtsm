@@ -89,7 +89,7 @@ additive):
             px_err) plus n_nearby / n_gate_survivors / max_cos so a spawn can
             be audited against the gates (matched_without_scoring marks a
             match the associator's fallback path made without gating this
-            candidate: no residuals), label_topk, priority, the MaskStats
+            candidate: no residuals), label_topk, detector_label / detector_score, priority, the MaskStats
             numbers, and the frame context (ids, epoch, lane, keyframe origin,
             camera pose). Join to `frame` / `dequeue` on t_sensor_ns.
   view      LEDGER (P2 stage C): one per PROCESSED frame, written BEFORE
@@ -294,7 +294,9 @@ class ObservationEvent:
     n_gate_survivors: int = 0                 # of those, how many passed the distance / z / reprojection gates
     max_cos: Optional[float] = None           # best cosine seen among scored survivors, passed or not
     matched_without_scoring: bool = False     # matched via a stale best_id (associator fallback path; residuals absent)
-    label_topk: Optional[List[Dict[str, Any]]] = None   # [{label, score}, ...] (detection label first); records, not pairs, so Parquet can type it
+    label_topk: Optional[List[Dict[str, Any]]] = None   # [{label, score}, ...] (detection label first when it comes from the supplied vocabulary); records, not pairs, so Parquet can type it
+    detector_label: Optional[str] = None      # the backend's own per-mask label, whatever its vocabulary (additive, 2026-10-05); absent from label_topk for a prompt-free model
+    detector_score: Optional[float] = None    # its raw confidence; None when the backend reports none
     priority: float = 0.0
     mask: Optional[Dict[str, Any]] = None     # MaskStats numbers (area_px, bbox, coverage, ..., centroid_px)
     kind: str = "obs"
