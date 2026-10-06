@@ -596,7 +596,11 @@ class Ros2Source:
         t.start()
         logger.info("[ros2] starting node %r (qos %s, discovery timeout %.0f s)", self._node_name, self._qos_mode, self._discovery_timeout_s)
 
-    def stop(self) -> None:
+    def stop(self, timeout: float = 5.0) -> None:
+        """Signal every loop, then wait (bounded) for the setup thread's teardown:
+        node destroyed and the rclpy context shut down BEFORE the interpreter
+        finalises, or the DDS threads die under the C++ runtime and the process
+        aborts on exit."""
         self._stop_event.set()
         q = self._ctx.ingest_queue
         if getattr(q, "policy", None) == "lossless":
@@ -608,6 +612,8 @@ class Ros2Source:
                 self._executor.shutdown(timeout_sec=1.0)
         except Exception:  # noqa: BLE001
             pass
+        if self._threads and not self._done.wait(timeout=timeout):
+            logger.warning("[ros2] teardown did not finish within %.0f s", timeout)
 
     def wait(self, timeout: Optional[float] = None) -> bool:
         return self._done.wait(timeout=timeout)

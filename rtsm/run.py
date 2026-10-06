@@ -517,6 +517,17 @@ def main(argv: "list[str] | None" = None):
     except KeyboardInterrupt:
         pass
     finally:
+        # Stop the ingest source before the interpreter finalises: a live rclpy
+        # node left running tears its DDS threads down under the C++ runtime
+        # ("terminate called without an active exception", found by the ros2
+        # gate). Every source has stop(); the ones with a teardown have wait().
+        try:
+            source.stop()
+            wait = getattr(source, "wait", None)
+            if callable(wait):
+                wait(timeout=5.0)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[run] source.stop() failed: %s", e)
         if recorder is not None:
             recorder.close()
         event_log.close()   # no-op if the pipeline already closed it
