@@ -10,7 +10,7 @@ All notable changes to `rtsm`. The format follows [Keep a Changelog](https://kee
 - Provenance: `resolved.git_dirty` and `resolved.tree_digest` (a digest of `git diff HEAD` when the checkout has uncommitted tracked changes); the report's header marks a dirty commit.
 - The report's method notes define *engine-confirmed*, *re-identified* (a reassociation) and the fingerprint.
 - The eval guide names the run-directory layout, the schemas and the `rtsm.evaluation` modules as the surface other tools build on.
-- Dashboard navigation (`--viz`): a mouse-scheme switch (three.js default, Blender, Maya) kept in the browser, zoom to the cursor, inertia, orbit pivot at the depth under the cursor, numpad view presets (1 / 3 / 7, Ctrl for the opposite side, 9 opposite, 2 / 4 / 6 / 8 orbit 15°), frame the selected object (F) or everything (Home), arrow-key panning, and a key-binding panel (H). Orthographic view is not provided.
+- Dashboard navigation (`--viz`): a visible rotation-centre anchor with a drag gizmo, double-click placement and a show/hide button (P); a mouse-scheme switch (three.js default, Blender, Maya) kept in the browser; zoom to the cursor, inertia, orbit pivot at the depth under the cursor while the anchor is hidden, numpad view presets (1 / 3 / 7, Ctrl for the opposite side, 9 opposite, 2 / 4 / 6 / 8 orbit 15°), frame the selected object (F) or everything (Home), arrow-key panning, and a key-binding panel (H). Orthographic view is not provided.
 
 ### Changed
 - The bag reader's world-frame rule is a shared function (`choose_world_frame`), used by bags and the live source alike.

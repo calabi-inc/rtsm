@@ -1606,7 +1606,7 @@ document.addEventListener('keyup', (e) => {
 
 // Viewport navigation: schemes, zoom to cursor, inertia, pivot under the cursor, presets, framing, help
 const nav = installNavigation({
-  camera, controls, dom: renderer.domElement,
+  camera, controls, scene, dom: renderer.domElement,
   pointSources: () => [...meshes.values(), ...(currentPoints ? [currentPoints] : [])],
   markers: () => [...objectMarkers.values()],
   selectedPoint: () => {
@@ -1618,42 +1618,10 @@ const nav = installNavigation({
   },
   helpEl: document.getElementById('nav-help'),
   schemeSelect: document.getElementById('navScheme') as HTMLSelectElement | null,
+  pivotButton: document.getElementById('navPivot') as HTMLButtonElement | null,
 })
 document.getElementById('navFrame')?.addEventListener('click', () => { if (!nav.frameSelected()) nav.frameAll() })
 document.getElementById('navHelp')?.addEventListener('click', () => nav.toggleHelp())
-
-// Double-click to set orbit focus
-const raycaster = new THREE.Raycaster()
-const mouse = new THREE.Vector2()
-
-renderer.domElement.addEventListener('dblclick', (event) => {
-  const rect = renderer.domElement.getBoundingClientRect()
-  mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1
-  mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1
-  raycaster.setFromCamera(mouse, camera)
-
-  // Check static cloud
-  if (currentPoints) {
-    raycaster.params.Points.threshold = 0.01
-    const hits = raycaster.intersectObject(currentPoints, false)
-    if (hits.length > 0) {
-      controls.target.copy(hits[0].point)
-      controls.update()
-      return
-    }
-  }
-
-  // Check streamed clouds
-  for (const pts of meshes.values()) {
-    raycaster.params.Points.threshold = 0.01
-    const hits = raycaster.intersectObject(pts, false)
-    if (hits.length > 0) {
-      controls.target.copy(hits[0].point)
-      controls.update()
-      return
-    }
-  }
-})
 
 // ============================================================================
 // ANIMATION LOOP

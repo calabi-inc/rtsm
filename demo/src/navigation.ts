@@ -1,26 +1,35 @@
 /**
  * Viewport navigation on top of three.js OrbitControls: mouse schemes (three.js default, Blender, Maya),
- * zoom to the cursor, inertia, orbit pivot under the cursor, numpad view presets, frame-all / frame-selected
- * with a short tween, keyboard panning, and a key-binding help panel.
+ * zoom to the cursor, inertia, a visible rotation-centre anchor that can be dragged across the model or placed
+ * with a double-click, orbit pivot at the depth under the cursor when the anchor is hidden, numpad view presets,
+ * frame-all / frame-selected with a short tween, keyboard panning, and a key-binding help panel.
  *
  * The scheme only changes how the mouse buttons and modifiers map onto OrbitControls' rotate / pan / dolly;
  * the camera model stays a turntable (up axis locked), which is also Blender's default. Orthographic view
  * (Blender numpad 5) is not provided: the rest of the dashboard addresses one PerspectiveCamera.
+ *
+ * The pivot (OrbitControls' target) is the rotation centre. When the anchor is shown it is pinned: it moves only
+ * when you drag it, double-click a point, frame something, or use a preset. When the anchor is hidden the pivot
+ * slides to the depth under the cursor at the start of every orbit (Blender's "auto depth"), so orbiting feels
+ * natural without a visible marker.
  */
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
+import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js'
 
 export type Scheme = 'default' | 'blender' | 'maya'
 
 export interface NavigationDeps {
   camera: THREE.PerspectiveCamera
   controls: OrbitControls
+  scene: THREE.Scene
   dom: HTMLElement
   pointSources: () => THREE.Points[]
   markers: () => THREE.Object3D[]
   selectedPoint: () => THREE.Vector3 | null
   helpEl?: HTMLElement | null
   schemeSelect?: HTMLSelectElement | null
+  pivotButton?: HTMLButtonElement | null
 }
 
 export interface Navigation {
@@ -31,6 +40,9 @@ export interface Navigation {
   frameSelected(): boolean
   preset(name: PresetName): void
   resetView(position: THREE.Vector3, target: THREE.Vector3): void
+  setPivotVisible(v: boolean): void
+  pivotVisible(): boolean
+  placePivot(point: THREE.Vector3): void
   update(): void
   toggleHelp(force?: boolean): void
   helpHtml(): string
@@ -38,22 +50,28 @@ export interface Navigation {
 
 export type PresetName = 'front' | 'back' | 'right' | 'left' | 'top' | 'bottom' | 'opposite'
 
-const STORAGE_KEY = 'rtsm.nav.scheme'
+const STORAGE_SCHEME = 'rtsm.nav.scheme'
+const STORAGE_PIVOT = 'rtsm.nav.pivot'
 const TWEEN_MS = 280
 const ORBIT_STEP = THREE.MathUtils.degToRad(15)
+const ANCHOR_SCREEN_FRAC = 0.014       // anchor radius as a fraction of the camera-to-pivot distance (constant on screen)
 
 const SCHEME_LABEL: Record<Scheme, string> = { default: 'three.js', blender: 'Blender', maya: 'Maya' }
 
 function loadScheme(): Scheme {
   try {
-    const v = localStorage.getItem(STORAGE_KEY)
+    const v = localStorage.getItem(STORAGE_SCHEME)
     if (v === 'default' || v === 'blender' || v === 'maya') return v
   } catch { /* storage unavailable */ }
   return 'default'
 }
 
-function saveScheme(s: Scheme) {
-  try { localStorage.setItem(STORAGE_KEY, s) } catch { /* storage unavailable */ }
+function loadPivotVisible(): boolean {
+  try { return localStorage.getItem(STORAGE_PIVOT) !== 'off' } catch { return true }
+}
+
+function store(key: string, value: string) {
+  try { localStorage.setItem(key, value) } catch { /* storage unavailable */ }
 }
 
 function isTypingTarget(t: EventTarget | null): boolean {
@@ -65,8 +83,31 @@ function isTypingTarget(t: EventTarget | null): boolean {
 
 function easeOutCubic(x: number): number { return 1 - Math.pow(1 - x, 3) }
 
+/** The anchor drawn at the rotation centre: a small sphere with three axis ticks, always on top. */
+function makeAnchor(): THREE.Group {
+  const g = new THREE.Group()
+  g.name = 'nav-pivot-anchor'
+  const sphere = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 12),
+    new THREE.MeshBasicMaterial({ color: 0xffb020, depthTest: false, depthWrite: false, transparent: true, opacity: 0.95 }))
+  sphere.renderOrder = 998
+  g.add(sphere)
+  const ring = new THREE.Mesh(new THREE.RingGeometry(2.2, 2.6, 40),
+    new THREE.MeshBasicMaterial({ color: 0xffb020, depthTest: false, depthWrite: false, transparent: true, opacity: 0.55, side: THREE.DoubleSide }))
+  ring.renderOrder = 998
+  g.add(ring)
+  ;(g as unknown as { ring: THREE.Mesh }).ring = ring
+  const axes: Array<[number, number, number, number]> = [[1, 0, 0, 0xff5555], [0, 1, 0, 0x55ff55], [0, 0, 1, 0x5599ff]]
+  for (const [x, y, z, color] of axes) {
+    const geom = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(-4 * x, -4 * y, -4 * z), new THREE.Vector3(4 * x, 4 * y, 4 * z)])
+    const line = new THREE.Line(geom, new THREE.LineBasicMaterial({ color, depthTest: false, depthWrite: false, transparent: true, opacity: 0.8 }))
+    line.renderOrder = 998
+    g.add(line)
+  }
+  return g
+}
+
 export function installNavigation(deps: NavigationDeps): Navigation {
-  const { camera, controls, dom } = deps
+  const { camera, controls, dom, scene } = deps
   const MOUSE = THREE.MOUSE
   const buttons = controls.mouseButtons as unknown as Record<'LEFT' | 'MIDDLE' | 'RIGHT', THREE.MOUSE | null | undefined>
 
@@ -93,8 +134,54 @@ export function installNavigation(deps: NavigationDeps): Navigation {
 
   function orbitButton(): number { return scheme === 'blender' ? 1 : 0 }
 
-  // ---- pivot under the cursor (Blender "auto depth"): orbit about the surface depth under the pointer, without
-  //      moving the view. The pivot slides along the view axis to the hit depth; the camera does not turn.
+  // ---- the rotation centre: anchor + drag gizmo ---------------------------------------------------
+  const pivot = new THREE.Object3D()
+  pivot.name = 'nav-pivot'
+  pivot.position.copy(controls.target)
+  scene.add(pivot)
+  const anchor = makeAnchor()
+  scene.add(anchor)
+  const gizmo = new TransformControls(camera, dom)
+  gizmo.setMode('translate')
+  gizmo.setSize(0.7)
+  gizmo.attach(pivot)
+  scene.add(gizmo)
+  let dragging = false
+  let visible = loadPivotVisible()
+  const dragDelta = new THREE.Vector3()
+
+  gizmo.addEventListener('dragging-changed', (e: { value?: boolean }) => {
+    dragging = !!e.value
+    controls.enabled = !dragging
+  })
+  // Dragging the anchor moves the rotation centre across the model; the camera translates with it, so the
+  // view does not turn and the model slides under a fixed screen centre.
+  gizmo.addEventListener('objectChange', () => {
+    dragDelta.subVectors(pivot.position, controls.target)
+    controls.target.copy(pivot.position)
+    camera.position.add(dragDelta)
+    controls.update()
+  })
+
+  function setPivotVisible(v: boolean) {
+    visible = v
+    anchor.visible = v
+    gizmo.visible = v
+    gizmo.enabled = v
+    store(STORAGE_PIVOT, v ? 'on' : 'off')
+    if (deps.pivotButton) {
+      deps.pivotButton.textContent = v ? 'Pivot: on' : 'Pivot: off'
+      deps.pivotButton.classList.toggle('primary', v)
+    }
+  }
+
+  /** Put the rotation centre on a point without turning the view: camera and target translate together. */
+  function placePivot(point: THREE.Vector3) {
+    const offset = new THREE.Vector3().subVectors(camera.position, controls.target)
+    moveTo(point.clone().add(offset), point)
+  }
+
+  // ---- raycast under the pointer -----------------------------------------------------------------
   const raycaster = new THREE.Raycaster()
   const ndc = new THREE.Vector2()
   const tmpDir = new THREE.Vector3()
@@ -113,6 +200,7 @@ export function installNavigation(deps: NavigationDeps): Navigation {
     return best ? tmpHit.copy((best as THREE.Intersection).point) : null
   }
 
+  // Auto depth (anchor hidden only): the pivot slides along the view axis to the surface depth under the pointer.
   function pivotToDepthUnderPointer(clientX: number, clientY: number) {
     const hit = hitUnderPointer(clientX, clientY)
     if (!hit) return
@@ -123,6 +211,7 @@ export function installNavigation(deps: NavigationDeps): Navigation {
 
   // ---- per-press mapping from modifiers ---------------------------------------------------------
   dom.addEventListener('pointerdown', (e: PointerEvent) => {
+    if (dragging) return
     applyBaseMapping()
     if (scheme === 'blender') {
       if (e.button === 1) buttons.MIDDLE = e.shiftKey ? MOUSE.PAN : e.ctrlKey ? MOUSE.DOLLY : MOUSE.ROTATE
@@ -131,11 +220,17 @@ export function installNavigation(deps: NavigationDeps): Navigation {
       if (e.altKey) { buttons.LEFT = MOUSE.ROTATE; buttons.MIDDLE = MOUSE.PAN; buttons.RIGHT = MOUSE.DOLLY }
     }
     const mapped = e.button === 0 ? buttons.LEFT : e.button === 1 ? buttons.MIDDLE : buttons.RIGHT
-    if (mapped === MOUSE.ROTATE || mapped === MOUSE.DOLLY) pivotToDepthUnderPointer(e.clientX, e.clientY)
+    if (!visible && (mapped === MOUSE.ROTATE || mapped === MOUSE.DOLLY)) pivotToDepthUnderPointer(e.clientX, e.clientY)
     if (e.button === 1) e.preventDefault()   // no autoscroll cursor on middle press
   }, { capture: true })
 
   dom.addEventListener('pointerup', () => { applyBaseMapping() }, { capture: true })
+
+  // Double-click: put the rotation centre on the point under the cursor (any scheme).
+  dom.addEventListener('dblclick', (e: MouseEvent) => {
+    const hit = hitUnderPointer(e.clientX, e.clientY)
+    if (hit) placePivot(hit)
+  })
 
   // Blender: Shift+wheel pans vertically, Ctrl+wheel pans horizontally; the plain wheel zooms to the cursor.
   dom.addEventListener('wheel', (e: WheelEvent) => {
@@ -151,7 +246,7 @@ export function installNavigation(deps: NavigationDeps): Navigation {
     controls.update()
   }, { capture: true, passive: false })
 
-  // ---- tweened moves (presets, framing) ---------------------------------------------------------
+  // ---- tweened moves (presets, framing, pivot placement) -----------------------------------------
   let tween: { p0: THREE.Vector3; p1: THREE.Vector3; t0: THREE.Vector3; t1: THREE.Vector3; start: number } | null = null
 
   function moveTo(position: THREE.Vector3, target: THREE.Vector3) {
@@ -167,6 +262,11 @@ export function installNavigation(deps: NavigationDeps): Navigation {
       if (k >= 1) tween = null
     }
     controls.update()
+    if (!dragging) pivot.position.copy(controls.target)
+    anchor.position.copy(controls.target)
+    const s = Math.max(1e-4, camera.position.distanceTo(controls.target) * ANCHOR_SCREEN_FRAC)
+    anchor.scale.setScalar(s)
+    ;(anchor as unknown as { ring: THREE.Mesh }).ring.quaternion.copy(camera.quaternion)   // the ring always faces the camera
   }
 
   // ---- framing -------------------------------------------------------------------------------------
@@ -278,6 +378,7 @@ export function installNavigation(deps: NavigationDeps): Navigation {
     else if (digit === '2') orbitStep(0, ORBIT_STEP)
     else if (code === 'NumpadDecimal' || code === 'Period' || code === 'KeyF') { if (!frameSelected()) frameAll() }
     else if (code === 'Home' || code === 'KeyA' && e.shiftKey) frameAll()
+    else if (code === 'KeyP') setPivotVisible(!visible)
     else if (code === 'Slash' && e.shiftKey || code === 'KeyH') toggleHelp()
     else handled = false
     if (handled) e.preventDefault()
@@ -290,13 +391,16 @@ export function installNavigation(deps: NavigationDeps): Navigation {
       blender: ['Middle drag: orbit', 'Shift + middle drag: pan', 'Ctrl + middle drag: zoom', 'Wheel: zoom to the cursor', 'Shift + wheel: pan up / down', 'Ctrl + wheel: pan left / right', 'Alt + left drag: orbit (emulated 3-button mouse)'],
       maya: ['Alt + left drag: tumble', 'Alt + middle drag: track', 'Alt + right drag: dolly', 'Wheel: zoom to the cursor'],
     }
+    const pivotLines = ['Orange anchor = rotation centre. Drag its arrows to move it across the model', 'Double-click a point: put the centre there', 'P or the Pivot button: show / hide the anchor',
+      'Anchor shown: the centre stays where you put it. Anchor hidden: it follows the depth under the cursor when you orbit']
     const keys = ['Numpad 1 / 3 / 7: front / right / top (Ctrl: back / left / bottom)', 'Numpad 9: opposite side', 'Numpad 2 / 4 / 6 / 8: orbit 15°',
       'F or Numpad .: frame the selected object (else everything)', 'Home or Shift+A: frame everything', 'Arrows: pan',
-      'Double-click: set the pivot on a point', 'Z / X / C while dragging: pitch-only / yaw-only / roll', 'H or ?: this panel']
+      'Z / X / C while dragging: pitch-only / yaw-only / roll', 'H or ?: this panel']
     const li = (s: string) => `<li>${s}</li>`
-    return `<div class="nav-help-title">Navigation · ${SCHEME_LABEL[scheme]}</div><div class="nav-help-cols"><div><div class="nav-help-sub">Mouse</div><ul>${mouse[scheme].map(li).join('')}</ul></div>`
+    return `<div class="nav-help-title">Navigation · ${SCHEME_LABEL[scheme]}</div><div class="nav-help-cols"><div><div class="nav-help-sub">Mouse</div><ul>${mouse[scheme].map(li).join('')}</ul>`
+      + `<div class="nav-help-sub">Rotation centre</div><ul>${pivotLines.map(li).join('')}</ul></div>`
       + `<div><div class="nav-help-sub">Keys</div><ul>${keys.map(li).join('')}</ul></div></div>`
-      + `<div class="nav-help-note">Orbit pivots at the depth under the cursor; the view does not jump. The up axis stays locked (turntable); use Flip X / Y / Z for the world's up.</div>`
+      + `<div class="nav-help-note">The up axis stays locked (turntable); use Flip X / Y / Z for the world's up. No orthographic view.</div>`
   }
 
   function toggleHelp(force?: boolean) {
@@ -309,7 +413,7 @@ export function installNavigation(deps: NavigationDeps): Navigation {
 
   function setScheme(s: Scheme) {
     scheme = s
-    saveScheme(s)
+    store(STORAGE_SCHEME, s)
     applyBaseMapping()
     if (deps.schemeSelect && deps.schemeSelect.value !== s) deps.schemeSelect.value = s
     if (deps.helpEl && deps.helpEl.style.display === 'block') deps.helpEl.innerHTML = helpHtml()
@@ -319,11 +423,14 @@ export function installNavigation(deps: NavigationDeps): Navigation {
     deps.schemeSelect.value = scheme
     deps.schemeSelect.addEventListener('change', () => setScheme(deps.schemeSelect!.value as Scheme))
   }
+  deps.pivotButton?.addEventListener('click', () => setPivotVisible(!visible))
   if (deps.helpEl) deps.helpEl.style.display = 'none'
   applyBaseMapping()
+  setPivotVisible(visible)
 
   return {
     get scheme() { return scheme },
-    setScheme, orbitButton, frameAll, frameSelected, preset, resetView, update, toggleHelp, helpHtml,
+    setScheme, orbitButton, frameAll, frameSelected, preset, resetView, setPivotVisible, pivotVisible: () => visible, placePivot,
+    update, toggleHelp, helpHtml,
   }
 }
