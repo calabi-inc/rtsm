@@ -143,18 +143,25 @@ class TestWriterAndConfig:
 
     def test_pose_line_cost_is_small(self, tmp_path):
         """240 lines (one session1 replay) through a real writer: a loose CI bound;
-        the stage-A gate measures the real thing."""
+        the stage-A gate measures the real thing.
+
+        The bound catches a pathological cost per line (a conversion or a fsync in the write path, tens of ms),
+        not runner speed: the line-buffered ledger file costs one write syscall per line, which measured 0.01 ms
+        on the dev box and 2.17 ms on GitHub's windows-latest runner (2026-10-05, the old 2 ms bound). Ten
+        untimed writes first, so the file open and the first serialisation do not count."""
         w = _writer(tmp_path)
         ev = PoseEvent(timestamp=0.0, source="replay", rx_seq=1, frame_seq=1, t_sensor_ns=1, t_wall_utc_s=0.0,
                        pose_clock="sender", epoch=1, tracking_state="normal", mailbox_write=True,
                        t_wc=[1.0, 2.0, 3.0], q_wc_xyzw=[0.0, 0.0, 0.0, 1.0], depth_valid_frac=0.9,
                        conf_hist=[100, 200, 48852])
+        for _ in range(10):
+            w.write(ev)
         t0 = time.perf_counter()
         for _ in range(240):
             w.write(ev)
         per_line_ms = (time.perf_counter() - t0) * 1000.0 / 240
         w.close()
-        assert per_line_ms < 2.0, per_line_ms
+        assert per_line_ms < 10.0, per_line_ms
 
 
 # ───────────────────────────── websocket / replay ─────────────────────────────

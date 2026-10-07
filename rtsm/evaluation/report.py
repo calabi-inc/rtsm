@@ -205,6 +205,13 @@ def render_markdown(agg: dict, ref: dict, *, resolved: Optional[dict], input_nam
     dirty = r.get("git_dirty")
     commit_txt = f"{r.get('git_commit', '–')}" + (f" (dirty, diff {r.get('tree_digest')})" if dirty else "")
     L.append(f"| commit / rtsm / python | `{commit_txt}` / {r.get('rtsm_version', '–')} / {r.get('python', '–')} |")
+    mf = r.get("model_files")
+    if isinstance(mf, dict) and mf:
+        parts = []
+        for key, rec in mf.items():
+            name = str((rec or {}).get("path", key)).replace(chr(92), "/").rsplit("/", 1)[-1]
+            parts.append(f"{name} `{str((rec or {}).get('sha256', ''))[:16]}`" if (rec or {}).get("exists") else f"{name} **missing at run start (downloaded by the backend's library)**")
+        L.append(f"| model files | {'; '.join(parts)} |")
     L.append(f"| cluster radius | {params.cluster_radius_m} m (the associator's distance gate); sensitivity at {', '.join(f'{x:g}' for x in params.cluster_radii_m)} m |")
     L.append(f"| detector | {_detector_line(ref.get('detector'))} |")
     if repeats:
@@ -350,7 +357,7 @@ def render_markdown(agg: dict, ref: dict, *, resolved: Optional[dict], input_nam
 
     L.append("## Method notes")
     L.append("")
-    L.append("- Everything above is computed from the run's ledgers (`events.jsonl`: pose / obs / view lines, the frame-flow trace) and the final memory in `summary.json`. No ground truth, no labels required; label numbers use the detector's top-1 label per observation.")
+    L.append("- Everything above is computed from the run's ledgers (`events.jsonl`: pose / obs / view lines, the frame-flow trace) and the final memory in `summary.json`. No ground truth, no labels required; label numbers use each observation's top-1 scored label (the detector's label first; under `segmentation.labels.prompt_free_primary: classifier` a prompt-free model's name stays out and the CLIP vocabulary classifier's label leads).")
     L.append("- Objects = every id the associator matched or created; a **transient** object was created and is not in the final memory (a proto that expired, or one the memory evicted).")
     L.append("- **Engine-confirmed** (\"confirmed\" above) means the memory promoted the object under its own rules (hits, stability, view bins); it is not ground-truth confirmation. **Re-identified** means the associator matched an existing object (a reassociation), not a verified identity.")
     L.append("- The fingerprint is the sha256 of the sorted multiset of (label_primary, xyz rounded to 3 decimals, hits, confirmed), 16 hex characters: identical fingerprints mean the same final memory at that resolution, not bit-identical runs.")

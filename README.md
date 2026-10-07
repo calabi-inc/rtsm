@@ -281,7 +281,7 @@ RTSM supports multiple segmentation backends via `segmentation.backend` in `conf
 | `grounded_sam2` | Apache 2.0 | Grounding DINO detect + SAM2 segment | 217 ms | 531 ms | Open-vocab (text-prompted) |
 | `sam2` | Apache 2.0 | SAM2 auto-mask (segment everything) | ~860 ms | ~1000 ms | None (class-agnostic) |
 | `fastsam` | AGPL-3.0 | FastSAM (segment everything) | ~50 ms | ~200 ms | None (class-agnostic) |
-| `yoloe` | AGPL-3.0 | YOLOE detection + segmentation | ~60 ms | ~210 ms | Open-vocab / 1200+ built-in |
+| `yoloe` | AGPL-3.0 | YOLOE detection + segmentation | ~60 ms | ~210 ms | Open-vocab / 4 585 built-in |
 | `dual` | AGPL-3.0 | FastSAM + YOLOE with IoU merge | 100 ms | 246 ms | Dual-confirmed labels |
 
 *Mean on RTX 5090, 640x480 input.*
@@ -355,7 +355,7 @@ scripts/
 
 - [x] Dual-confirmation segmentation (FastSAM + YOLOE)
 - [x] AGPL-clean default (SAM2 + Grounding DINO, Apache 2.0)
-- [x] YOLOE prompt-free (1200+ LVIS categories)
+- [x] YOLOE prompt-free (4 585 built-in categories)
 - [x] WebSocket receiver for Calabi Lens (ARKit iOS)
 - [x] Record/replay system for offline testing
 - [x] A/B segmentation debug tooling
