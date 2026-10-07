@@ -153,6 +153,38 @@
         color: #fff;
       }
 
+      #ui select {
+        padding: 4px 6px;
+        border-radius: 6px;
+        border: 1px solid rgba(255,255,255,0.08);
+        background: rgba(255,255,255,0.06);
+        color: rgba(255,255,255,0.75);
+        font-size: 11px;
+        cursor: pointer;
+      }
+      #ui select option { background: #1a1a1a; color: #ddd; }
+      #nav-help {
+        position: fixed;
+        top: 48px;
+        right: 12px;
+        width: 520px;
+        max-width: calc(100vw - 24px);
+        z-index: 30;
+        background: rgba(20,20,20,0.92);
+        backdrop-filter: blur(8px);
+        border: 1px solid rgba(255,255,255,0.08);
+        border-radius: 10px;
+        padding: 12px 14px;
+        color: rgba(255,255,255,0.8);
+        font-family: system-ui, -apple-system, Arial, sans-serif;
+        font-size: 11px;
+        line-height: 1.5;
+      }
+      #nav-help .nav-help-title { font-size: 12px; font-weight: 600; color: #fff; margin-bottom: 6px; }
+      #nav-help .nav-help-sub { font-size: 9px; text-transform: uppercase; letter-spacing: 0.8px; color: rgba(255,255,255,0.4); margin: 4px 0; }
+      #nav-help .nav-help-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+      #nav-help ul { margin: 0; padding-left: 16px; }
+      #nav-help .nav-help-note { margin-top: 8px; color: rgba(255,255,255,0.5); }
       #mode {
         font-size: 10px;
         color: rgba(255,255,255,0.4);
@@ -623,7 +655,7 @@
         max-height: 200px; opacity: 1; overflow: hidden;
       }
     </style>
-    <script type="module" crossorigin src="/assets/index-BKu7Hn0g.js"></script>
+    <script type="module" crossorigin src="/assets/index-CtGJb6sN.js"></script>
     <link rel="stylesheet" crossorigin href="/assets/index-CnsZ1jie.css">
   </head>
   <body>
@@ -647,6 +679,7 @@
     <div id="app"></div>
 
     <div id="hud">Loading...</div>
+    <div id="nav-help" style="display:none"></div>
 
     <div id="ui">
       <!-- Minimalist toggle: chevron icon (rotates when collapsed) -->
@@ -683,6 +716,14 @@
         <button id="flipX">Flip X</button>
         <button id="flipY">Flip Y</button>
         <button id="flipZ">Flip Z</button>
+        <select id="navScheme" title="Mouse scheme">
+          <option value="default">three.js</option>
+          <option value="blender">Blender</option>
+          <option value="maya">Maya</option>
+        </select>
+        <button id="navPivot" title="Show / hide the rotation centre anchor (P)">Pivot: on</button>
+        <button id="navFrame" title="Frame the selected object, else everything (F / Home)">Frame</button>
+        <button id="navHelp" title="Key bindings (H)">Keys</button>
       </div>
 
       <!-- RTSM Controls -->

@@ -12,6 +12,7 @@
 
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
+import { installNavigation } from './navigation'
 import { PLYLoader } from 'three/examples/jsm/loaders/PLYLoader.js'
 import uPlot from 'uplot'
 import 'uplot/dist/uPlot.min.css'
@@ -891,12 +892,10 @@ function applyFlipScale() {
 }
 
 resetBtn?.addEventListener('click', () => {
-  camera.position.copy(initialCamPos)
   camera.up.set(0, 1, 0)
-  controls.target.copy(initialTarget)
   flippedX = flippedY = flippedZ = false
   applyFlipScale()
-  controls.update()
+  nav.resetView(initialCamPos, initialTarget)
   setMode('Free')
 })
 
@@ -1526,7 +1525,7 @@ controls.addEventListener('start', () => { isDragging = true })
 controls.addEventListener('end', () => { isDragging = false; clearTempLocks() })
 
 renderer.domElement.addEventListener('pointerdown', (e) => {
-  if (e.button !== 0) return
+  if (e.button !== nav.orbitButton()) return
   lastPointerX = e.clientX
   if (isCDown) {
     rollTemp = true
@@ -1544,7 +1543,7 @@ renderer.domElement.addEventListener('pointerdown', (e) => {
 }, { capture: true })
 
 renderer.domElement.addEventListener('pointerup', (e) => {
-  if (e.button !== 0) return
+  if (e.button !== nav.orbitButton()) return
   if (rollTemp) {
     rollTemp = false
     ;(controls as any).enableRotate = true
@@ -1605,38 +1604,24 @@ document.addEventListener('keyup', (e) => {
   }
 })
 
-// Double-click to set orbit focus
-const raycaster = new THREE.Raycaster()
-const mouse = new THREE.Vector2()
-
-renderer.domElement.addEventListener('dblclick', (event) => {
-  const rect = renderer.domElement.getBoundingClientRect()
-  mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1
-  mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1
-  raycaster.setFromCamera(mouse, camera)
-
-  // Check static cloud
-  if (currentPoints) {
-    raycaster.params.Points.threshold = 0.01
-    const hits = raycaster.intersectObject(currentPoints, false)
-    if (hits.length > 0) {
-      controls.target.copy(hits[0].point)
-      controls.update()
-      return
-    }
-  }
-
-  // Check streamed clouds
-  for (const pts of meshes.values()) {
-    raycaster.params.Points.threshold = 0.01
-    const hits = raycaster.intersectObject(pts, false)
-    if (hits.length > 0) {
-      controls.target.copy(hits[0].point)
-      controls.update()
-      return
-    }
-  }
+// Viewport navigation: schemes, zoom to cursor, inertia, pivot under the cursor, presets, framing, help
+const nav = installNavigation({
+  camera, controls, scene, dom: renderer.domElement,
+  pointSources: () => [...meshes.values(), ...(currentPoints ? [currentPoints] : [])],
+  markers: () => [...objectMarkers.values()],
+  selectedPoint: () => {
+    if (!selectedObjectId) return null
+    const marker = objectMarkers.get(selectedObjectId)
+    if (marker) return marker.getWorldPosition(new THREE.Vector3())
+    const o = rtsmObjects.find(x => x.id === selectedObjectId)
+    return o && o.xyz_world ? world.localToWorld(new THREE.Vector3(o.xyz_world[0], o.xyz_world[1], o.xyz_world[2])) : null
+  },
+  helpEl: document.getElementById('nav-help'),
+  schemeSelect: document.getElementById('navScheme') as HTMLSelectElement | null,
+  pivotButton: document.getElementById('navPivot') as HTMLButtonElement | null,
 })
+document.getElementById('navFrame')?.addEventListener('click', () => { if (!nav.frameSelected()) nav.frameAll() })
+document.getElementById('navHelp')?.addEventListener('click', () => nav.toggleHelp())
 
 // ============================================================================
 // ANIMATION LOOP
@@ -1670,6 +1655,7 @@ function animate() {
     }
   }
 
+  nav.update()
   renderer.render(scene, camera)
 }
 
