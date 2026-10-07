@@ -332,7 +332,7 @@ one non-keyframe slot, so it never exceeds `keyframe_lane_depth + 1`; under
 `lossless` / `legacy` it is the FIFO depth. `ingest_lanes` carries the policy,
 per-lane depth and the lane counters (see the configuration guide).
 
-Sources that keep their own counters (`bag`, `ros2`) add a `source` object:
+Sources that keep their own counters (`bag`, `ros2`) add a `source` object (field by field on the [ROS 2 Ingest](ros2.md#observability) page):
 
 ```json
 "source": {"frames_seen": 237, "paired": 232, "unpaired_rgb": 4, "unpaired_depth": 0, "pose_missing": 0,
