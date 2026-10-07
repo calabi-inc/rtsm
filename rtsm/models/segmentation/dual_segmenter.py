@@ -246,6 +246,7 @@ class DualConfirmationSegmenter(SegmentationAdapter):
             label_confidence=merged_conf,
             fastsam_raw_count=Nf,
             yoloe_raw_count=Ny,
+            label_source=result_y.label_source,
         )
 
     def warmup(self) -> None:
@@ -291,6 +292,7 @@ class DualConfirmationSegmenter(SegmentationAdapter):
             confirmation_source=["yoloe_only"] * N,
             detection_labels=result_y.labels,
             label_confidence=[float(result_y.scores[i]) if result_y.scores is not None else 0.0 for i in range(N)],
+            label_source=result_y.label_source,
         )
 
     def close(self) -> None:

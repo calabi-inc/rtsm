@@ -147,12 +147,15 @@ segmentation:
 |---------|-------------|---------|-------------|
 | `grounded_sam2` | Grounding DINO + SAM2 (text-prompted) | Apache-2.0 | ~510 ms |
 | `sam2` | SAM2 auto-mask (class-agnostic, no labels) | Apache-2.0 | ~860 ms |
-| `dual` | FastSAM + YOLOE IoU merge (prompt-free, 1200+ categories) | AGPL-3.0 | ~210 ms |
+| `dual` | FastSAM + YOLOE IoU merge (prompt-free, 4 585 built-in categories) | AGPL-3.0 | ~210 ms |
 | `fastsam` | FastSAM only (class-agnostic) | AGPL-3.0 | ~50 ms |
 | `yoloe` | YOLOE only (open-vocab, prompt-free) | AGPL-3.0 | ~60 ms |
 
 !!! note "AGPL backends require `ultralytics`"
     Backends using FastSAM or YOLOE require the `ultralytics` package (AGPL-3.0). Install with: `pip install "rtsm[gpu-ultralytics]"`
+
+!!! note "Labels under a prompt-free detector"
+    The packaged YOLOE weights are prompt-free: they name objects from their own 4 585 built-in categories (a tag list that includes abstract words such as "heat" or "adaptation"), not from your vocabulary. By default the model's own class name leads an object's labels (`segmentation.labels.prompt_free_primary: detector`); with the known-good weights that reads `bottle`, `cup`, `keyboard`, `file cabinet`. Set `prompt_free_primary: classifier` to keep that name out of the scored labels and let the CLIP vocabulary classifier (`rtsm/cfg/clip/vocab.yaml`) decide: the mitigation when the weights in use label badly, as the `yoloe-26s-seg-pf.pt` that ultralytics 8.4.31 downloads from its v8.4.0 assets does (it named shelves `heat` and boxes `razor blade`). Either way the detector's own name is kept on each observation as `detector_label` in the ledger, and the report header lists each model file's sha256. Under `grounded_sam2` the grounded phrase is the primary label.
 
 ### Backend-Specific Settings
 

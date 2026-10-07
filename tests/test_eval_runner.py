@@ -351,3 +351,20 @@ def test_save_crops_writes_snapshots_and_index(cfg, bag, tmp_path):
 
 def test_git_state_outside_a_checkout(tmp_path):
     assert R._git_state(tmp_path) == (None, None)
+
+
+def test_model_files_and_hub_ids_in_provenance(tmp_path):
+    (tmp_path / "a.pt").write_bytes(b"weights" * 100)
+    cfg = {"segmentation": {"backend": "dual",
+                            "fastsam": {"model_path": "a.pt"},                      # relative to the working directory
+                            "yoloe": {"model_path": str(tmp_path / "missing.pt")},  # absent: a library would auto-download
+                            "sam2": {"model_id": "facebook/sam2.1-hiera-small"},
+                            "grounded_sam2": {"gdino_model_id": "IDEA-Research/grounding-dino-tiny", "sam2_model_id": None}},
+           "clip": {"pretrained": "webli"}}
+    files = R._model_files(cfg, root=tmp_path)
+    assert set(files) == {"segmentation.fastsam.model_path", "segmentation.yoloe.model_path"}
+    a = files["segmentation.fastsam.model_path"]
+    assert a["exists"] is True and a["bytes"] == 700 and a["sha256"] == hashlib.sha256(b"weights" * 100).hexdigest() and a["path"] == "a.pt"
+    assert files["segmentation.yoloe.model_path"] == {"path": str(tmp_path / "missing.pt"), "exists": False}
+    assert R._hf_models(cfg) == {"segmentation.sam2.model_id": "facebook/sam2.1-hiera-small",
+                                 "segmentation.grounded_sam2.gdino_model_id": "IDEA-Research/grounding-dino-tiny"}

@@ -217,6 +217,7 @@ class GroundedSAM2Segmenter(SegmentationAdapter):
             labels=labels,
             class_ids=class_ids,
             vocab=vocab,
+            label_source="vocab",
         )
 
     def warmup(self) -> None:

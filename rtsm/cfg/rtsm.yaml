@@ -34,13 +34,13 @@ segmentation:
     max_det: 100                                        # indoor rooms rarely have 300 objects
 
   yoloe:
-    model_path: model_store/yolo/yoloe-26s-seg-pf.pt   # prompt-free: 1200+ LVIS categories, no vocab needed
+    model_path: model_store/yolo/yoloe-26s-seg-pf.pt   # prompt-free: 4 585 built-in categories (a tag list incl. abstract words), no vocab needed
     device: cuda
     imgsz: 640
     conf: 0.25                                          # permissive so YOLOE confirms more FastSAM masks
     iou: 0.5                                            # stricter NMS for cluttered indoor scenes
     max_det: 100                                        # cap detections per frame
-    # vocab is ignored for -pf models (1200+ built-in categories)
+    # vocab is ignored for -pf models (4 585 built-in categories)
     vocab: null
 
   sam2:
@@ -60,6 +60,14 @@ segmentation:
     box_threshold: 0.20              # GDINO detection confidence threshold
     text_threshold: 0.15             # GDINO text matching threshold
     vocab: null                      # null = use default indoor vocab (40+ classes)
+
+  # Object labels under a prompt-free detector (dual / yoloe with -pf weights). The model's own class name leads an
+  # object's scored labels by default ("detector"); "classifier" keeps it out so the CLIP vocabulary classifier's label
+  # decides, a mitigation when the weights in use label badly (the v8.4.0 yoloe-26s-seg-pf.pt asset that ultralytics
+  # 8.4.31 downloads named shelves 'heat'; the March export labels the same scene 'bottle', 'cup', 'keyboard').
+  # The detector's own name is recorded per observation (detector_label) either way.
+  labels:
+    prompt_free_primary: detector     # detector | classifier
 
   # Dual-confirmation settings (only used when backend: dual)
   dual:
