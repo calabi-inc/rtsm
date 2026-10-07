@@ -7,7 +7,7 @@ The memory is served over HTTP on one port; a WebSocket carries the dashboard st
 | REST API | `http://localhost:8002` | objects, search, stats, health |
 | MCP | `http://localhost:8002/mcp/sse` | when the `mcp` extra is installed and enabled |
 | Calabi Lens ingest | `ws://localhost:8765/stream` | the phone's RGB-D + pose stream |
-| ROS 2 ingest | subscriptions on the local ROS 2 graph (`--ros2`) | topics by rule or `io.ros2.topics`; `rtsm ros2 probe` first |
+| [ROS 2 ingest](ros2.md) | subscriptions on the local ROS 2 graph (`--ros2`) | subscriber only; topics by rule or `io.ros2.topics`; `rtsm ros2 probe` first |
 | Dashboard WebSocket | `ws://localhost:8083/ws` | only with `--viz` |
 
 <div class="grid cards" markdown>
@@ -43,5 +43,13 @@ The memory is served over HTTP on one port; a WebSocket carries the dashboard st
     The dashboard stream: point clouds and object updates, and the message types the viewer understands.
 
     [:octicons-arrow-right-24: WebSocket](websocket.md)
+
+-   :material-robot-industrial:{ .lg .middle } **ROS 2 Ingest**
+
+    ---
+
+    The subscriber contract: topic roles and message types, encodings, pairing, pose, registration, QoS, refusal codes, `/stats.source`.
+
+    [:octicons-arrow-right-24: ROS 2](ros2.md)
 
 </div>

@@ -72,6 +72,7 @@ nav:
       - Python Client: api/python-client.md
       - MCP (AI Agents): api/mcp.md
       - WebSocket: api/websocket.md
+      - ROS 2 Ingest: api/ros2.md
   - Benchmarks: benchmarks.md
   - Contributing: contributing.md
 
