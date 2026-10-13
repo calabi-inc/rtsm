@@ -22,6 +22,7 @@ from typing import Dict, Any, Optional
 import logging
 
 from rtsm.models.segmentation.base import SegmentationAdapter, SegmentationResult
+from rtsm.models.weights import check_and_enforce
 
 logger = logging.getLogger(__name__)
 
@@ -87,9 +88,11 @@ def get_segmenter(cfg: Dict[str, Any]) -> SegmentationAdapter:
 
 def _create_fastsam(cfg: Dict[str, Any], seg_cfg: Dict[str, Any]) -> SegmentationAdapter:
     """Create FastSAM segmenter from config."""
-    from rtsm.models.segmentation.fastsam_segmenter import FastSAMSegmenter
-
     fastsam_cfg = seg_cfg.get("fastsam", {})
+    # The weight file by content (rtsm/models/weights.py): warn / refuse / ignore per segmentation.weights_policy,
+    # before the backend's library gets a chance to download whatever it serves under that name.
+    check_and_enforce(fastsam_cfg.get("model_path", "model_store/fastsam/FastSAM-x.pt"), seg_cfg, logger)
+    from rtsm.models.segmentation.fastsam_segmenter import FastSAMSegmenter
 
     return FastSAMSegmenter(
         model_path=fastsam_cfg.get("model_path", "model_store/fastsam/FastSAM-x.pt"),
@@ -104,9 +107,9 @@ def _create_fastsam(cfg: Dict[str, Any], seg_cfg: Dict[str, Any]) -> Segmentatio
 
 def _create_yoloe(cfg: Dict[str, Any], seg_cfg: Dict[str, Any]) -> SegmentationAdapter:
     """Create YOLOE segmenter from config."""
-    from rtsm.models.segmentation.yoloe_segmenter import YOLOESegmenter
-
     yoloe_cfg = seg_cfg.get("yoloe", {})
+    check_and_enforce(yoloe_cfg.get("model_path", "model_store/yolo/yoloe-26s-seg.pt"), seg_cfg, logger)
+    from rtsm.models.segmentation.yoloe_segmenter import YOLOESegmenter
 
     return YOLOESegmenter(
         model_path=yoloe_cfg.get("model_path", "model_store/yolo/yoloe-26s-seg.pt"),

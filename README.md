@@ -216,6 +216,7 @@ rtsm --replay recordings/session1
 ```bash
 python scripts/fetch_models.py                # all default models (SAM2, GDINO, CLIP)
 python scripts/fetch_models.py --only sam2    # or individually
+python scripts/fetch_models.py --verify       # FastSAM / YOLOE files against the validated sha256s
 ```
 
 > **License note:** `rtsm[gpu]` uses only Apache 2.0 / MIT dependencies. `rtsm[gpu-ultralytics]` adds the `ultralytics` package (AGPL-3.0) for FastSAM and YOLOE backends.
