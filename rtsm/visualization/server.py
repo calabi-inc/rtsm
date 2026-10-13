@@ -367,6 +367,9 @@ class VisualizationServer:
         elif cmd == "viewing":
             self.note_viewing(data.get("session"))
 
+        elif cmd == "ping":
+            await self.broadcaster._try_send_json(websocket, {"type": "pong"})
+
         elif cmd == "stats":
             stats = self.registry.stats()
             stats["clients"] = self.broadcaster.client_count

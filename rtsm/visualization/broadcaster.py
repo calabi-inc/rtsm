@@ -214,6 +214,7 @@ class WSBroadcaster:
 
         dead = [c for c, ok in zip(clients, results) if ok is not True]
         if dead:
+            logger.info("[broadcaster] dropped %d client(s) whose send failed or timed out (%.0f s)", len(dead), _SEND_TIMEOUT_S)
             async with self._lock:
                 for c in dead:
                     self._clients.discard(c)

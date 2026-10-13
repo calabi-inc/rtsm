@@ -1079,6 +1079,8 @@ def create_app(
                             await vis_server.resync_client(websocket)
                         elif cmd == "viewing" and vis_server is not None and hasattr(vis_server, "note_viewing"):
                             vis_server.note_viewing(msg.get("session"))
+                        elif cmd == "ping":
+                            await vis_broadcaster._try_send_json(websocket, {"type": "pong"})
                     except Exception:
                         pass
             except WebSocketDisconnect:

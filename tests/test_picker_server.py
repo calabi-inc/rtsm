@@ -249,3 +249,11 @@ def test_viz_hooks_and_payload(world):
     w.vs.note_viewing(None)
     vs2 = VisualizationServer(cfg={}, working_memory=_WM())
     assert vs2.session_update_payload() == {"enabled": False, "live": None, "sessions": []}
+
+
+def test_ws_ping_pong(world):
+    w = world
+    with w.api.websocket_connect("/ws") as ws:
+        assert ws.receive_json()["type"] == "session_update"
+        ws.send_json({"cmd": "ping"})
+        assert ws.receive_json() == {"type": "pong"}

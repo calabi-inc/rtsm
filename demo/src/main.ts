@@ -135,6 +135,22 @@ const meshes = new Map<string, THREE.Points>()
 let wsConnected = false
 let meshCreateCount = 0
 
+// Sessions: 'live' or a frozen session key on screen; the live scene keeps moving in the HUD meanwhile
+let viewing: string = 'live'
+let lastRxAt = 0   // socket liveness: the server answers ping with pong; silence for 30 s = reconnect
+let sessionsEnabled = false
+let sessionsList: SessionSummary[] = []
+let liveSessionKey: string | null = null
+let liveObjectCount = 0
+let liveMeshCount = 0
+// Prior content: sessions merged into the live one, drawn dimmed (never in the memory)
+const priorGroup = new THREE.Group()
+world.add(priorGroup)
+const priorMembers = new Set<string>()
+const priorMeshes = new Map<string, THREE.Points>()
+const priorMarkers = new Map<string, THREE.Mesh>()
+let priorObjects: Array<RtsmObject & { session: string }> = []
+
 // ── Camera feed PiP (FaceTime-style: draggable, resizable, minimizable) ──
 const cameraFeedImg = document.getElementById('camera-feed') as HTMLImageElement | null
 const cameraPanel = document.getElementById('camera-panel') as HTMLElement | null
@@ -438,6 +454,8 @@ function connectWebSocket() {
   ws.onopen = () => {
     wsConnected = true
     console.log('[ws] Connected to demo server')
+    lastRxAt = Date.now()
+    sendJson({ cmd: 'viewing', session: viewing })
     updateHud()
     updateConnectionButtons()
   }
@@ -460,6 +478,7 @@ function connectWebSocket() {
   }
 
   ws.onmessage = (ev) => {
+    lastRxAt = Date.now()
     if (ev.data instanceof ArrayBuffer) {
       // Binary message - route by magic bytes
       if (ev.data.byteLength >= 4) {
@@ -468,10 +487,16 @@ function connectWebSocket() {
           handleCameraFrame(ev.data)
         } else {
           // mesh_create (PCLD)
-          const parsed = parseMeshCreate(ev.data)
-          if (parsed) {
-            createOrUpdateMesh(parsed.meshId, parsed.positions, parsed.colors, parsed.pose)
+          if (viewing !== 'live') {
+            liveMeshCount++                 // a frozen session is on screen: count only
             updateHud()
+          } else {
+            const parsed = parseMeshCreate(ev.data)
+            if (parsed) {
+              createOrUpdateMesh(parsed.meshId, parsed.positions, parsed.colors, parsed.pose)
+              liveMeshCount = meshes.size
+              updateHud()
+            }
           }
         }
       }
@@ -480,7 +505,18 @@ function connectWebSocket() {
       try {
         const msg = JSON.parse(ev.data)
 
-        if (msg.type === 'mesh_update_pose') {
+        if (msg.type === 'pong') {
+          // liveness only
+        } else if (msg.type === 'session_update') {
+          applySessionUpdate(msg)
+        } else if (msg.type === 'session_refined') {
+          applySessionRefined(msg)
+        } else if (viewing !== 'live' && (msg.type === 'mesh_update_pose' || msg.type === 'mesh_delete' || msg.type === 'clear' || msg.type === 'objects_update')) {
+          // A frozen session is on screen: the live scene keeps moving in the HUD only
+          if (msg.type === 'objects_update') liveObjectCount = (msg.objects || []).length
+          if (msg.type === 'clear') liveMeshCount = 0
+          updateHud()
+        } else if (msg.type === 'mesh_update_pose') {
           updateMeshPose(msg.mesh_id, msg.pose)
           updateHud()
         } else if (msg.type === 'mesh_delete') {
@@ -493,6 +529,7 @@ function connectWebSocket() {
         } else if (msg.type === 'objects_update') {
           // Real-time WM objects update from visualization server
           rtsmObjects = msg.objects || []
+          liveObjectCount = rtsmObjects.length
 
           // Debug: check if any objects have label_scores
           if (rtsmObjects.length > 0) {
@@ -813,6 +850,9 @@ function updateHud() {
     `Meshes: ${meshes.size} | Points: ${totalPoints.toLocaleString()}`,
     `Pose updates: ${poseUpdateCount}`,
     `Objects: ${rtsmObjects.length} (${confirmedCount} confirmed)`,
+    viewing === 'live'
+      ? `Session: <span style="color:#0f0">live</span>${priorMembers.size ? ` · +${priorMembers.size} prior` : ''}`
+      : `Session: <span style="color:#fc0">${viewing}</span> (read-only) · live: ${liveObjectCount} obj, ${liveMeshCount} kf`,
   ].join('<br>')
 }
 
@@ -1082,11 +1122,25 @@ function updateObjectList() {
     `
   }).join('')
 
+  if (viewing === 'live' && priorObjects.length > 0 && !isSearchMode) {
+    const items = priorObjects.filter(o => !panelFilterConfirmed || o.confirmed).map(o => `
+      <div class="object-item prior" data-id="${o.id}" data-session="${o.session}" title="from session ${o.session}">
+        <div class="object-dot prior"></div>
+        <div class="object-info">
+          <div class="object-label">${o.id.slice(0, 8)} <span class="object-meta">(prior)</span></div>
+          <div class="object-meta">${o.session.slice(0, 15)} &middot; ${(o.stability ?? 0).toFixed(2)}</div>
+        </div>
+      </div>`).join('')
+    objectListEl.innerHTML += `<div class="object-section">Prior (merged) &middot; ${priorObjects.length}</div>${items}`
+  }
+
   // Add click handlers
   objectListEl.querySelectorAll('.object-item').forEach(item => {
     item.addEventListener('click', () => {
       const id = item.getAttribute('data-id')
-      if (id) selectObject(id)
+      const session = item.getAttribute('data-session')
+      if (id && session) loadObjectSnapshots(id, session)
+      else if (id) selectObject(id)
     })
   })
 }
@@ -1153,8 +1207,12 @@ galleryClose?.addEventListener('click', () => {
 }
 
 // Load snapshots for an object
-async function loadObjectSnapshots(objectId: string) {
+async function loadObjectSnapshots(objectId: string, sessionKey: string | null = null) {
   if (!snapshotGallery || !galleryImages || !galleryLoading) return
+  const key = sessionKey || (viewing !== 'live' ? viewing : null)
+  const snapshotsUrl = key
+    ? `${RTSM_API_BASE}/sessions/${encodeURIComponent(key)}/objects/${objectId}/snapshots`
+    : `${RTSM_API_BASE}/objects/${objectId}/snapshots`
 
   snapshotGallery.classList.add('visible')
   galleryImages.innerHTML = ''
@@ -1169,7 +1227,7 @@ async function loadObjectSnapshots(objectId: string) {
   }
 
   try {
-    const resp = await fetch(`${RTSM_API_BASE}/objects/${objectId}/snapshots`)
+    const resp = await fetch(snapshotsUrl)
     const data = await resp.json()
 
     if (data.error) {
@@ -1302,7 +1360,11 @@ const RTSM_API_BASE = import.meta.env.DEV ? '/api' : ''
 
 // Reset RTSM (clears WM, sweep cache, frame window, visualization)
 rtsmResetBtn?.addEventListener('click', async () => {
-  if (!confirm('Reset RTSM? This will clear all objects, keyframes, and sweep state.')) {
+  if (viewing !== 'live') {
+    alert('A frozen session is on screen. Switch to Live first.')
+    return
+  }
+  if (!confirm('Reset RTSM? The live session is frozen and kept under Sessions; objects, keyframes and sweep state restart.')) {
     return
   }
   rtsmResetBtn.disabled = true
@@ -2227,3 +2289,332 @@ updateHud()
 updateConnectionButtons()  // Set initial button states
 applyFlipScale()  // Apply default X/Y flip
 animate()
+
+// ============================================================================
+// SESSIONS (rtsm/core/sessions.py): the live session or a frozen one, read-only
+// ============================================================================
+
+interface SessionSummary {
+  key: string
+  session_id: string | null
+  epoch: number
+  source: string
+  started_wall_utc: number
+  ended_wall_utc: number | null
+  end_reason: string | null
+  merged_into: string | null
+  merged_from: string[]
+  pinned: boolean
+  live: boolean
+  counters: Record<string, number>
+  n_objects?: number
+  n_keyframes?: number
+  on_disk?: boolean
+  discarded_predecessor?: Record<string, unknown> | null
+}
+
+const sessionPick = document.getElementById('sessionPick') as HTMLSelectElement | null
+const sessionLiveBtn = document.getElementById('sessionLive') as HTMLButtonElement | null
+const sessionEndBtn = document.getElementById('sessionEnd') as HTMLButtonElement | null
+const sessionBanner = document.getElementById('session-banner') as HTMLElement | null
+
+function sendJson(obj: Record<string, unknown>) {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify(obj))
+  }
+}
+
+function sessionLabel(s: SessionSummary): string {
+  const t = new Date(s.started_wall_utc * 1000)
+  const hh = String(t.getHours()).padStart(2, '0')
+  const mm = String(t.getMinutes()).padStart(2, '0')
+  const ss = String(t.getSeconds()).padStart(2, '0')
+  const n = s.n_objects ?? s.counters?.objects ?? 0
+  if (s.live) {
+    const prior = (s.merged_from || []).length
+    return `live${prior ? ` · includes ${prior} earlier` : ''}`
+  }
+  return `${hh}:${mm}:${ss} · ${s.end_reason || 'frozen'} · ${n} obj${s.pinned ? ' · pinned' : ''}`
+}
+
+/** Dropdown: live first, then top-level frozen sessions newest first, merged ones nested under their successor. */
+function renderSessionPicker() {
+  if (!sessionPick) return
+  const byKey = new Map(sessionsList.map(s => [s.key, s]))
+  const options: Array<{ value: string; text: string }> = []
+  const emit = (s: SessionSummary, depth: number) => {
+    options.push({ value: s.live ? 'live' : s.key, text: `${'\u21b3 '.repeat(depth)}${sessionLabel(s)}` })
+    for (const child of sessionsList.filter(c => c.merged_into === s.key)) emit(child, depth + 1)
+  }
+  const live = sessionsList.find(s => s.live)
+  if (live) emit(live, 0)
+  for (const s of sessionsList) {
+    if (s.live || s.merged_into) continue
+    if (s.merged_into && byKey.has(s.merged_into)) continue
+    emit(s, 0)
+  }
+  // a merged session whose successor is gone shows at top level
+  for (const s of sessionsList) {
+    if (!s.live && s.merged_into && !byKey.has(s.merged_into)) emit(s, 0)
+  }
+  sessionPick.innerHTML = options.map(o => `<option value="${o.value}">${o.text}</option>`).join('')
+  sessionPick.value = viewing
+  if (sessionPick.value !== viewing) sessionPick.value = 'live'
+  sessionPick.disabled = sessionsList.length === 0
+}
+
+function applySessionUpdate(msg: any) {
+  sessionsEnabled = !!msg.enabled
+  sessionsList = (msg.sessions || []) as SessionSummary[]
+  liveSessionKey = msg.live || null
+  renderSessionPicker()
+  if (viewing !== 'live' && !sessionsList.find(s => s.key === viewing)) {
+    switchToLive()                       // the session on screen was removed
+    return
+  }
+  syncPriorMembers()
+  updateSessionBanner()
+  updateHud()
+}
+
+/** Parse consecutive mesh_create packets (the /sessions/{key}/clouds body). */
+function parseMeshPackets(buffer: ArrayBuffer): Array<{ meshId: string; positions: Float32Array; colors: Uint8Array; pose: number[] | null }> {
+  const out = []
+  const view = new DataView(buffer)
+  let off = 0
+  while (off + 10 <= buffer.byteLength) {
+    const idLen = view.getUint16(off + 4, true)
+    const n = view.getUint32(off + 6, true)
+    const poseOff = off + 10 + idLen + n * 12 + n * 3
+    if (poseOff >= buffer.byteLength) break
+    const hasPose = view.getUint8(poseOff)
+    const len = poseOff + 1 + (hasPose ? 64 : 0) - off
+    const parsed = parseMeshCreate(buffer.slice(off, off + len))
+    if (parsed) out.push(parsed)
+    off += len
+  }
+  return out
+}
+
+async function viewFrozen(key: string) {
+  viewing = key
+  sendJson({ cmd: 'viewing', session: key })
+  clearAllMeshes()
+  rtsmObjects = []
+  selectedObjectId = null
+  snapshotGallery?.classList.remove('visible')
+  updateObjectMarkers()
+  updateObjectList()
+  priorGroup.visible = false
+  updateSessionBanner()
+  updateSessionButtons()
+  try {
+    const d = await (await fetch(`${RTSM_API_BASE}/sessions/${encodeURIComponent(key)}`)).json()
+    if (viewing !== key) return
+    rtsmObjects = (d.objects || []) as RtsmObject[]
+    updateObjectMarkers()
+    updateObjectList()
+    const buf = await (await fetch(`${RTSM_API_BASE}/sessions/${encodeURIComponent(key)}/clouds`)).arrayBuffer()
+    if (viewing !== key) return
+    for (const p of parseMeshPackets(buf)) createOrUpdateMesh(p.meshId, p.positions, p.colors, p.pose)
+    updateHud()
+  } catch (e) {
+    console.error('[sessions] failed to load', key, e)
+  }
+}
+
+function switchToLive() {
+  const wasFrozen = viewing !== 'live'
+  viewing = 'live'
+  if (sessionPick) sessionPick.value = 'live'
+  if (wasFrozen) {
+    clearAllMeshes()
+    rtsmObjects = []
+    selectedObjectId = null
+    snapshotGallery?.classList.remove('visible')
+    updateObjectMarkers()
+    updateObjectList()
+    sendJson({ cmd: 'resync' })
+  }
+  sendJson({ cmd: 'viewing', session: 'live' })
+  priorGroup.visible = true
+  syncPriorMembers()
+  updateSessionBanner()
+  updateSessionButtons()
+  updateHud()
+}
+
+function applySessionRefined(msg: any) {
+  const key = msg.session as string
+  const poses = (msg.poses || {}) as Record<string, number[]>
+  const objs = (msg.objects || []) as Array<{ id: string; xyz_world: number[]; demoted_by_correction: boolean }>
+  if (key === viewing) {
+    for (const [mid, pose] of Object.entries(poses)) if (meshes.has(mid)) updateMeshPose(mid, pose)
+    for (const o of objs) {
+      const target = rtsmObjects.find(x => x.id === o.id)
+      if (target) target.xyz_world = o.xyz_world
+    }
+    updateObjectMarkers()
+    updateHud()
+    return
+  }
+  if (priorMembers.has(key)) {
+    for (const [mid, pose] of Object.entries(poses)) {
+      const pts = priorMeshes.get(`${key}:${mid}`)
+      if (pts) pts.matrix.copy(mat4FromRowMajorArray(pose))
+    }
+    for (const o of objs) {
+      const m = priorMarkers.get(`${key}:${o.id}`)
+      if (m) m.position.set(o.xyz_world[0], o.xyz_world[1], o.xyz_world[2])
+      const po = priorObjects.find(x => x.session === key && x.id === o.id)
+      if (po) po.xyz_world = o.xyz_world
+    }
+  }
+}
+
+/** Prior content: the sessions merged into the live one, drawn dimmed in the live scene (not in the memory). */
+async function syncPriorMembers() {
+  const live = sessionsList.find(s => s.live)
+  const wanted = new Set<string>(viewing === 'live' && live ? (live.merged_from || []) : [])
+  for (const key of Array.from(priorMembers)) {
+    if (!wanted.has(key)) removePriorMember(key)
+  }
+  for (const key of wanted) {
+    if (priorMembers.has(key)) continue
+    priorMembers.add(key)
+    try {
+      const d = await (await fetch(`${RTSM_API_BASE}/sessions/${encodeURIComponent(key)}`)).json()
+      if (!priorMembers.has(key)) return
+      for (const o of (d.objects || []) as RtsmObject[]) {
+        if (!o.xyz_world) continue
+        priorObjects.push({ ...o, session: key })
+        const geom = new THREE.SphereGeometry(0.03, 10, 10)
+        const mat = new THREE.MeshBasicMaterial({ color: 0x7f9cff, wireframe: true, transparent: true, opacity: 0.6 })
+        const marker = new THREE.Mesh(geom, mat)
+        marker.position.set(o.xyz_world[0], o.xyz_world[1], o.xyz_world[2])
+        priorGroup.add(marker)
+        priorMarkers.set(`${key}:${o.id}`, marker)
+      }
+      const buf = await (await fetch(`${RTSM_API_BASE}/sessions/${encodeURIComponent(key)}/clouds`)).arrayBuffer()
+      if (!priorMembers.has(key)) return
+      for (const p of parseMeshPackets(buf)) {
+        const geom = new THREE.BufferGeometry()
+        geom.setAttribute('position', new THREE.BufferAttribute(p.positions, 3))
+        const colorsFloat = new Float32Array(p.colors.length)
+        for (let i = 0; i < p.colors.length; i++) colorsFloat[i] = p.colors[i] / 255
+        geom.setAttribute('color', new THREE.BufferAttribute(colorsFloat, 3))
+        const mat = new THREE.PointsMaterial({ size: 0.006, vertexColors: true, sizeAttenuation: true, transparent: true, opacity: 0.35, depthWrite: false })
+        const pts = new THREE.Points(geom, mat)
+        pts.frustumCulled = false
+        pts.matrixAutoUpdate = false
+        if (p.pose) pts.matrix.copy(mat4FromRowMajorArray(p.pose))
+        priorGroup.add(pts)
+        priorMeshes.set(`${key}:${p.meshId}`, pts)
+      }
+      updateObjectList()
+    } catch (e) {
+      console.error('[sessions] prior member failed', key, e)
+    }
+  }
+  updateObjectList()
+}
+
+function removePriorMember(key: string) {
+  priorMembers.delete(key)
+  for (const [id, pts] of Array.from(priorMeshes)) {
+    if (!id.startsWith(`${key}:`)) continue
+    priorGroup.remove(pts)
+    pts.geometry.dispose()
+    ;(pts.material as THREE.Material).dispose()
+    priorMeshes.delete(id)
+  }
+  for (const [id, m] of Array.from(priorMarkers)) {
+    if (!id.startsWith(`${key}:`)) continue
+    priorGroup.remove(m)
+    m.geometry.dispose()
+    ;(m.material as THREE.Material).dispose()
+    priorMarkers.delete(id)
+  }
+  priorObjects = priorObjects.filter(o => o.session !== key)
+}
+
+function viewedSession(): SessionSummary | null {
+  return viewing === 'live' ? null : (sessionsList.find(s => s.key === viewing) || null)
+}
+
+function updateSessionButtons() {
+  const frozen = viewing !== 'live'
+  if (rtsmResetBtn) rtsmResetBtn.disabled = frozen
+  if (clearStreamBtn) clearStreamBtn.disabled = frozen
+  if (sessionLiveBtn) sessionLiveBtn.disabled = !frozen
+  if (sessionEndBtn) sessionEndBtn.disabled = frozen || !sessionsEnabled
+}
+
+function updateSessionBanner() {
+  if (!sessionBanner) return
+  const s = viewedSession()
+  if (!s) {
+    sessionBanner.style.display = 'none'
+    sessionBanner.innerHTML = ''
+    return
+  }
+  const ended = s.ended_wall_utc ? new Date(s.ended_wall_utc * 1000).toLocaleTimeString() : '?'
+  const merged = s.merged_into ? ' · merged into live' : ''
+  sessionBanner.style.display = 'flex'
+  sessionBanner.innerHTML = `
+    <span class="sb-text"><b>Session ${s.key}</b> · ended ${ended} · ${s.end_reason || ''} · read-only${merged}${s.pinned ? ' · pinned' : ''}</span>
+    <button id="sb-live">Live</button>
+    <button id="sb-pin">${s.pinned ? 'Unpin' : 'Pin'}</button>
+    <button id="sb-merge">${s.merged_into ? 'Unmerge' : 'Merge into live'}</button>
+    <button id="sb-delete" class="warning">Delete…</button>`
+  document.getElementById('sb-live')?.addEventListener('click', () => switchToLive())
+  document.getElementById('sb-pin')?.addEventListener('click', () => sessionAction(s.key, s.pinned ? 'unpin' : 'pin'))
+  document.getElementById('sb-merge')?.addEventListener('click', () => sessionAction(s.key, s.merged_into ? 'unmerge' : 'merge'))
+  document.getElementById('sb-delete')?.addEventListener('click', async () => {
+    if (!confirm(`Delete session ${s.key} from disk and the list?`)) return
+    const resp = await fetch(`${RTSM_API_BASE}/sessions/${encodeURIComponent(s.key)}`, { method: 'DELETE' })
+    if (resp.status === 409) {
+      const d = await resp.json()
+      alert(`Not removed: ${d.detail?.reason || 'refused'}`)
+      return
+    }
+    switchToLive()
+  })
+}
+
+async function sessionAction(key: string, action: 'pin' | 'unpin' | 'merge' | 'unmerge') {
+  const body = action === 'merge' ? JSON.stringify({ into: 'live' }) : undefined
+  const resp = await fetch(`${RTSM_API_BASE}/sessions/${encodeURIComponent(key)}/${action}`, {
+    method: 'POST', headers: body ? { 'Content-Type': 'application/json' } : undefined, body,
+  })
+  if (resp.status === 409) {
+    const d = await resp.json()
+    alert(`${action} refused: ${d.detail?.reason || 'refused'}`)
+  }
+  // the server broadcasts session_update; the banner and picker follow
+}
+
+sessionPick?.addEventListener('change', () => {
+  const v = sessionPick.value
+  if (v === 'live') switchToLive()
+  else viewFrozen(v)
+})
+sessionLiveBtn?.addEventListener('click', () => switchToLive())
+sessionEndBtn?.addEventListener('click', async () => {
+  if (!confirm('Freeze the live session now? It stays listed under Sessions; a new live session opens.')) return
+  const resp = await fetch(`${RTSM_API_BASE}/sessions/end`, { method: 'POST' })
+  if (!resp.ok) alert(`End refused (${resp.status})`)
+})
+setInterval(() => sendJson({ cmd: 'viewing', session: viewing }), 60_000)
+// Liveness: a tab frozen in the background stops reading its socket; the server drops it after a send
+// timeout while this page still shows 'connected'. Ping every 10 s; 30 s of silence closes the socket,
+// and onclose reconnects (sync + session_update put the scene back in step).
+setInterval(() => {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return
+  sendJson({ cmd: 'ping' })
+  if (lastRxAt && Date.now() - lastRxAt > 30_000) {
+    console.warn('[ws] no message for 30 s: reconnecting')
+    ws.close()
+  }
+}, 10_000)
+updateSessionButtons()
