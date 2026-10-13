@@ -238,6 +238,10 @@ class WorkingMemory:
         self._label_detections: Dict[str, Dict[str, Any]] = {}
         # Reverse index: frame_id -> set of object IDs last updated on that frame
         self._frame_to_objects: Dict[str, set] = {}
+        # What the last apply_pose_corrections() did (the session registry's
+        # refine event reads it): corrected / direct / fallback counts, the
+        # demoted object ids, the largest object shift in metres.
+        self.last_correction: Optional[Dict[str, Any]] = None
         # Min-heap of (deadline_mono, oid) for proto expiry (lazy re-schedule on matches)
         self._proto_heap: List[Tuple[float, str]] = []
 
@@ -776,6 +780,40 @@ class WorkingMemory:
                 f"back to proto (large pose correction)"
             )
 
+    # ---------- session snapshot (rtsm/core/sessions.py) ----------
+
+    def snapshot_for_session(self) -> Any:
+        """Everything a session freeze keeps from the working memory, as plain
+        copies: one dict per object (the /objects summary shape plus the label
+        scores, the mean embedding, the crop count and the frame that last
+        updated it), the frame -> objects index, and the JPEG crops by object
+        id. Taken under the WM lock; nothing returned aliases live state."""
+        from rtsm.core.sessions import SessionSnapshot
+        with self._lock:
+            objects: List[Dict[str, Any]] = []
+            crops: Dict[str, List[bytes]] = {}
+            for o in self._map.values():
+                objects.append({
+                    "id": o.id,
+                    "xyz_world": np.asarray(o.xyz_world, dtype=np.float32).copy(),
+                    "label_hint": o.label_primary,
+                    "label_primary": o.label_primary,
+                    "label_scores": dict(o.label_scores) if o.label_scores else {},
+                    "confirmed": bool(o.confirmed),
+                    "stability": float(o.stability),
+                    "hits": int(o.hits),
+                    "emb_mean": (np.asarray(o.emb_mean, dtype=np.float32).tolist() if o.emb_mean is not None else None),
+                    "n_view_bins": len(o.view_bins) if o.view_bins else 0,
+                    "created_wall_utc": float(o.created_wall_utc),
+                    "last_seen_wall_utc": float(o.last_seen_wall_utc),
+                    "last_update_frame_id": o.last_update_frame_id,
+                    "n_crops": len(o.image_crops) if o.image_crops else 0,
+                })
+                if o.image_crops:
+                    crops[o.id] = list(o.image_crops)
+            index = {fid: sorted(oids) for fid, oids in self._frame_to_objects.items() if oids}
+            return SessionSnapshot(objects=objects, frame_to_objects=index, crops=crops)
+
     # ---------- pose corrections (loop closure) ----------
 
     def apply_pose_corrections(
@@ -803,6 +841,7 @@ class WorkingMemory:
         corrected_oids: set = set()
         demoted_oids: list = []
         corrected = 0
+        max_shift = 0.0
         thresh = self.pose_demote_thresh_m
 
         with self._lock:
@@ -816,6 +855,7 @@ class WorkingMemory:
                     old_xyz = o.xyz_world.copy()
                     new_xyz = (delta_R @ old_xyz + delta_t).astype(np.float32)
                     shift_m = float(np.linalg.norm(new_xyz - old_xyz))
+                    max_shift = max(max_shift, shift_m)
                     o.xyz_world = new_xyz
                     corrected += 1
                     corrected_oids.add(oid)
@@ -848,6 +888,7 @@ class WorkingMemory:
                     _, delta_R, delta_t = deltas_list[nearest_idx]
                     new_xyz = (delta_R @ old_xyz + delta_t).astype(np.float32)
                     shift_m = float(np.linalg.norm(new_xyz - old_xyz))
+                    max_shift = max(max_shift, shift_m)
                     o.xyz_world = new_xyz
                     corrected += 1
 
@@ -870,6 +911,10 @@ class WorkingMemory:
                 f"from {len(frame_corrections)} frame deltas"
                 f"{f', demoted {len(demoted_oids)} back to proto' if demoted_oids else ''}"
             )
+        self.last_correction = {
+            "corrected": corrected, "direct": len(corrected_oids), "fallback": corrected - len(corrected_oids),
+            "demoted": list(demoted_oids), "max_shift_m": max_shift, "n_frames": len(frame_corrections),
+        }
         return corrected
 
     # ---------- utilities ----------

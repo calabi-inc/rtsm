@@ -313,6 +313,17 @@ class FaissClient:
             self._id_to_row = {oid: i for i, oid in enumerate(row_to_id)}
             self._embeddings = embeddings
 
+    def export(self) -> Tuple[List[str], np.ndarray]:
+        """Every stored embedding, sorted by id, as copies: what a session freeze
+        keeps (rtsm/core/sessions.py). ``(ids, embs)`` with embs float32 (N, dim),
+        ``(0, dim)`` when empty."""
+        with self._lock:
+            ids = sorted(self._embeddings.keys())
+            if not ids:
+                return [], np.zeros((0, int(self.dim)), dtype=np.float32)
+            embs = np.vstack([self._embeddings[oid] for oid in ids]).astype(np.float32, copy=True)
+            return ids, embs
+
     def stats(self) -> Dict[str, Any]:
         """Health snapshot for /healthz and /stats/detailed."""
         with self._lock:

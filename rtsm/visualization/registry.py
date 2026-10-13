@@ -20,6 +20,7 @@ class KeyframeRecord:
     colors: np.ndarray              # (N, 3) uint8 RGB
     pose: Optional[np.ndarray] = None  # (4, 4) float32 Twc row-major, or None if not yet received
     map_id: str = "0"               # SLAM map ID
+    session_key: str = ""          # the session registry's key of the session that produced it ("" = untagged)
 
 
 class KeyframeRegistry:
@@ -41,7 +42,8 @@ class KeyframeRegistry:
         positions: np.ndarray,
         colors: np.ndarray,
         pose: Optional[np.ndarray] = None,
-        map_id: str = "0"
+        map_id: str = "0",
+        session_key: str = "",
     ) -> KeyframeRecord:
         """
         Register a new keyframe or update existing.
@@ -58,6 +60,8 @@ class KeyframeRegistry:
                 if pose is not None:
                     rec.pose = pose
                 rec.map_id = map_id
+                if session_key:
+                    rec.session_key = session_key
             else:
                 # Create new
                 rec = KeyframeRecord(
@@ -66,7 +70,8 @@ class KeyframeRegistry:
                     positions=positions,
                     colors=colors,
                     pose=pose,
-                    map_id=map_id
+                    map_id=map_id,
+                    session_key=session_key,
                 )
                 self._keyframes[mesh_id] = rec
             return rec
@@ -96,10 +101,20 @@ class KeyframeRegistry:
                 return True
             return False
 
-    def get_all(self) -> List[KeyframeRecord]:
-        """Get all keyframes (for syncing new clients)."""
+    def get_all(self, session_key: Optional[str] = None) -> List[KeyframeRecord]:
+        """Get all keyframes (for syncing new clients), or those of one session."""
         with self._lock:
-            return list(self._keyframes.values())
+            if session_key is None:
+                return list(self._keyframes.values())
+            return [r for r in self._keyframes.values() if r.session_key == session_key]
+
+    def detach(self, session_key: str) -> List[KeyframeRecord]:
+        """Remove and return the keyframes of one session (a session freeze)."""
+        with self._lock:
+            out = [r for r in self._keyframes.values() if r.session_key == session_key]
+            for r in out:
+                del self._keyframes[r.mesh_id]
+            return out
 
     def get_all_ids(self) -> List[str]:
         """Get all mesh IDs."""
@@ -111,10 +126,12 @@ class KeyframeRegistry:
         with self._lock:
             return mesh_id in self._keyframes
 
-    def count(self) -> int:
-        """Get total number of keyframes."""
+    def count(self, session_key: Optional[str] = None) -> int:
+        """Get total number of keyframes, or the count of one session."""
         with self._lock:
-            return len(self._keyframes)
+            if session_key is None:
+                return len(self._keyframes)
+            return sum(1 for r in self._keyframes.values() if r.session_key == session_key)
 
     def clear(self) -> int:
         """Clear all keyframes. Returns count of deleted."""
