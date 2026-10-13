@@ -259,6 +259,7 @@ io:
   receiver: zeromq
   camera_endpoint: tcp://172.27.240.1:5555   # D435i RGB-D frames
   rtabmap_endpoint: tcp://127.0.0.1:6000     # RTABMap pose topics
+  apply_map_correction: true                 # compose the bridge's rtabmap.map_correction (map->odom) onto tracking poses
 ```
 
 The subscriber pairs each RTABMap pose with the nearest camera frame (30 ms slop) from a window of **encoded** JPEG/PNG frames — `ingest.pair_window_s` (2 s) or at most `ceil(pair_window_s × pair_window_fps × 1.5)` frames (90 at the defaults, ≈ 30 MB worst case; `pair_window_fps` is read by nothing else) — and decodes a frame only once its pose has been admitted to the ingest queue. Its non-keyframe throttle reads `ingest.nonkf_min_interval_s` like the other receivers (it was a fixed 0.5 s before). The window has to outlast the latency of a keyframe pose stamp behind the newest camera frame (RTABMap can trail by more than a second during loop closure); an unpaired keyframe is dropped as `no_camera_frame`, not retried.
@@ -666,6 +667,33 @@ analytics:
 ```
 
 When enabled, the **analytics ticker** (one daemon thread per process) rolls the per-frame buffers into per-second buckets at 1 Hz whether or not a visualization client is connected, so headless runs (`--replay`, `rtsm demo --no-viz`, the eval harness) expose the same `GET /stats/analytics` history and real `input_hz` / `effective_ratio` as a run with the dashboard open; the visualization server only forwards the buckets. `/stats/analytics.rollup` reports the ticker's health (`ticks`, `late_ticks`, `stale_rollups`). `analytics.enable: false` disables the buffers and the ticker together (`/stats/analytics` then returns 503).
+
+---
+
+## Sessions
+
+A SLAM boundary (a new session id from the source, a receiver-inferred restart, a `reset` correction, `POST /reset`) freezes the live session instead of discarding it: objects, keyframe clouds, pose history, vectors and crops are kept, listed under `GET /sessions`, persisted and refined by later pose corrections (see [Sessions](../api/rest-api.md#sessions)).
+
+```yaml
+sessions:
+  enable: true                      # false = the previous behaviour (no freeze; /reset discards)
+  dir: sessions                     # frozen sessions on disk; relative to the working directory
+  keep_in_memory: 3                 # frozen sessions kept with clouds and vectors in RAM; the rest reload on demand
+  cloud_max_points: 150000          # per keyframe at freeze (uniform subsample, seeded by mesh id); 0 = keep all
+  persist_crops: true               # the objects' JPEG snapshots into the session folder
+  persist_on_freeze: true           # write to disk at freeze (false = memory only)
+  boundary_on_clock_rebase: true    # a large backwards sensor jump without an epoch change ends the session
+  tracking_gap_s: 2.0               # sensor-time gap between admitted frames that opens a tracking_gap event
+  min_keyframes: 1                  # a session ending with fewer keyframes and no objects is discarded, not frozen
+  merge_on_link: true               # a correction tying a frozen session to the live map marks it merged
+  alias_stamp_tol_ms: 30            # a "ts:<ns>" correction key matches a keyframe within this tolerance
+  retention:
+    keep_on_disk: 20                # 0 = no cap; the live chain and pinned sessions never count
+    max_age_days: 30                # 0 = no age limit
+    grace_served_min: 10            # a session served through /sessions/{key} in the last N minutes is never removed
+```
+
+A frozen session's folder holds `meta.json`, `objects.json`, `frame_index.json`, `keyframes.json` (poses and the pose history), `clouds.npz`, `vectors.npz`, `crops/<id>/<k>.jpg` and `timeline.jsonl`; a folder is written under a `.tmp` name and renamed, and stray `.tmp` / `.gc` folders are removed at start. Retention runs after start and after every freeze.
 
 ---
 

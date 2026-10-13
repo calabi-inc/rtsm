@@ -35,7 +35,7 @@ from rtsm.stores.frame_window import FrameWindow
 from rtsm.core.datamodel import FramePacket, TimeBundle, PoseStamped, PinholeIntrinsics, IngestMeta
 from rtsm.io.ingest_lanes import KF_SOURCE
 from rtsm.io.ingest_queue import IngestQueue
-from rtsm.utils.transforms import euler_to_quat_xyzw
+from rtsm.utils.transforms import euler_to_quat_xyzw, rotmat_to_quat_xyzw
 from rtsm.evaluation.event_log import (
     RX_DROPPED, RX_DUPLICATE_TS, RX_ENQUEUED, RX_MALFORMED, RX_NO_CAMERA_FRAME, RX_PARSE_ERROR, RX_QUEUE_FULL,
     RX_THROTTLE, TS_NOT_AVAILABLE, PoseEvent, ReceiverEvent,
@@ -67,6 +67,14 @@ class ZeroMQSubscriber:
         # Optional visualization callbacks
         on_kf_packet: Optional[Callable[..., Any]] = None,
         on_kf_pose_update: Optional[Callable[..., Any]] = None,
+        on_session_change: Optional[Callable[..., Any]] = None,
+        # The bridge's rtabmap.map_correction (map->odom), composed onto every
+        # tracking pose at receive time so this lane's poses are map-frame like
+        # kf_pose already is; the message's map_id becomes the session id.
+        apply_map_correction: bool = True,
+        # The end of a burst of per-keyframe pose updates (the viz server flushes
+        # its coalesced batch); called on every map_correction.
+        on_corrections_flush: Optional[Callable[[], None]] = None,
         latency_analytics: Optional[Any] = None,
         event_sink: Optional[Callable[[Any], None]] = None,
         throttle_clock: str = "wall",
@@ -127,6 +135,17 @@ class ZeroMQSubscriber:
         # Visualization callbacks
         self._on_kf_packet = on_kf_packet
         self._on_kf_pose_update = on_kf_pose_update
+        self._on_corrections_flush = on_corrections_flush
+
+        # Map correction state (rtabmap.map_correction)
+        self._apply_map_correction = bool(apply_map_correction)
+        self._T_w_odom: Optional[np.ndarray] = None      # latest map->odom (4x4); None until the first message
+        self._map_corr_ts_ns: Optional[int] = None
+        self._map_id: Optional[int] = None
+        self._map_corr_received = 0
+        self._map_corr_applied = 0
+        self._map_corr_malformed = 0
+        self._enqueue_kf_id: Optional[str] = None       # the node id of the keyframe being paired (set by _handle_kf_pose)
 
         # ZMQ context and sockets
         self.ctx = zmq.Context()
@@ -141,6 +160,7 @@ class ZeroMQSubscriber:
         self.rtabmap_sock.connect(self.rtabmap_endpoint)
         self.rtabmap_sock.setsockopt(zmq.SUBSCRIBE, b"rtabmap.tracking_pose")
         self.rtabmap_sock.setsockopt(zmq.SUBSCRIBE, b"rtabmap.kf_pose")
+        self.rtabmap_sock.setsockopt(zmq.SUBSCRIBE, b"rtabmap.map_correction")
 
         # Conditionally subscribe to visualization topics
         if on_kf_packet:
@@ -170,6 +190,7 @@ class ZeroMQSubscriber:
             require_tracking_normal=False, confidence_threshold=0,
             pose_sink=pose_sink, event_sink=event_sink, ledger_sink=ledger_sink,
             latency_analytics=latency_analytics, decode_cache_size=4,
+            on_session_change=on_session_change,
         )
 
         # Track latest pose for frame assembly
@@ -386,6 +407,8 @@ class ZeroMQSubscriber:
         try:
             json_data = json.loads(parts[1].decode("utf-8"))
             ts_ns, t_wc, q_xyzw, _stamped = self._parse_rtabmap_pose_ex(json_data)
+            # The bridge's tracking_pose is the ODOMETRY pose: put it in the map frame.
+            t_wc, q_xyzw = self._compose_map_correction(t_wc, q_xyzw)
 
             # Receive-time pose event: the receiver-minted epoch (a stamp that
             # goes back by more than POSE_EPOCH_REBASE_S = restarted source),
@@ -435,8 +458,13 @@ class ZeroMQSubscriber:
             # the same key -- a periodic backwards blip an agent could read
             # as a discontinuity. tracking_pose already writes at input rate.
 
-            # Enqueue as keyframe
-            self._try_enqueue_frame(ts_ns, t_wc, q_xyzw, is_keyframe=True)
+            # Enqueue as keyframe; the node id rides on the header so a correction
+            # keyed by it (kf_pose_update) finds this keyframe (FramePacket.kf_id).
+            self._enqueue_kf_id = str(kf_id) if kf_id not in (None, -1, "") else None
+            try:
+                self._try_enqueue_frame(ts_ns, t_wc, q_xyzw, is_keyframe=True)
+            finally:
+                self._enqueue_kf_id = None
             logger.debug(f"[zmq] kf_pose: kf_id={kf_id}{'' if stamped else ' (stamp inherited)'}")
 
         except Exception as e:
@@ -520,6 +548,73 @@ class ZeroMQSubscriber:
 
         except Exception as e:
             logger.error(f"[zeromq] kf_packet: parse error: {e}")
+
+    # ── Map correction (the bridge's map->odom) ──
+
+    def _handle_map_correction(self, parts: List[bytes]) -> None:
+        """rtabmap.map_correction: {"T_w_odom": {"t": [x, y, z], "q": [qx, qy, qz, qw]},
+        "map_id": int, "ts_ns": int} -- the bridge's publishMapCorrection, once per
+        RTAB-Map update and before its burst of kf_pose_update. Keeps the latest
+        map->odom for the tracking poses, takes the map id as the session id, and
+        ends the previous update burst. Malformed messages are counted, never raised."""
+        self._map_corr_received += 1
+        try:
+            if len(parts) < 2:
+                raise ValueError("expected 2 parts")
+            data = json.loads(parts[1].decode("utf-8"))
+            tw = data.get("T_w_odom") or {}
+            t = [float(v) for v in tw["t"]]
+            q = [float(v) for v in tw["q"]]
+            if len(t) != 3 or len(q) != 4:
+                raise ValueError("T_w_odom needs t[3] and q[4]")
+            T = self._quat_to_matrix(t, q)
+        except Exception as e:  # noqa: BLE001
+            self._map_corr_malformed += 1
+            logger.warning(f"[zeromq] map_correction: malformed message ignored: {e}")
+            return
+        self._T_w_odom = T
+        try:
+            self._map_corr_ts_ns = int(data["ts_ns"]) if data.get("ts_ns") is not None else None
+        except (TypeError, ValueError):
+            self._map_corr_ts_ns = None
+        map_id = data.get("map_id")
+        try:
+            map_id = int(map_id) if map_id is not None else None
+        except (TypeError, ValueError):
+            map_id = None
+        if map_id is not None and map_id > 0 and map_id != self._map_id:
+            self._map_id = map_id
+            self._fe.new_session(f"rtabmap-map-{map_id}")
+            logger.info(f"[zeromq] RTAB-Map map id {map_id}: session rtabmap-map-{map_id} (frame_epoch {self._fe.frame_epoch})")
+        if self._on_corrections_flush is not None:
+            try:
+                self._on_corrections_flush()
+            except Exception as e:  # noqa: BLE001
+                logger.error(f"[zeromq] on_corrections_flush error: {e}")
+
+    def _compose_map_correction(self, t_wc: np.ndarray, q_xyzw: np.ndarray) -> tuple:
+        """T_wc_map = T_w_odom @ T_odom_c. The bridge's tracking_pose is the odometry
+        pose (OdometryEvent::pose()); with no correction yet the identity applies."""
+        if not self._apply_map_correction or self._T_w_odom is None:
+            return t_wc, q_xyzw
+        T_oc = self._quat_to_matrix([float(v) for v in t_wc], [float(v) for v in q_xyzw])
+        T = self._T_w_odom.astype(np.float64) @ T_oc.astype(np.float64)
+        q = rotmat_to_quat_xyzw(T[:3, :3].astype(np.float32))
+        self._map_corr_applied += 1
+        return T[:3, 3].astype(np.float32), np.asarray(q, dtype=np.float32)
+
+    def stats(self) -> dict:
+        """The source's own counters (/stats.source)."""
+        age = None
+        if self._map_corr_ts_ns is not None and self._last_pose_ts_ns is not None:
+            age = max(0.0, (int(self._last_pose_ts_ns) - int(self._map_corr_ts_ns)) / 1e9)
+        return {
+            "map_correction": {"enabled": self._apply_map_correction, "received": self._map_corr_received,
+                               "applied": self._map_corr_applied, "malformed": self._map_corr_malformed,
+                               "map_id": self._map_id, "age_s": age},
+            "kf_stamps_inherited": self._kf_stamps_inherited,
+            "frame_epoch": self._fe.frame_epoch,
+        }
 
     def _handle_kf_pose_update(self, parts: List[bytes]) -> None:
         """
@@ -612,6 +707,7 @@ class ZeroMQSubscriber:
         t_wc: np.ndarray,
         q_xyzw: np.ndarray,
         is_keyframe: bool,
+        kf_id: Optional[str] = None,
     ) -> None:
         """
         One ATTEMPT to assemble and enqueue a frame for a pose. The rx_seq is
@@ -622,6 +718,8 @@ class ZeroMQSubscriber:
         """
         if self.ingest_q is None:
             return
+        if kf_id is None and is_keyframe:
+            kf_id = self._enqueue_kf_id
         rx_seq = self._fe.next_rx_seq()
         # Skip duplicates (except keyframes always get enqueued)
         if not is_keyframe and self._fe.is_repeat_stamp(ts_ns):
@@ -664,6 +762,7 @@ class ZeroMQSubscriber:
             pose_raw=(t_wc, q_xyzw), pose_format=POSE_FMT_PREPARED, pose_convention=CONVENTION_OPENCV,
             decode_key=(cam_ts if cam_ts is not None else ts_ns),
             pose_frame_id="world", keep_encoded_rgb=False,
+            extra=({"kf_id": kf_id} if kf_id is not None else {}),
         ))
         try:
             pkt = self._fe.admit(raw, rx_seq=rx_seq)
@@ -763,6 +862,8 @@ class ZeroMQSubscriber:
                         self._handle_kf_packet(parts)
                     elif topic == "rtabmap.kf_pose_update":
                         self._handle_kf_pose_update(parts)
+                    elif topic == "rtabmap.map_correction":
+                        self._handle_map_correction(parts)
 
         except KeyboardInterrupt:
             logger.info("[zeromq] Shutting down...")

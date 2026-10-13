@@ -155,3 +155,6 @@ recordings/*_bag/
 
 # External datasets fetched for reader tests (TUM RGB-D bags etc.; see eval/datasets/external-corpus.md)
 recordings/external/
+
+# Frozen sessions (sessions.dir): per-run data, never in the repo
+sessions/

@@ -28,6 +28,20 @@ from rtsm.io.websocket import handle_lens_text_message, parse_lens_message
 logger = logging.getLogger(__name__)
 
 
+def recording_session_id(recording_dir: str) -> str:
+    """The session id a recording carries (meta.json ``session_id``, written from
+    the Lens hello by the recorder), else the recording folder's name."""
+    try:
+        with open(os.path.join(recording_dir, "meta.json"), "r", encoding="utf-8") as fh:
+            meta = json.load(fh)
+        sid = meta.get("session_id") or (meta.get("hello") or {}).get("session_id")
+        if sid and str(sid) != "unknown":
+            return str(sid)
+    except (OSError, ValueError):
+        pass
+    return os.path.basename(os.path.normpath(recording_dir))
+
+
 class ReplayReceiver:
     """Replays a recorded WebSocket session through the RTSM pipeline.
 
@@ -61,6 +75,7 @@ class ReplayReceiver:
         pose_sink: Optional[callable] = None,
         ledger_sink: Optional[callable] = None,
         on_frame_correction: Optional[callable] = None,
+        on_session_change: Optional[callable] = None,
     ) -> None:
         self._recording_dir = os.path.abspath(recording_dir)
         self._ingest_q = ingest_queue
@@ -94,6 +109,7 @@ class ReplayReceiver:
             confidence_threshold=confidence_threshold, pose_sink=pose_sink, event_sink=event_sink,
             ledger_sink=ledger_sink, latency_analytics=latency_analytics,
             on_camera_frame=on_camera_frame, on_keyframe=on_keyframe,
+            on_session_change=on_session_change,
         )
 
         self._replay_speed = max(0.1, replay_speed)  # <1 = slower, >1 = faster
@@ -107,7 +123,10 @@ class ReplayReceiver:
         return self._fe
 
     def start(self) -> None:
-        """Launch the replay loop in a daemon thread."""
+        """Launch the replay loop in a daemon thread. The recording's session id
+        (meta.json, the Lens hello) names the session, as the live receiver's
+        handshake would; a recording without one is named after its folder."""
+        self._fe.new_session(recording_session_id(self._recording_dir))
         self._thread = threading.Thread(
             target=self._replay_loop, name="replay-receiver", daemon=True
         )

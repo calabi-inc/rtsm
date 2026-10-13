@@ -173,6 +173,14 @@ class FramePacket:
     # new client session; None for sources without the notion). The dispatcher's
     # SensorClock re-bases on a change so sensor time stays continuous.
     frame_epoch: Optional[int] = None
+    # Session identity of the source at this frame (the websocket hello's
+    # session_id, the bag basename, the ros2 session id, "rtabmap-map-<id>" on
+    # ZeroMQ); None for sources without one. The session registry
+    # (rtsm/core/sessions.py) reads it with frame_epoch at a boundary.
+    session_id: Optional[str] = None
+    # The source's own keyframe id (the RTAB-Map node id on the ZeroMQ lane)
+    # when the source keys pose corrections by it; None elsewhere.
+    kf_id: Optional[str] = None
     # Ingest bookkeeping: created by the receiver, completed by the ingest
     # queue at admission (see IngestMeta). None only for packets built by code
     # that predates it (tests, probes).

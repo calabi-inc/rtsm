@@ -27,7 +27,15 @@ An adapter owns the transport (sockets, files, pairing of poses with camera fram
 
 - one `RawFrame` per candidate frame: header fields (source frame id, sensor stamp, sender wall stamp, tracking state, the source's own keyframe flag if it has one), the **still-encoded** RGB / depth / confidence payloads with their encodings and declared sizes, intrinsics at RGB resolution (`codecs.rescale_intrinsics`), and the pose as the transport delivered it plus `pose_format` / `pose_convention` tags;
 - `PoseSample` events for poses that arrive separately from frames (`IngestFrontEnd.pose_event`), so the receive-time robot pose and the pose ledger see every pose at input rate;
-- `FrameCorrection` events for retroactive pose corrections (loop closure, relocalisation).
+- `FrameCorrection` events for retroactive pose corrections (loop closure, relocalisation), and the session identity: `new_session(session_id)` on the front-end when the source's map changes.
+
+Three rules keep the session registry and the visualization server agnostic of the SLAM behind an adapter (see [Sessions](../api/rest-api.md#sessions)):
+
+1. **One session id per SLAM map**, passed to `fe.new_session()`; the same string is the `map_ref` when the adapter announces a link into a previous map, so the registry resolves it by equality (the ZeroMQ adapter mints `rtabmap-map-<id>`; Lens sends its UUID; a plug-in chooses its own). A same-id call is a reconnect, not a boundary.
+2. **Corrections only through the batch entry** (`on_pose_corrections_batch(batch, kind=..., session_id=..., map_ref=...)`, or per keyframe through `on_kf_pose_update` plus `on_corrections_flush` at the end of a burst), never by re-sending frames. A batch may be keyed by the pipeline's `ws_<seq>`, by the source's own keyframe id, or by a sensor stamp as `"ts:<ns>"`; an empty batch is announced-only (a SLAM that reports a map change without delivering poses: a timeline event, nothing moves).
+3. **The source's keyframe id on the header** (`FrameHeader.extra["kf_id"]`, carried to `FramePacket.kf_id`) when corrections will be keyed by it; otherwise key them by stamp.
+
+Poses handed to the front-end are map-frame: a SLAM's pose correction (map→odom) is composed by the adapter or by TF before the front-end sees the pose; the viewer never sees an odometry frame.
 
 It never decodes pixels, never applies keyframe or throttle logic, never touches the ingest queue. Those belong to the front-end; that is what keeps the session1 anchor (`ad6f71a5b89c8506`, 124 objects / 65 confirmed at 53 frames) meaningful across sources.
 

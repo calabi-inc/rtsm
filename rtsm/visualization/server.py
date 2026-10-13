@@ -25,6 +25,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 
+from rtsm.core.sessions import LiveApplyResult, LiveVizState, packet_frame_id
 from rtsm.visualization.processor import PointCloudProcessor, ProcessorConfig
 from rtsm.visualization.registry import KeyframeRegistry
 from rtsm.visualization.broadcaster import WSBroadcaster
@@ -136,6 +137,7 @@ class VisualizationServer:
         latency_analytics: Any = None,
         ingest_queue: Any = None,
         analytics_ticker: Any = None,
+        sessions: Any = None,
     ):
         """
         Initialize visualization server.
@@ -227,6 +229,23 @@ class VisualizationServer:
         self._correct_wm = bool(
             cfg.get("slam", {}).get("correct_working_memory", True)
         )
+
+        # Session registry (rtsm/core/sessions.py); None = today's behaviour.
+        # The server knows nothing about which SLAM or transport produced a
+        # frame: it tags keyframes with the live session key, learns the
+        # source's keyframe id -> mesh id alias from FramePacket.kf_id, hands
+        # every correction batch to the registry, and coalesces per-keyframe
+        # pose updates (an adapter calling handle_kf_pose_update) into one batch.
+        self.sessions = sessions
+        self._live_session_key: str = ""
+        self._live_session_id: Optional[str] = None
+        self._kf_alias: Dict[str, str] = {}
+        self._alias_stamp: Dict[str, int] = {}
+        self._pending: Dict[str, np.ndarray] = {}
+        self._pending_lock = threading.Lock()
+        self._pending_timer: Optional[threading.Timer] = None
+        self._pending_flush_s = 0.2
+        self._corrections_unaliased = 0
 
         # Server state
         self._app: Optional[FastAPI] = None
@@ -582,7 +601,8 @@ class VisualizationServer:
                 positions=positions,
                 colors=colors,
                 pose=pose,
-                map_id=map_id
+                map_id=map_id,
+                session_key=self._live_session_key,
             )
 
             # Broadcast to clients (thread-safe via broadcaster.schedule)
@@ -626,9 +646,15 @@ class VisualizationServer:
 
     def handle_kf_pose_update(self, kf_id: str, pose: np.ndarray) -> None:
         """
-        Handle pose correction from bundle adjustment or loop closure.
+        One re-posed keyframe from an adapter (the ZeroMQ bridge's kf_pose_update,
+        keyed by the SLAM's own node id). Called from the subscriber thread.
 
-        Called from ZMQ subscriber thread or WebSocket receiver.
+        A cloud stored under that id (a bridge kf_packet thumbnail) is re-posed
+        at once, as before. The update is then translated through the alias
+        table to the pipeline's keyframe and coalesced into one batch, flushed
+        by the adapter (SourceContext.on_corrections_flush) at the end of its
+        burst or by a timer, so objects, the TSDF, the pose history and the
+        session registry see it exactly as a Lens correction batch.
         """
         mesh_id = kf_id
 
@@ -639,20 +665,108 @@ class VisualizationServer:
                 )
             logger.debug(f"[visualization] Pose updated for KF {mesh_id} (BA/LC)")
 
-    def handle_pose_corrections_batch(self, corrections: dict) -> None:
-        """
-        Handle a batch of pose corrections from loop closure.
-
-        When TSDF is enabled, applies corrections to the TSDF volume.
-        Otherwise delegates per-correction to handle_kf_pose_update.
-        Also retroactively corrects WorkingMemory object positions.
-        """
-        if not corrections:
+        target = self._kf_alias.get(str(kf_id))
+        if target is None:
+            self._corrections_unaliased += 1
             return
+        with self._pending_lock:
+            self._pending[target] = np.asarray(pose, dtype=np.float32).copy()
+            if self._pending_timer is None:
+                t = threading.Timer(self._pending_flush_s, self.flush_pending_corrections)
+                t.daemon = True
+                self._pending_timer = t
+                t.start()
+
+    def flush_pending_corrections(self) -> None:
+        """Apply the coalesced per-keyframe updates as one batch (adapter flush or timer)."""
+        with self._pending_lock:
+            pending, self._pending = self._pending, {}
+            timer, self._pending_timer = self._pending_timer, None
+        if timer is not None:
+            timer.cancel()
+        if not pending:
+            return
+        self.handle_pose_corrections_batch(pending, kind="loop_closure", session_id=self._live_session_id)
+
+    # ---- Sessions (rtsm/core/sessions.py) ----
+
+    def set_live_session(self, key: str, session_id: Optional[str]) -> None:
+        """The registry's live session: new keyframes are tagged with it."""
+        self._live_session_key = str(key or "")
+        self._live_session_id = session_id
+
+    def freeze_live(self, next_key: Optional[str]) -> LiveVizState:
+        """A session boundary (the registry holds its lock): hand over the live
+        session's keyframes, pose history and alias tables, clear them, reset the
+        TSDF, tell the clients the scene restarts, adopt the next live key."""
+        self.flush_pending_corrections()          # pending updates belong to the session that ends
+        records = self.registry.detach(self._live_session_key)
+        state = LiveVizState(records=records, pose_history=dict(self._pose_history),
+                             kf_alias=dict(self._kf_alias), alias_stamp=dict(self._alias_stamp))
+        self._pose_history.clear()
+        self._kf_alias.clear()
+        self._alias_stamp.clear()
+        with self._pending_lock:
+            self._pending.clear()
+        if self.tsdf is not None:
+            self.tsdf.reset()
+        if self._running:
+            self.broadcaster.schedule(self.broadcaster._broadcast_json({"type": "clear"}))
+        if next_key is not None:
+            self._live_session_key = str(next_key)
+        return state
+
+    def session_stats(self) -> Dict[str, Any]:
+        with self._pending_lock:
+            pending = len(self._pending)
+        return {"live_session_key": self._live_session_key, "corrections_unaliased": self._corrections_unaliased,
+                "aliases": len(self._kf_alias), "pending_updates": pending}
+
+    def handle_pose_corrections_batch(self, corrections: dict, *, kind: str = "loop_closure",
+                                      session_id: Optional[str] = None, map_ref: Optional[str] = None) -> Any:
+        """
+        The one entry for a batch of re-posed keyframes, from any lane: a dict of
+        keyframe id -> 4x4 map-frame pose (the pipeline's ws_<seq>, a source node
+        id through the alias table, or "ts:<ns>"), with the SLAM's kind and an
+        optional map reference. An empty dict is announced-only.
+
+        With a session registry the batch is routed to the session that owns
+        each keyframe (live: this server's path below; frozen: the registry's
+        snapshot). Without one, today's live path runs unchanged.
+        """
+        if self.sessions is not None:
+            try:
+                return self.sessions.apply_corrections(
+                    corrections, kind=kind, session_id=session_id or self._live_session_id, map_ref=map_ref,
+                    live_apply=self._apply_live_corrections)
+            except Exception as e:  # noqa: BLE001
+                logger.error(f"[visualization] session registry rejected a correction batch: {e}")
+                return None
+        if not corrections:
+            return None
+        self._apply_live_corrections(corrections)
+        return None
+
+    def _apply_live_corrections(self, corrections: dict) -> LiveApplyResult:
+        """Today's live path: WM objects, the TSDF or the per-frame meshes, the
+        pose history. Returns the per-frame deltas it computed for the registry."""
+        deltas: Dict[str, Any] = {}
+        objects_moved = 0
+        objects_demoted = 0
 
         # ---- Correct WorkingMemory objects ----
         if self._correct_wm and self.wm is not None:
-            self._apply_wm_pose_corrections(corrections)
+            deltas = self._apply_wm_pose_corrections(corrections)
+            lc = getattr(self.wm, "last_correction", None)
+            if isinstance(lc, dict) and deltas:
+                objects_moved = int(lc.get("corrected", 0))
+                objects_demoted = len(lc.get("demoted", []) or [])
+        else:
+            for kf_id, new_pose in corrections.items():
+                old_pose = self._pose_history.get(kf_id)
+                if old_pose is not None and isinstance(new_pose, np.ndarray):
+                    deltas[kf_id] = (old_pose[:3, 3].astype(np.float32), np.eye(3, dtype=np.float32),
+                                     (new_pose[:3, 3] - old_pose[:3, 3]).astype(np.float32))
 
         # ---- Correct TSDF / per-frame meshes ----
         if self.tsdf is not None:
@@ -665,12 +779,19 @@ class VisualizationServer:
                 ).start()
         else:
             for kf_id, corr_pose in corrections.items():
-                self.handle_kf_pose_update(kf_id, corr_pose)
+                if self.registry.update_pose(kf_id, corr_pose) and self._running:
+                    self.broadcaster.schedule(self.broadcaster.send_mesh_update_pose(kf_id, corr_pose))
 
         # Update pose history with corrected poses
+        max_shift = 0.0
         for kf_id, new_pose in corrections.items():
             if isinstance(new_pose, np.ndarray):
+                old = self._pose_history.get(kf_id)
+                if old is not None:
+                    max_shift = max(max_shift, float(np.linalg.norm(new_pose[:3, 3] - old[:3, 3])))
                 self._pose_history[kf_id] = new_pose.copy()
+        return LiveApplyResult(frame_deltas=deltas, max_shift_m=max_shift, objects_moved=objects_moved,
+                               objects_demoted=objects_demoted)
 
     def broadcast_camera_frame(self, pkt) -> None:
         """Broadcast camera JPEG to visualization clients.
@@ -709,7 +830,7 @@ class VisualizationServer:
             if pkt.depth_m is None or pkt.pose is None or pkt.intr is None:
                 return
 
-            mesh_id = f"ws_{pkt.time.seq}"
+            mesh_id = packet_frame_id(pkt) or f"ws_{pkt.time.seq}"
 
             # Build 3x3 intrinsics matrix
             K = np.array([
@@ -761,6 +882,13 @@ class VisualizationServer:
 
             # Store original pose for retroactive WM correction
             self._pose_history[mesh_id] = pose.copy()
+            # The source's own keyframe id (RTAB-Map node id on ZeroMQ) and the
+            # sensor stamp: how a correction keyed by node id or by stamp finds
+            # this keyframe (rtsm/core/sessions.py).
+            kf_src = getattr(pkt, "kf_id", None)
+            if kf_src is not None:
+                self._kf_alias[str(kf_src)] = mesh_id
+            self._alias_stamp[mesh_id] = int(pkt.time.t_sensor_ns or 0)
             if len(self._pose_history) > self._pose_history_max:
                 # Evict oldest entries (dict preserves insertion order in Python 3.7+)
                 excess = len(self._pose_history) - self._pose_history_max
@@ -815,6 +943,7 @@ class VisualizationServer:
                 colors=colors,
                 pose=pose,
                 map_id="websocket",
+                session_key=self._live_session_key,
             )
 
             if self._running:
@@ -828,7 +957,7 @@ class VisualizationServer:
         except Exception as e:
             logger.error(f"[visualization] Error processing frame packet: {e}")
 
-    def _apply_wm_pose_corrections(self, corrections: dict) -> None:
+    def _apply_wm_pose_corrections(self, corrections: dict) -> Dict[str, tuple]:
         """
         Compute per-frame rigid correction deltas and apply them to WM objects.
 
@@ -874,6 +1003,7 @@ class VisualizationServer:
                 )
             except Exception as e:
                 logger.error(f"[visualization] WM pose correction failed: {e}")
+        return frame_corrections
 
     def _extract_and_broadcast_tsdf(self) -> None:
         """Extract fused point cloud from TSDF and broadcast to clients."""

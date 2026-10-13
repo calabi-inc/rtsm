@@ -54,6 +54,7 @@ class BagSource:
             confidence_threshold=ctx.confidence_threshold, pose_sink=ctx.pose_sink, clearance_sink=ctx.clearance_sink,
             event_sink=ctx.event_sink, ledger_sink=ctx.ledger_sink, latency_analytics=ctx.latency_analytics,
             on_camera_frame=ctx.on_camera_frame, on_keyframe=ctx.on_keyframe,
+            on_session_change=ctx.on_session_change,
         )
         self._stats = BagStats()
         self._enqueued = 0

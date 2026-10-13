@@ -395,6 +395,50 @@ POST /reset
 
 Clears working memory, sweep cache, frame window, visualization registry, TSDF state, and analytics buffers. Models stay loaded.
 
+With sessions enabled (the default) the live session is **frozen first** and listed under `/sessions`; the response carries `"session": {"frozen": key | null, "live": key, "discarded": bool}` (`frozen` is null when the live session had no keyframes and no objects, which is discarded rather than kept). Send `{"discard": true}` to keep nothing, as before.
+
+## Sessions
+
+A *session* is one map frame of the pose source. The ingest front-end mints a new `frame_epoch` when the source's session id changes (a Lens hello, a bag, a ROS 2 run, `rtabmap-map-<id>` on ZeroMQ) or when a receiver infers a restart (a large backwards stamp jump); the pipeline then freezes the live session before the next frame (`rtsm/core/sessions.py`): objects, keyframe clouds, pose history, vectors, crops and a timeline are kept and persisted under `sessions.dir/<key>/`, and a new live session opens. Pose-correction batches refine the live session or the frozen session that owns the keyframes. `sessions:` in the configuration sets the folder, the RAM / disk caps and the merge rule.
+
+### List Sessions
+
+```http
+GET /sessions
+```
+
+`{"enabled": true, "live": key, "sessions": [summary, ...]}`: the live session first (`live: true`, `ended_wall_utc: null`), then the frozen ones most recent first, including those found on disk at start. A summary carries `key`, `session_id`, `epoch`, `source`, `started_wall_utc`, `ended_wall_utc`, `end_reason` (`session_id` | `restart_inferred` | `map_reset` | `manual` | `process_exit`), `aligned_to`, `merged_into`, `merged_from`, `pinned`, `counters` (frames, keyframes, objects, confirmed, refinements, corrections_applied, objects_demoted_by_corrections, tracking_gaps, announced_only), `persisted`, `on_disk`, `in_memory`, `n_keyframes`, `n_objects`, `discarded_predecessor`.
+
+### Get Session
+
+```http
+GET /sessions/{key}
+```
+
+The summary plus `timeline` (`start` | `reconnect` | `tracking_gap` | `refine` | `relocalized` | `merge` | `unmerge` | `freeze` events with a `detail` object), `objects` (the `/objects` summary shape plus `label_scores`, `last_update_frame_id`, `n_crops`, `demoted_by_correction`), `keyframes` (`mesh_id`, `timestamp_ns`, `n_points`) and `retention: {removable_after, protected_by}`. Reading a session marks it served, which protects it from retention for `sessions.retention.grace_served_min`. 404 for an unknown key.
+
+### End the Live Session
+
+```http
+POST /sessions/end
+```
+
+Freezes the live session by hand (reason `manual`) and opens the next one with the same identity: `{"frozen": key | null, "live": key, "discarded": bool}`. 409 when sessions are disabled.
+
+### Merge, Pin, Delete
+
+```http
+POST /sessions/{key}/merge      {"into": "live"}
+POST /sessions/{key}/unmerge
+POST /sessions/{key}/pin
+POST /sessions/{key}/unpin
+DELETE /sessions/{key}[?force=true]
+```
+
+Merging marks a frozen session as part of the live map (`merged_into` / `merged_from`); its objects stay its own and keep refining by keyframe id. The registry merges on its own when a correction batch carries `relocalized_in_prior_map` with a `map_ref` naming the session, or spans the live session and exactly one frozen session (`sessions.merge_on_link`). A pinned session never counts against retention. `DELETE` applies the retention rules by hand and answers 204, or 409 with `{"detail": {"reason": ...}}`: `live_session`, `pinned` (unless `?force=true`), `in_live_chain` (unmerge first); 404 for an unknown key.
+
+`/healthz` carries a diagnostic `sessions` block (`live`, `n_frozen`, `n_on_disk`, `n_merged`, `discarded`, `gc_removed`, `corrections_unrouted`, `corrections_unaliased`, `merge_ambiguous`, `announced_only`, `boundaries`, `last_boundary`); it never folds into `status`.
+
 ---
 
 ## Prometheus Metrics

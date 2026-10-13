@@ -161,6 +161,7 @@ class IngestFrontEnd:
         on_camera_frame: Optional[Callable[[Any], None]] = None,
         on_keyframe: Optional[Callable[[Any], None]] = None,
         decode_cache_size: int = 4,
+        on_session_change: Optional[Callable[[Optional[str], int], None]] = None,
     ) -> None:
         self.source = str(source)
         self.policy = policy
@@ -183,6 +184,7 @@ class IngestFrontEnd:
         self.latency_analytics = latency_analytics
         self.on_camera_frame = on_camera_frame
         self.on_keyframe = on_keyframe
+        self.on_session_change = on_session_change
         # Per-session counters (the websocket adapter resets them per connection)
         self.frame_count: int = 0
         self.last_enq_ts_ns: Optional[int] = None
@@ -213,7 +215,17 @@ class IngestFrontEnd:
         if session_id != self._epoch_session_id:
             self._epoch_session_id = session_id
             self.frame_epoch += 1
+        self._notify_session_change()
         return self.frame_epoch
+
+    def _notify_session_change(self) -> None:
+        """Tell the session registry (session_id, frame_epoch). Never raises."""
+        if self.on_session_change is None:
+            return
+        try:
+            self.on_session_change(self._epoch_session_id, int(self.frame_epoch))
+        except Exception as e:  # noqa: BLE001
+            logger.error(f"[{self.source}] on_session_change callback error: {e}")
 
     def reset_session_state(self) -> None:
         """Per-connection resets the websocket receiver performs after a handshake."""
@@ -252,6 +264,7 @@ class IngestFrontEnd:
                     "[%s] tracking stamp jumped back %.1f s (%d -> %d): new frame_epoch %d",
                     self.source, (int(last) - stamp) / 1e9, int(last), stamp, self.frame_epoch,
                 )
+                self._notify_session_change()
             self.last_pose_ts_ns = stamp
         wall, clock = self._wall_and_clock(sample.t_wall_utc_s)
         if mailbox_write and self.pose_sink is not None:
@@ -413,6 +426,8 @@ class IngestFrontEnd:
             confidence=conf_map, rgb_jpeg=raw_jpeg, frame_epoch=self.frame_epoch,
             ingest=IngestMeta(keyframe_origin=kf_origin, depth_valid_frac=dvf, rx_seq=rx_seq),
             detections=h.extra.get("detections"),
+            session_id=self._epoch_session_id,
+            kf_id=(str(h.extra["kf_id"]) if h.extra.get("kf_id") is not None else None),
         )
 
     def enqueue(self, pkt: FramePacket) -> bool:
