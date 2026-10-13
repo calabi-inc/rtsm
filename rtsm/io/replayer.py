@@ -236,6 +236,8 @@ class ReplayReceiver:
 
                 elif kind == "text":
                     try:
+                        if self._replay_hello(entry.get("payload")):
+                            continue
                         handle_lens_text_message(
                             entry["payload"], apply_camera_flip=self._apply_camera_flip,
                             on_pose_corrections=self._on_pose_corrections,
@@ -251,6 +253,23 @@ class ReplayReceiver:
             f"{frames_enqueued} enqueued, {remaining_q} remaining in queue"
         )
         self._done.set()
+
+    def _replay_hello(self, payload: Any) -> bool:
+        """A hello recorded mid-stream (the device reconnected with another session
+        id, or a clone made with scripts/split_recording_session.py): re-announce the
+        session exactly as the live handshake would. True when the entry was a hello."""
+        try:
+            msg = json.loads(payload) if isinstance(payload, str) else payload
+        except (TypeError, ValueError):
+            return False
+        if not isinstance(msg, dict) or msg.get("type") != "hello":
+            return False
+        sid = msg.get("session_id")
+        session_id = str(sid) if sid else recording_session_id(self._recording_dir)
+        self._fe.new_session(session_id)
+        self._fe.reset_session_state()
+        logger.info(f"[replay] hello: session {session_id} (frame_epoch {self._fe.frame_epoch})")
+        return True
 
     def _load_index(self) -> List[dict]:
         entries = []

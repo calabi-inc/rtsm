@@ -152,9 +152,12 @@ logs/
 
 # Bags converted from recordings (scripts/recording_to_mcap.py): gigabytes, regenerable
 recordings/*_bag/
+# Session-split clones (scripts/split_recording_session.py): regenerable, frames hard-linked
+recordings/*_split/
 
 # External datasets fetched for reader tests (TUM RGB-D bags etc.; see eval/datasets/external-corpus.md)
 recordings/external/
 
-# Frozen sessions (sessions.dir): per-run data, never in the repo
+# Frozen sessions (sessions.dir, and any sessions_* scratch folder): per-run data, never in the repo
 sessions/
+sessions_*/

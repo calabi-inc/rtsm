@@ -437,6 +437,17 @@ DELETE /sessions/{key}[?force=true]
 
 Merging marks a frozen session as part of the live map (`merged_into` / `merged_from`); its objects stay its own and keep refining by keyframe id. The registry merges on its own when a correction batch carries `relocalized_in_prior_map` with a `map_ref` naming the session, or spans the live session and exactly one frozen session (`sessions.merge_on_link`). A pinned session never counts against retention. `DELETE` applies the retention rules by hand and answers 204, or 409 with `{"detail": {"reason": ...}}`: `live_session`, `pinned` (unless `?force=true`), `in_live_chain` (unmerge first); 404 for an unknown key.
 
+### Clouds, Keyframes, Snapshots
+
+```http
+GET /sessions/{key}/keyframes
+GET /sessions/{key}/clouds
+GET /sessions/{key}/objects/{oid}/snapshots[?index=N]
+GET /sessions/{key}/objects/{oid}/snapshots/{index}/image
+```
+
+`keyframes` lists `mesh_id`, `timestamp_ns`, `pose` (16 floats, row-major) and `n_points`. `clouds` returns `application/octet-stream`: the session's keyframe clouds as consecutive `mesh_create` packets in the [WebSocket's binary format](websocket.md#mesh-create-binary), with `X-Clouds` = the packet count, so a client parses them with the parser it already has (the clouds were subsampled to `sessions.cloud_max_points` per keyframe at freeze). The snapshot endpoints mirror [`/objects/{oid}/snapshots`](#object-snapshots) for a frozen object's crops, most recent first. Reading any of them marks the session served.
+
 `/healthz` carries a diagnostic `sessions` block (`live`, `n_frozen`, `n_on_disk`, `n_merged`, `discarded`, `gc_removed`, `corrections_unrouted`, `corrections_unaliased`, `merge_ambiguous`, `announced_only`, `boundaries`, `last_boundary`); it never folds into `status`.
 
 ---

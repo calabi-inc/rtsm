@@ -91,6 +91,23 @@ class WSBroadcaster:
         colors: np.ndarray,
         pose: Optional[np.ndarray] = None
     ) -> bytes:
+        return pack_mesh_create(mesh_id, positions, colors, pose)
+
+    async def send_session_update(self, payload: Dict[str, Any]) -> None:
+        """The session list changed (rtsm/core/sessions.py): {live, sessions, enabled}."""
+        await self._broadcast_json({"type": "session_update", **payload})
+
+    async def send_session_refined(self, payload: Dict[str, Any]) -> None:
+        """A frozen session's keyframes / objects moved: {session, poses, objects}."""
+        await self._broadcast_json({"type": "session_refined", **payload})
+
+    @staticmethod
+    def _pack_mesh_create_impl(
+        mesh_id: str,
+        positions: np.ndarray,
+        colors: np.ndarray,
+        pose: Optional[np.ndarray] = None
+    ) -> bytes:
         """
         Pack a mesh_create message as binary.
 
@@ -197,6 +214,7 @@ class WSBroadcaster:
 
         dead = [c for c, ok in zip(clients, results) if ok is not True]
         if dead:
+            logger.info("[broadcaster] dropped %d client(s) whose send failed or timed out (%.0f s)", len(dead), _SEND_TIMEOUT_S)
             async with self._lock:
                 for c in dead:
                     self._clients.discard(c)
@@ -289,3 +307,10 @@ class WSBroadcaster:
                 break
 
         return synced
+
+
+def pack_mesh_create(mesh_id: str, positions: np.ndarray, colors: np.ndarray,
+                     pose: Optional[np.ndarray] = None) -> bytes:
+    """One mesh_create packet (the dashboard's binary format), usable outside the
+    broadcaster: the REST clouds endpoint of a frozen session concatenates these."""
+    return WSBroadcaster._pack_mesh_create_impl(mesh_id, positions, colors, pose)

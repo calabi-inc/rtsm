@@ -179,3 +179,16 @@ def test_disabled_registry_reset_keeps_todays_behaviour(tmp_path):
     assert "session" not in r and r["cleared"]["working_memory"] == {"objects": 1}
     assert api.post("/sessions/end").status_code == 409
     assert api.get("/sessions").json()["enabled"] is False
+
+
+def test_dashboard_page_is_not_cached(tmp_path):
+    static = tmp_path / "static"
+    (static / "assets").mkdir(parents=True)
+    (static / "index.html").write_text("<html><script src=\"/assets/index-abc.js\"></script></html>")
+    (static / "assets" / "index-abc.js").write_text("console.log(1)")
+    api = TestClient(create_app(working_memory=_WM(), registry=CollectorRegistry(), static_dir=str(static)))
+    page = api.get("/")
+    assert page.status_code == 200 and page.headers["cache-control"] == "no-cache, must-revalidate"
+    asset = api.get("/assets/index-abc.js")
+    assert asset.status_code == 200 and "no-cache" not in asset.headers.get("cache-control", "")
+    assert "cache-control" not in {k.lower() for k in api.get("/healthz").headers} or "no-cache" not in api.get("/healthz").headers.get("cache-control", "")

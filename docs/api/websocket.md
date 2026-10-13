@@ -143,6 +143,26 @@ Sent to all clients when a clear/reset is triggered:
 
 ---
 
+### Session Update (JSON)
+
+The first message a client receives, and again whenever the session list changes (a boundary, a freeze, a merge, a pin, a removal, a session written to disk):
+
+```json
+{"type": "session_update", "enabled": true, "live": "20261013-091835_e0_4F4E55A3", "sessions": [ { "key": "...", "live": true, "session_id": "...", "epoch": 0, "source": "websocket", "started_wall_utc": 1791883115.2, "ended_wall_utc": null, "end_reason": null, "merged_into": null, "merged_from": [], "pinned": false, "counters": { "frames": 86, "keyframes": 9, "objects": 0 } } ]}
+```
+
+The entries are the summaries of [`GET /sessions`](rest-api.md#sessions), the live session first. A frozen session's clouds and objects are not pushed over the socket: the dashboard fetches `GET /sessions/{key}` and `GET /sessions/{key}/clouds` when the user selects it.
+
+### Session Refined (JSON)
+
+A pose-correction batch moved keyframes and objects of a **frozen** session (the live session's refinements arrive as `mesh_update_pose` and the next `objects_update`, as before):
+
+```json
+{"type": "session_refined", "session": "20261013-091835_e0_4F4E55A3", "poses": { "ws_10": [16 floats, row-major] }, "objects": [ { "id": "...", "xyz_world": [x, y, z], "demoted_by_correction": false } ]}
+```
+
+A client applies it only when that session is on screen (or drawn as prior content).
+
 ## Client Commands
 
 Send JSON text messages to request data:
@@ -164,6 +184,22 @@ Returns a stats snapshot with keyframe count, client count, etc.
 Clears all keyframes, meshes, resets TSDF state, and broadcasts `{"type": "clear"}` to all connected clients.
 
 ---
+
+### Resync
+
+```json
+{"cmd": "resync"}
+```
+
+The live keyframes again, then the latest `objects_update`: the dashboard sends it when it returns from a frozen session to live.
+
+### Viewing
+
+```json
+{"cmd": "viewing", "session": "20261013-091835_e0_4F4E55A3"}
+```
+
+Which session the client shows (`"live"` or a key), sent on connect, on every change and every 60 s. A frozen session on screen counts as served, which protects it from retention for `sessions.retention.grace_served_min`.
 
 ## Configuration
 

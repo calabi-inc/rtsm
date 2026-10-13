@@ -325,6 +325,11 @@ class SessionRegistry:
         self._pending_map_reset = False
         self._last_admitted_ns: Optional[int] = None
         self.persist_async = bool(persist_async)
+        # Viewer hooks (the visualization server sets them): on_change after any
+        # change of the session list or a record's summary; on_refined after a
+        # frozen session's keyframes / objects moved (key, poses, moved objects).
+        self.on_change: Optional[Callable[[], None]] = None
+        self.on_refined: Optional[Callable[[str, Dict[str, List[float]], List[Dict[str, Any]]], None]] = None
         self._q: "queue.Queue[Callable[[], None]]" = queue.Queue()
         self._writer: Optional[threading.Thread] = None
         self._busy = False
@@ -569,6 +574,7 @@ class SessionRegistry:
             self._event(rec, "unmerge", None, {"session_key": succ.key if succ else None})
             self._ledger("unmerge", rec, {})
             self._persist_meta(rec)
+            self._notify_change()
             return None
 
     def pin(self, key: str, flag: bool = True) -> Optional[str]:
@@ -578,6 +584,7 @@ class SessionRegistry:
                 return "unknown_session"
             rec.pinned = bool(flag)
             self._persist_meta(rec)
+            self._notify_change()
             return None
 
     def delete(self, key: str, *, force: bool = False) -> Optional[str]:
@@ -691,6 +698,8 @@ class SessionRegistry:
                 n += 1
             self.frozen.sort(key=lambda r: r.started_wall_utc, reverse=True)
         self.gc()
+        if n:
+            self._notify_change()
         return n
 
     def gc(self) -> int:
@@ -749,6 +758,7 @@ class SessionRegistry:
                 logger.error("[sessions] viz server refused the live key: %s", e)
         self._event(rec, "start", t_sensor_ns, {"source": self.source, "discarded_predecessor": discarded})
         self._ledger("start", rec, {})
+        self._notify_change()
         return rec
 
     def _make_key(self, now: float, epoch: int, session_id: Optional[str]) -> str:
@@ -827,6 +837,8 @@ class SessionRegistry:
         self.live = None
         if open_next:
             self._open_live(next_epoch, next_session_id, t_sensor_ns, discarded=discarded)
+        else:
+            self._notify_change()
         # 4. persistence after the lock (the caller still holds mutate; the writer thread does not need it)
         if frozen is not None and self.cfg.persist_on_freeze:
             self._schedule(lambda rec=frozen: self._persist_full(rec))
@@ -970,6 +982,11 @@ class SessionRegistry:
                                           "objects_moved": len(moved_oids), "objects_demoted": demoted, "map_ref": map_ref})
         self._ledger("refine", rec, {"kind": kind, "n_keyframes": len(deltas), "max_shift_m": round(max_shift, 4)})
         self._persist_meta(rec)
+        poses_out = {fid: rec.pose_history[fid].reshape(-1).tolist() for fid in deltas if fid in rec.pose_history}
+        moved_out = [{"id": oid, "xyz_world": np.asarray(by_id[oid]["xyz_world"], dtype=np.float32).tolist(),
+                      "demoted_by_correction": bool(by_id[oid].get("demoted_by_correction"))}
+                     for oid in moved_oids if oid in by_id and by_id[oid].get("xyz_world") is not None]
+        self._notify_refined(rec.key, poses_out, moved_out)
         return len(deltas)
 
     def _resolve_keys(self, corrections: Dict[str, Any]) -> Tuple[Dict[str, np.ndarray], List[str], List[str]]:
@@ -1045,6 +1062,7 @@ class SessionRegistry:
         self._ledger("merge", rec, {"into": live.key})
         rec.last_served_wall_utc = now
         self._persist_meta(rec)
+        self._notify_change()
 
     def _live_chain(self) -> set:
         out: set = set()
@@ -1103,6 +1121,7 @@ class SessionRegistry:
         if reason == "gc":
             self.counters["gc_removed"] += 1
         self._ledger(reason if reason == "gc" else "delete", rec, {})
+        self._notify_change()
 
     def _find(self, key: str) -> Optional[FrozenSession]:
         for r in self.frozen:
@@ -1139,6 +1158,61 @@ class SessionRegistry:
                                          counts={**dict(rec.counters), **extra}))
         except Exception as e:  # noqa: BLE001
             logger.error("[sessions] ledger line failed: %s", e)
+
+    # ── viewer accessors (the REST / WebSocket surface) ──
+
+    def keyframes(self, key: str) -> Optional[List[Dict[str, Any]]]:
+        """A frozen session's keyframes: mesh id, stamp, 16-float pose, point count. None for an unknown key."""
+        with self.mutate:
+            rec = self._find(key)
+            if rec is None:
+                return None
+            self._ensure_loaded(rec)
+            return [{"mesh_id": k.mesh_id, "timestamp_ns": k.timestamp_ns, "pose": k.pose.reshape(-1).tolist(),
+                     "n_points": k.n_points} for k in rec.keyframes.values()]
+
+    def clouds(self, key: str) -> Optional[Dict[str, Tuple[np.ndarray, np.ndarray]]]:
+        """A frozen session's clouds (loaded on demand, counted as served). None for an unknown key."""
+        with self.mutate:
+            rec = self._find(key)
+            if rec is None:
+                return None
+            self._ensure_loaded(rec)
+            rec.last_served_wall_utc = self._now()
+            return dict(rec.clouds or {})
+
+    def snapshots(self, key: str, oid: str) -> Optional[List[bytes]]:
+        """An object's JPEG crops in a frozen session, most recent first (the live
+        endpoint's order). None for an unknown session; [] for no crops."""
+        with self.mutate:
+            rec = self._find(key)
+            if rec is None:
+                return None
+            if rec.crops is not None and oid in rec.crops:
+                return list(reversed(rec.crops[oid]))
+            folder = (rec.crops_dir or (self.dir / rec.key / "crops")) / str(oid)
+            if not folder.is_dir():
+                return []
+            files = sorted(folder.glob("*.jpg"), key=lambda p: int(p.stem) if p.stem.isdigit() else 0)
+            return [f.read_bytes() for f in reversed(files)]
+
+    def _notify_change(self) -> None:
+        cb = self.on_change
+        if cb is None:
+            return
+        try:
+            cb()
+        except Exception as e:  # noqa: BLE001
+            logger.error("[sessions] on_change hook failed: %s", e)
+
+    def _notify_refined(self, key: str, poses: Dict[str, List[float]], objects: List[Dict[str, Any]]) -> None:
+        cb = self.on_refined
+        if cb is None:
+            return
+        try:
+            cb(key, poses, objects)
+        except Exception as e:  # noqa: BLE001
+            logger.error("[sessions] on_refined hook failed: %s", e)
 
     # ── persistence ──
 
@@ -1240,6 +1314,7 @@ class SessionRegistry:
                 rec.crops = None
                 if rec.dirty:
                     self._write_meta_files(rec)
+            self._notify_change()                      # on_disk / persisted changed
         except Exception as e:  # noqa: BLE001
             with self.mutate:
                 rec.persisted = False

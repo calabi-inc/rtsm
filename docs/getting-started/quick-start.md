@@ -123,6 +123,19 @@ Open the visualization frontend in your browser. The 3D viewer connects to the W
 
 ---
 
+### Sessions
+
+The **Session** row of the control panel lists the live session and every frozen one (a SLAM boundary, `POST /reset`, or the **End** button freezes the live session and keeps it: see [Sessions](../api/rest-api.md#sessions)). Pick a frozen session to see its clouds, objects, snapshots and timeline read-only; a banner names it and offers **Live**, **Pin**, **Merge into live** and **Delete**. While a frozen session is on screen the live scene is not drawn, but the HUD keeps counting its objects and keyframes; **Live** brings it back. A session merged into the live one is nested under it in the picker and drawn dimmed inside the live scene as prior content (its objects are not in the memory; they appear under *Prior (merged)* in the object list).
+
+To see it without a device: clone a recording so its second half carries a new session id, then replay the clone:
+
+```bash
+python scripts/split_recording_session.py recordings/session1 recordings/session1_split
+python -m rtsm --viz --replay recordings/session1_split
+```
+
+Halfway through, the first half is frozen and listed; the live session continues with the second half of the map.
+
 ### Navigating the 3D view
 
 The View row has a mouse-scheme switch, remembered by the browser:
