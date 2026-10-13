@@ -87,3 +87,28 @@ def test_replay_of_the_clone_announces_two_sessions(tmp_path, monkeypatch):
     assert seen == [("A-SESSION", 1), ("B-SESSION", 2)]
     assert rx.frontend._epoch_session_id == "B-SESSION" and rx.frontend.frame_epoch == 2
     assert rx.frontend.frame_count == 0                                    # reset at the hello, as the live handshake does
+
+
+def test_three_way_split_and_replay(tmp_path, monkeypatch):
+    mod = _load_script()
+    src = _fake_recording(tmp_path)                                     # 6 frames
+    dst = tmp_path / "rec3"
+    summary = mod.split_recording(src, dst, at=[0.33, 0.66], session_id=["B-SESSION", "C-SESSION"])
+    assert summary["n_sessions"] == 3 and [p["frames"] for p in summary["parts"]] == [2, 2, 2]
+    assert [p["session_id"] for p in summary["parts"]] == ["A-SESSION", "B-SESSION", "C-SESSION"]
+    assert [sp["seq"] for sp in summary["splits"]] == [2, 4]
+    hellos = [json.loads(l) for l in (dst / "text_messages.jsonl").read_text().splitlines()]
+    assert [h["after_seq"] for h in hellos] == [1, 2, 4]              # the existing text message, then the two hellos
+    with pytest.raises(ValueError):
+        mod.split_recording(src, tmp_path / "bad", at=[0.66, 0.33])
+    with pytest.raises(ValueError):
+        mod.split_recording(src, tmp_path / "bad2", at=[0.5], session_id=["x", "y"])
+    assert mod.main([str(src), str(tmp_path / "cli3"), "--at", "0.33", "--at", "0.66"]) == 0
+    import rtsm.io.replayer as replayer
+    monkeypatch.setattr(replayer, "parse_lens_message", lambda fe, raw, **kw: None)
+    seen = []
+    rx = replayer.ReplayReceiver(recording_dir=str(dst), ingest_queue=IngestQueue(8), replay_speed=1000.0,
+                                 on_session_change=lambda sid, e: seen.append((sid, e)))
+    rx.start()
+    assert rx.wait(10.0)
+    assert seen == [("A-SESSION", 1), ("B-SESSION", 2), ("C-SESSION", 3)]

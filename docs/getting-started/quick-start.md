@@ -134,7 +134,7 @@ python scripts/split_recording_session.py recordings/session1 recordings/session
 python -m rtsm --viz --replay recordings/session1_split
 ```
 
-Halfway through, the first half is frozen and listed; the live session continues with the second half of the map.
+Halfway through, the first half is frozen and listed; the live session continues with the second half of the map. Several `--at` fractions make several sessions (`--at 0.33 --at 0.66` for three), each with its share of the map.
 
 ### Navigating the 3D view
 
