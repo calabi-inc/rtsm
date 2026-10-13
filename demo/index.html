@@ -187,7 +187,7 @@
       #nav-help .nav-help-note { margin-top: 8px; color: rgba(255,255,255,0.5); }
       #session-banner {
         position: fixed;
-        top: 12px;
+        top: 40px;                 /* below the tab bar (32px) */
         left: 50%;
         transform: translateX(-50%);
         z-index: 31;
@@ -203,7 +203,7 @@
         font-size: 11px;
         max-width: calc(100vw - 24px);
       }
-      #session-banner .sb-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      #session-banner .sb-text { white-space: normal; line-height: 1.4; }
       #session-banner button {
         padding: 4px 8px;
         border-radius: 6px;
@@ -617,7 +617,7 @@
       /* ======== Camera Feed PiP (FaceTime-style) ======== */
       #camera-panel {
         position: fixed;
-        top: 150px;
+        top: 196px;                /* below the status box (#hud: six lines from 42px) */
         left: 12px;
         width: 240px;
         background: rgba(20,20,20,0.92);

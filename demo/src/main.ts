@@ -852,7 +852,7 @@ function updateHud() {
     `Objects: ${rtsmObjects.length} (${confirmedCount} confirmed)`,
     viewing === 'live'
       ? `Session: <span style="color:#0f0">live</span>${priorMembers.size ? ` · +${priorMembers.size} prior` : ''}`
-      : `Session: <span style="color:#fc0">${viewing}</span> (read-only) · live: ${liveObjectCount} obj, ${liveMeshCount} kf`,
+      : `Session: <span style="color:#fc0" title="${viewing}">${(() => { const s = viewedSession(); return s ? sessionLabel(s).split(' · ')[0] : viewing })()}</span> (read-only) · live: ${liveObjectCount} obj, ${liveMeshCount} kf`,
   ].join('<br>')
 }
 
@@ -2562,7 +2562,7 @@ function updateSessionBanner() {
   const merged = s.merged_into ? ' · merged into live' : ''
   sessionBanner.style.display = 'flex'
   sessionBanner.innerHTML = `
-    <span class="sb-text"><b>Session ${s.key}</b> · ended ${ended} · ${s.end_reason || ''} · read-only${merged}${s.pinned ? ' · pinned' : ''}</span>
+    <span class="sb-text" title="${s.key}"><b>Session ${sessionLabel(s)}</b> · ended ${ended} · read-only${merged}</span>
     <button id="sb-live">Live</button>
     <button id="sb-pin">${s.pinned ? 'Unpin' : 'Pin'}</button>
     <button id="sb-merge">${s.merged_into ? 'Unmerge' : 'Merge into live'}</button>
