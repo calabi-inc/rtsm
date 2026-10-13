@@ -210,7 +210,12 @@ def render_markdown(agg: dict, ref: dict, *, resolved: Optional[dict], input_nam
         parts = []
         for key, rec in mf.items():
             name = str((rec or {}).get("path", key)).replace(chr(92), "/").rsplit("/", 1)[-1]
-            parts.append(f"{name} `{str((rec or {}).get('sha256', ''))[:16]}`" if (rec or {}).get("exists") else f"{name} **missing at run start (downloaded by the backend's library)**")
+            if (rec or {}).get("exists"):
+                v = (rec or {}).get("validated")
+                tag = " validated" if v == "validated" else (" **not the validated file**" if v == "mismatch" else "")
+                parts.append(f"{name} `{str((rec or {}).get('sha256', ''))[:16]}`{tag}")
+            else:
+                parts.append(f"{name} **missing at run start (downloaded by the backend's library)**")
         L.append(f"| model files | {'; '.join(parts)} |")
     L.append(f"| cluster radius | {params.cluster_radius_m} m (the associator's distance gate); sensitivity at {', '.join(f'{x:g}' for x in params.cluster_radii_m)} m |")
     L.append(f"| detector | {_detector_line(ref.get('detector'))} |")

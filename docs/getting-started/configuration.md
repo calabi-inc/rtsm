@@ -140,6 +140,7 @@ The segmentation backend determines which models extract object masks from each 
 ```yaml
 segmentation:
   backend: grounded_sam2    # default (Apache-2.0)
+  weights_policy: warn      # warn | strict | off: FastSAM / YOLOE files checked by sha256 against the validated files
   retina_masks: false       # false = 640x640 (fast), true = original resolution
 ```
 
@@ -153,6 +154,9 @@ segmentation:
 
 !!! note "AGPL backends require `ultralytics`"
     Backends using FastSAM or YOLOE require the `ultralytics` package (AGPL-3.0). Install with: `pip install "rtsm[gpu-ultralytics]"`
+
+!!! note "Validated weight files"
+    FastSAM and YOLOE weight files are checked by sha256 against `rtsm/models/weights.py` when a backend is created, because the file ultralytics serves under a given name changes upstream. `weights_policy: warn` (default) logs a warning for a missing or different file, `strict` refuses to start, `off` is silent. The eval report header and `resolved.json` record each file's status. See [Installation, Model Weights](installation.md#model-weights).
 
 !!! note "Labels under a prompt-free detector"
     The packaged YOLOE weights are prompt-free: they name objects from their own 4 585 built-in categories (a tag list that includes abstract words such as "heat" or "adaptation"), not from your vocabulary. By default the model's own class name leads an object's labels (`segmentation.labels.prompt_free_primary: detector`); with the known-good weights that reads `bottle`, `cup`, `keyboard`, `file cabinet`. Set `prompt_free_primary: classifier` to keep that name out of the scored labels and let the CLIP vocabulary classifier (`rtsm/cfg/clip/vocab.yaml`) decide: the mitigation when the weights in use label badly, as the `yoloe-26s-seg-pf.pt` that ultralytics 8.4.31 downloads from its v8.4.0 assets does (it named shelves `heat` and boxes `razor blade`). Either way the detector's own name is kept on each observation as `detector_label` in the ledger, and the report header lists each model file's sha256. Under `grounded_sam2` the grounded phrase is the primary label.

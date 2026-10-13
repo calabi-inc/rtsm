@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import copy
 import hashlib
+from rtsm.models.weights import validation_state
 import json
 import logging
 import os
@@ -185,6 +186,7 @@ def _model_files(cfg: dict, root: Optional[Path] = None) -> Dict[str, Dict[str, 
                     h.update(chunk)
             rec["bytes"] = p.stat().st_size
             rec["sha256"] = h.hexdigest()
+            rec["validated"] = validation_state(p, rec["sha256"])      # validated | mismatch | None (not a file rtsm validates)
         out[key] = rec
     return out
 

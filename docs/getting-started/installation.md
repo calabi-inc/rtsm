@@ -106,10 +106,15 @@ First run will download ~840MB of model weights to your HuggingFace cache (`~/.c
 
 ### AGPL backends (opt-in)
 
-| Model | Source | Size | Auto-download |
-|-------|--------|------|:---:|
-| FastSAM-x | ultralytics (auto-downloads) | ~140MB | Yes |
-| YOLOE-26s-seg | ultralytics (auto-downloads) | ~50MB | Yes |
+| Model | File | Validated sha256 (prefix) | Size |
+|-------|------|---------------------------|------|
+| FastSAM-x | `model_store/fastsam/FastSAM-x.pt` | `c0be4e7ddbe4c153` | 144 943 063 B |
+| YOLOE-26s-seg (prompted) | `model_store/yolo/yoloe-26s-seg.pt` | `6f62bc7ed9f86056` | 30 759 531 B |
+| YOLOE-26s-seg-pf (prompt-free) | `model_store/yolo/yoloe-26s-seg-pf.pt` | `9d0390d82c411566` | 35 163 686 B |
+
+ultralytics fetches these by file name, and the file behind a name changes upstream in place: on 2026-09-17 the `v8.4.0` release assets replaced `yoloe-26s-seg-pf.pt` with a different export, which labels an office `heat` and `razor blade` where the validated file says `bottle` and `cup`. rtsm therefore validates by content. Every documented number was produced with the files above (`rtsm/models/weights.py`, full hashes there). When a backend is created its file is checked: `segmentation.weights_policy: warn` (the default) logs a warning for a missing or different file, `strict` refuses to start, `off` is silent. The eval report header marks each file `validated` or `not the validated file`, `resolved.json` carries the hash, and `python scripts/fetch_models.py --verify` prints the status of each file.
+
+The validated files are not served under their names upstream at the moment, so a fresh download is expected to differ until a pinned source exists; the difference is recorded in every run's provenance, and the validated files travel with an engagement.
 
 ### Pre-download (optional)
 
