@@ -173,3 +173,10 @@ class SourceContext:
     on_kf_pose_update: Optional[Callable[..., Any]] = None
     on_raw_message: Optional[Callable[..., Any]] = None
     on_handshake_done: Optional[Callable[..., Any]] = None
+    # (session_id, frame_epoch) on every front-end new_session() call and on a
+    # receiver-minted epoch (ZeroMQ stamp regression); the session registry
+    # turns a same-id call into a reconnect event. Receiver thread.
+    on_session_change: Optional[Callable[[Optional[str], int], None]] = None
+    # An adapter that receives per-keyframe pose updates calls this at the end
+    # of a burst so the viz server applies them as one batch.
+    on_corrections_flush: Optional[Callable[[], None]] = None

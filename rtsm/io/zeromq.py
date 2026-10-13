@@ -67,6 +67,7 @@ class ZeroMQSubscriber:
         # Optional visualization callbacks
         on_kf_packet: Optional[Callable[..., Any]] = None,
         on_kf_pose_update: Optional[Callable[..., Any]] = None,
+        on_session_change: Optional[Callable[..., Any]] = None,
         latency_analytics: Optional[Any] = None,
         event_sink: Optional[Callable[[Any], None]] = None,
         throttle_clock: str = "wall",
@@ -170,6 +171,7 @@ class ZeroMQSubscriber:
             require_tracking_normal=False, confidence_threshold=0,
             pose_sink=pose_sink, event_sink=event_sink, ledger_sink=ledger_sink,
             latency_analytics=latency_analytics, decode_cache_size=4,
+            on_session_change=on_session_change,
         )
 
         # Track latest pose for frame assembly

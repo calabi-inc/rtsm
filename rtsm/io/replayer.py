@@ -61,6 +61,7 @@ class ReplayReceiver:
         pose_sink: Optional[callable] = None,
         ledger_sink: Optional[callable] = None,
         on_frame_correction: Optional[callable] = None,
+        on_session_change: Optional[callable] = None,
     ) -> None:
         self._recording_dir = os.path.abspath(recording_dir)
         self._ingest_q = ingest_queue
@@ -94,6 +95,7 @@ class ReplayReceiver:
             confidence_threshold=confidence_threshold, pose_sink=pose_sink, event_sink=event_sink,
             ledger_sink=ledger_sink, latency_analytics=latency_analytics,
             on_camera_frame=on_camera_frame, on_keyframe=on_keyframe,
+            on_session_change=on_session_change,
         )
 
         self._replay_speed = max(0.1, replay_speed)  # <1 = slower, >1 = faster

@@ -306,6 +306,7 @@ class WebSocketReceiver:
         throttle_clock: str = "wall",
         ledger_sink: Optional[callable] = None,
         on_frame_correction: Optional[callable] = None,
+        on_session_change: Optional[callable] = None,
     ) -> None:
         self.ingest_q = ingest_queue
         # The one ingest chain (rtsm/io/ingest_frontend.py). Frame-flow trace,
@@ -318,6 +319,7 @@ class WebSocketReceiver:
             require_tracking_normal=require_tracking_normal, confidence_threshold=confidence_threshold,
             pose_sink=pose_sink, clearance_sink=clearance_sink, event_sink=event_sink, ledger_sink=ledger_sink,
             latency_analytics=latency_analytics, on_camera_frame=on_camera_frame, on_keyframe=on_keyframe,
+            on_session_change=on_session_change,
         )
         self.name = str(event_source)
         self._host = host
