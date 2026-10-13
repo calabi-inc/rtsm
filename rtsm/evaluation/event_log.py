@@ -321,6 +321,21 @@ class ViewEvent:
     kind: str = "view"
 
 
+@dataclass
+class SessionEvent:
+    """One line per session-registry action (rtsm/core/sessions.py): a session
+    opened, frozen or discarded at a SLAM boundary, refined by a correction
+    batch, merged / unmerged, removed by retention or by hand."""
+    timestamp: float                          # time.monotonic() at the write
+    action: str                               # start | freeze | discard | refine | merge | unmerge | gc | delete
+    session_key: str
+    session_id: Optional[str]
+    epoch: int
+    reason: Optional[str]                     # the end reason once frozen (session_id | restart_inferred | map_reset | manual | process_exit)
+    counts: Dict[str, Any]                    # the record's counters at the write, plus action-specific fields
+    kind: str = "session"
+
+
 def _pyarrow_available() -> bool:
     import importlib.util
     return importlib.util.find_spec("pyarrow") is not None
