@@ -101,6 +101,11 @@ io:
   # ZMQ endpoints for dual-socket subscription (only when receiver: zeromq)
   camera_endpoint: tcp://172.27.240.1:5555      # D435i camera.rgbd topic
   rtabmap_endpoint: tcp://127.0.0.1:6000        # RTABMap pose topics
+  # The bridge's rtabmap.map_correction (map->odom). Its tracking_pose is the
+  # ODOMETRY pose; composing the correction at receive time puts every pose in
+  # the map frame like kf_pose already is. The message's map_id is the session
+  # id (rtabmap-map-<id>): a new RTAB-Map map starts a new session.
+  apply_map_correction: true
 
   # WebSocket receiver config (only when receiver: websocket)
   websocket:

@@ -84,6 +84,8 @@ def zeromq_source(cfg: dict, ctx: SourceContext, **options: Any):
         on_kf_packet=ctx.on_kf_packet,
         on_kf_pose_update=ctx.on_kf_pose_update,
         on_session_change=ctx.on_session_change,
+        apply_map_correction=bool(io_cfg.get("apply_map_correction", True)),
+        on_corrections_flush=ctx.on_corrections_flush,
         pose_sink=ctx.pose_sink,
         event_sink=ctx.event_sink,
         ledger_sink=ctx.ledger_sink,
