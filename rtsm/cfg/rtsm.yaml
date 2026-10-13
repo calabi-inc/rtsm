@@ -23,6 +23,9 @@ segmentation:
   #   yoloe          - open-vocab (requires ultralytics, AGPL)
   #   dual           - FastSAM + YOLOE IoU merge (requires ultralytics, AGPL)
   backend: grounded_sam2
+  weights_policy: warn             # warn | strict | off: FastSAM / YOLOE weight files are checked by sha256 against the
+                                   # validated files (rtsm/models/weights.py) when a backend is created; the file ultralytics
+                                   # serves under a name changes upstream (yoloe-26s-seg-pf.pt was replaced on 2026-09-17)
   retina_masks: false                  # false = 640x640 masks (fast), true = original resolution (precise but slow)
 
   fastsam:
