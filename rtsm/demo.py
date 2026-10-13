@@ -221,6 +221,10 @@ def run_demo(argv: list[str] | None = None) -> None:
     seg_analytics = analytics.seg
     latency_analytics = analytics.latency
 
+    # ── Session registry (rtsm/core/sessions.py) ──
+    from rtsm.core.sessions import LiveComponents, SessionRegistry
+    sessions = SessionRegistry(cfg, live=LiveComponents(wm=wm, vectors=vectors, sweep_cache=sweep_cache), source="replay")
+
     # ── Visualization server (processing only, WebSocket merged into API) ──
     vis_server = None
     vis_broadcaster = None
@@ -237,7 +241,9 @@ def run_demo(argv: list[str] | None = None) -> None:
             latency_analytics=latency_analytics,
             ingest_queue=ingest_q,
             analytics_ticker=analytics.ticker,
+            sessions=sessions,
         )
+        sessions.live_components.vis_server = vis_server
         vis_broadcaster = vis_server.broadcaster
         vis_server_registry = vis_server.registry
 
@@ -254,6 +260,7 @@ def run_demo(argv: list[str] | None = None) -> None:
     )
     event_sink = event_log.sink()
     ledger_sink = event_log.ledger_sink()      # None unless diagnostics.ledgers is on
+    sessions.event_sink = event_sink
     # Lane-side drops (superseded / kf_dropped / age under policy latest) ->
     # trace lines with source "lanes" + analytics counters.
     ingest_q.set_on_drop(lane_drop_handler(event_sink, latency_analytics, ingest_q))
@@ -271,6 +278,7 @@ def run_demo(argv: list[str] | None = None) -> None:
         on_camera_frame=vis_server.broadcast_camera_frame if vis_server else None,
         on_pose_corrections=vis_server.handle_kf_pose_update if vis_server else None,
         on_pose_corrections_batch=vis_server.handle_pose_corrections_batch if vis_server else None,
+        on_session_change=sessions.on_session_change,
         latency_analytics=latency_analytics,
         event_sink=event_sink,
         ledger_sink=ledger_sink,
@@ -294,6 +302,7 @@ def run_demo(argv: list[str] | None = None) -> None:
         latency_analytics=latency_analytics,
         event_log=event_log,
         clock=clock,
+        sessions=sessions,
     )
 
     # ── Start API + viz WebSocket + static frontend on single port ──
@@ -318,6 +327,7 @@ def run_demo(argv: list[str] | None = None) -> None:
         static_dir=static_dir,
         ingest_provider=ingest_q.stats,
         analytics_ticker=analytics.ticker,
+        sessions=sessions,
     )
     start_server(app, host="0.0.0.0", port=port)
 

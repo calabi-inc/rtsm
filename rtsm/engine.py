@@ -56,6 +56,7 @@ class Runtime:
     clock: Clock
     pipeline: Any                      # rtsm.core.pipeline.Pipeline
     up_axis: str
+    sessions: Any = None               # rtsm.core.sessions.SessionRegistry | None
 
 
 def load_models(cfg: dict) -> Models:
@@ -82,7 +83,7 @@ def load_models(cfg: dict) -> Models:
 
 
 def build_runtime(cfg: dict, models: Models, *, clock: Clock, lane_cfg: LaneConfig, event_log: EventLogWriter,
-                  up_axis_default: str = "z") -> Runtime:
+                  up_axis_default: str = "z", sessions: Any = None) -> Runtime:
     """Proximity index, working memory, analytics bundle, associator, ingest
     gate, vector store, ingest queue (with the lane drop handler wired to the
     event log and the analytics), sweep cache, and the pipeline over them.
@@ -165,7 +166,8 @@ def build_runtime(cfg: dict, models: Models, *, clock: Clock, lane_cfg: LaneConf
         clock=clock,
         seg_analytics=seg_analytics,
         latency_analytics=latency_analytics,
+        sessions=sessions,
     )
     return Runtime(proximity_index=proximity_index, wm=wm, analytics=analytics, associator=assoc, ingest_gate=ingest_gate,
                    vectors=vectors, ingest_q=ingest_q, sweep_cache=sweep_cache, event_log=event_log, clock=clock,
-                   pipeline=pipeline, up_axis=up_axis)
+                   pipeline=pipeline, up_axis=up_axis, sessions=sessions)

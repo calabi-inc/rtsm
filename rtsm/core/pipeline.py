@@ -227,6 +227,7 @@ class Pipeline:
         latency_analytics: Optional[Any] = None,
         event_log: Optional[EventLogWriter] = None,
         clock: Optional[Clock] = None,
+        sessions: Any = None,
     ):
         self.cfg = cfg
         self.segmenter = segmenter
@@ -235,6 +236,9 @@ class Pipeline:
         # hands `clock.now_mono()` to the ingest gate / sweep policy. Wall by
         # default (unchanged behaviour).
         self.clock: Clock = clock if clock is not None else WallClock()
+        # Session registry (rtsm/core/sessions.py): a SLAM boundary freezes the
+        # live session before the next packet is processed. None = no sessions.
+        self.sessions = sessions
         self.clip = clip
         self.working_mem = working_mem
         self.proximity_index = proximity_index
@@ -344,6 +348,16 @@ class Pipeline:
         # LTM scheduling — reads this value.
         self.clock.advance(pkt.time.t_sensor_ns if pkt is not None else None,
                            getattr(pkt, "frame_epoch", None))
+        # Session boundary before this packet (a new map freezes the live
+        # session; the same session records tracking gaps).
+        if self.sessions is not None and pkt is not None:
+            try:
+                boundary = self.sessions.observe_frame(pkt, clock_rebases=int(getattr(self.clock, "rebases", 0) or 0))
+                if boundary is not None:
+                    logger.info("[sessions] boundary (%s): %s -> live %s", boundary.reason,
+                                boundary.frozen_key or "discarded", boundary.live_key)
+            except Exception:
+                logger.error("[sessions] observe_frame failed", exc_info=True)
 
         # Ingest gate: accept keyframes unconditionally, gate non-KFs with policy
         accept = True
@@ -1420,6 +1434,11 @@ class Pipeline:
                 close_model()
             except Exception:
                 logger.warning("Failed to close %s during shutdown", name, exc_info=True)
+        if self.sessions is not None:
+            try:
+                self.sessions.on_process_exit()
+            except Exception:
+                logger.warning("Failed to freeze the live session during shutdown", exc_info=True)
         try:
             self._event_log.close()
         except Exception:

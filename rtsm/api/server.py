@@ -8,7 +8,7 @@ from dataclasses import dataclass
 
 import base64
 import numpy as np
-from fastapi import FastAPI, Response, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import Body, FastAPI, Response, HTTPException, WebSocket, WebSocketDisconnect
 from prometheus_client import Gauge, CollectorRegistry, generate_latest, CONTENT_TYPE_LATEST, REGISTRY
 
 
@@ -39,6 +39,7 @@ def create_app(
     frame_flow_provider: Optional[Callable[[], Dict[str, Any]]] = None,
     ingest_provider: Optional[Callable[[], Dict[str, Any]]] = None,
     analytics_ticker: Optional[Any] = None,
+    sessions: Optional[Any] = None,
 ) -> FastAPI:
     """
     Build a FastAPI app exposing:
@@ -206,6 +207,13 @@ def create_app(
                         )
                 except Exception:
                     pass
+
+        # ---- sessions (rtsm/core/sessions.py; diagnostic, never folds) ----
+        if sessions is not None:
+            try:
+                out["sessions"] = dict(sessions.health())
+            except Exception:
+                out["sessions"] = {"error": "unavailable"}
 
         if degraded or reasons:
             out["status"] = "degraded"
@@ -461,9 +469,14 @@ def create_app(
 
     # ---- Reset endpoint ----
     @app.post("/reset")
-    def reset() -> Dict[str, Any]:
+    def reset(payload: Optional[Dict[str, Any]] = Body(None)) -> Dict[str, Any]:
         """
         Reset RTSM runtime state while keeping models loaded.
+
+        With a session registry the live session is FROZEN first (listed under
+        /sessions, persisted) unless the body says {"discard": true}, which
+        keeps the previous behaviour: nothing is kept. The response carries
+        "session": {frozen, live, discarded}.
 
         Clears:
         - WorkingMemory (all objects, proto/confirmed)
@@ -483,6 +496,20 @@ def create_app(
             "reset_time_utc": time.time(),
             "cleared": {},
         }
+
+        # Sessions: freeze the live session first (default), or discard it.
+        discard = bool((payload or {}).get("discard", False))
+        if sessions is not None and getattr(sessions, "enabled", False):
+            try:
+                if discard:
+                    live_key = sessions.discard_live()
+                    result["session"] = {"frozen": None, "live": live_key, "discarded": True}
+                else:
+                    b = sessions.end_live("manual")
+                    result["session"] = {"frozen": (b.frozen_key if b else None), "live": (b.live_key if b else None),
+                                         "discarded": bool(b.discarded) if b else False}
+            except Exception as e:
+                result["session"] = {"error": str(e)}
 
         # Clear WorkingMemory (also clears attached ProximityIndex)
         try:
@@ -565,6 +592,75 @@ def create_app(
                 result["cleared"]["latency_analytics"] = {"error": str(e)}
 
         return result
+
+    # ---- Sessions (rtsm/core/sessions.py) ----
+    def _sessions_or_404():
+        if sessions is None:
+            raise HTTPException(status_code=404, detail="sessions are not wired into this server")
+        return sessions
+
+    def _session_result(key: str, reason: Optional[str]) -> Dict[str, Any]:
+        if reason == "unknown_session":
+            raise HTTPException(status_code=404, detail=f"unknown session {key}")
+        if reason:
+            raise HTTPException(status_code=409, detail={"reason": reason, "session": key})
+        return sessions.detail(key) or {"key": key}
+
+    @app.get("/sessions")
+    def sessions_list() -> Dict[str, Any]:
+        """Every session this process knows: the live one first, then the frozen
+        ones most recent first (those on disk included after load_from_disk)."""
+        if sessions is None:
+            return {"enabled": False, "live": None, "sessions": []}
+        out = sessions.list_summaries()
+        out["enabled"] = bool(getattr(sessions, "enabled", False))
+        return out
+
+    @app.get("/sessions/{key}")
+    def sessions_detail(key: str) -> Dict[str, Any]:
+        """One session with its timeline, objects, keyframes and retention state;
+        marks it served (retention grace)."""
+        d = _sessions_or_404().detail(key)
+        if d is None:
+            raise HTTPException(status_code=404, detail=f"unknown session {key}")
+        return d
+
+    @app.post("/sessions/end")
+    def sessions_end() -> Dict[str, Any]:
+        """Freeze the live session by hand (reason manual) and open the next one."""
+        s = _sessions_or_404()
+        if not getattr(s, "enabled", False):
+            raise HTTPException(status_code=409, detail={"reason": "sessions_disabled"})
+        b = s.end_live("manual")
+        return {"frozen": (b.frozen_key if b else None), "live": (b.live_key if b else None),
+                "discarded": bool(b.discarded) if b else False}
+
+    @app.post("/sessions/{key}/merge")
+    def sessions_merge(key: str, payload: Optional[Dict[str, Any]] = Body(None)) -> Dict[str, Any]:
+        """Fold a frozen session into the live one (display and registry; its objects stay its own)."""
+        s = _sessions_or_404()
+        into = str((payload or {}).get("into", "live"))
+        return _session_result(key, s.merge(key, into))
+
+    @app.post("/sessions/{key}/unmerge")
+    def sessions_unmerge(key: str) -> Dict[str, Any]:
+        return _session_result(key, _sessions_or_404().unmerge(key))
+
+    @app.post("/sessions/{key}/pin")
+    def sessions_pin(key: str) -> Dict[str, Any]:
+        return _session_result(key, _sessions_or_404().pin(key, True))
+
+    @app.post("/sessions/{key}/unpin")
+    def sessions_unpin(key: str) -> Dict[str, Any]:
+        return _session_result(key, _sessions_or_404().pin(key, False))
+
+    @app.delete("/sessions/{key}")
+    def sessions_delete(key: str, force: bool = False) -> Response:
+        """Remove a frozen session from disk and the list (the retention rules by hand:
+        409 for the live session, a pinned one unless ?force=true, or a member of
+        the live chain)."""
+        _session_result(key, _sessions_or_404().delete(key, force=force))
+        return Response(status_code=204)
 
     # ---- Detailed stats endpoint ----
     @app.get("/stats/detailed")

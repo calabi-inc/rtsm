@@ -253,11 +253,21 @@ def main(argv: "list[str] | None" = None):
     )
     event_sink = event_log.sink()
     ledger_sink = event_log.ledger_sink()      # None unless diagnostics.ledgers is on
-    rt = build_runtime(cfg, models, clock=clock, lane_cfg=lane_cfg, event_log=event_log, up_axis_default=up_axis_default)
+    # ── Session registry (rtsm/core/sessions.py): a SLAM boundary freezes the
+    # live session instead of discarding it. The live stores are wired in once
+    # the runtime and the viz server exist.
+    from rtsm.core.sessions import LiveComponents, SessionRegistry
+    sessions = SessionRegistry(cfg, live=LiveComponents(), event_sink=event_log.sink(),
+                               source=("replay" if args.replay else receiver_type))
+    rt = build_runtime(cfg, models, clock=clock, lane_cfg=lane_cfg, event_log=event_log, up_axis_default=up_axis_default,
+                       sessions=sessions)
     proximity_index, wm, analytics = rt.proximity_index, rt.wm, rt.analytics
     seg_analytics, latency_analytics = analytics.seg, analytics.latency
     assoc, ingest_gate, vectors, ingest_q, sweep_cache, up_axis = (rt.associator, rt.ingest_gate, rt.vectors, rt.ingest_q,
                                                                     rt.sweep_cache, rt.up_axis)
+    sessions.live_components.wm = wm
+    sessions.live_components.vectors = vectors
+    sessions.live_components.sweep_cache = sweep_cache
 
     # ---------------- Visualization Server (optional) ----------------
     vis_cfg = cfg.get("visualization", {})
@@ -273,7 +283,9 @@ def main(argv: "list[str] | None" = None):
             latency_analytics=latency_analytics,
             ingest_queue=ingest_q,
             analytics_ticker=analytics.ticker,
+            sessions=sessions,
         )
+        sessions.live_components.vis_server = vis_server
         logger.info("Visualization server initialized")
 
     # Resolve display IP (use real network IP instead of 0.0.0.0)
@@ -338,6 +350,8 @@ def main(argv: "list[str] | None" = None):
         on_kf_pose_update=vis_server.handle_kf_pose_update if vis_server else None,
         on_raw_message=recorder.on_message if recorder else None,
         on_handshake_done=recorder.on_handshake if recorder else None,
+        on_session_change=sessions.on_session_change,
+        on_corrections_flush=vis_server.flush_pending_corrections if vis_server else None,
     )
     source_name = "replay" if args.replay else receiver_type
     try:
@@ -350,6 +364,12 @@ def main(argv: "list[str] | None" = None):
         )
     except UnknownSourceError as exc:
         raise ValueError(str(exc)) from exc
+    try:
+        n_disk = sessions.load_from_disk()
+        if n_disk:
+            logger.info("[sessions] %d session(s) on disk under %s", n_disk, sessions.dir)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[sessions] load_from_disk failed: %s", e)
     source.start()
     replay_like = bool(args.replay or source.name == "bag")
     replay_receiver = source if replay_like else None
@@ -446,6 +466,7 @@ def main(argv: "list[str] | None" = None):
         frame_flow_provider=watchdog.status if watchdog else None,
         ingest_provider=ingest_q.stats,
         analytics_ticker=analytics.ticker,
+        sessions=sessions,
     )
     start_server(app, host=host, port=port)
     logger.info(f"FastAPI server started on http://{display_host}:{port}")
@@ -531,6 +552,7 @@ def main(argv: "list[str] | None" = None):
         if recorder is not None:
             recorder.close()
         event_log.close()   # no-op if the pipeline already closed it
+        sessions.wait_idle(10.0)   # the writer thread finishes the last session folder
         analytics.stop()
 
 if __name__ == "__main__":

@@ -469,6 +469,29 @@ visualization:
     push_interval_ms: 1000        # Dashboard push cadence (ms); the 1 Hz Tier-2 rollup itself is owned by the analytics ticker (analytics.enable)
     full_sync_interval_s: 30      # Re-send full Tier 2 history every N seconds
 
+# -------------------- Sessions (rtsm/core/sessions.py) --------------------
+# A SLAM boundary (a new session id, a receiver-inferred restart, a `reset`
+# correction, POST /reset) FREEZES the live session instead of discarding
+# it: objects, keyframe clouds, pose history, vectors and crops are kept,
+# listed under GET /sessions and persisted. Pose-correction batches refine
+# the live session, or the frozen session that owns the keyframes.
+sessions:
+  enable: true                      # false = today's behaviour (no freeze; /reset discards)
+  dir: sessions                     # frozen sessions on disk; relative to the working directory
+  keep_in_memory: 3                 # frozen sessions kept with clouds and vectors in RAM; the rest reload on demand
+  cloud_max_points: 150000          # per keyframe at freeze (uniform subsample, seeded by mesh id); 0 = keep all
+  persist_crops: true               # the objects' JPEG snapshots into the session folder
+  persist_on_freeze: true           # write to disk at freeze (false = memory only)
+  boundary_on_clock_rebase: true    # a large backwards sensor jump without an epoch change ends the session
+  tracking_gap_s: 2.0               # sensor-time gap between admitted frames that opens a tracking_gap event
+  min_keyframes: 1                  # a session ending with fewer keyframes and no objects is discarded, not frozen
+  merge_on_link: true               # a correction tying a frozen session to the live map marks it merged
+  alias_stamp_tol_ms: 30            # a "ts:<ns>" correction key matches a keyframe within this tolerance
+  retention:
+    keep_on_disk: 20                # 0 = no cap; the live chain and pinned sessions never count
+    max_age_days: 30                # 0 = no age limit
+    grace_served_min: 10            # a session served through /sessions/{key} in the last N minutes is never removed
+
 # -------------------- SLAM (on-device, via Calabi Lens) --------------------
 # RTAB-Map runs on the iPhone. These settings control how RTSM handles
 # SLAM-corrected poses received from the client.
