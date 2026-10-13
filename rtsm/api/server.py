@@ -662,6 +662,62 @@ def create_app(
         _session_result(key, _sessions_or_404().delete(key, force=force))
         return Response(status_code=204)
 
+    @app.get("/sessions/{key}/keyframes")
+    def sessions_keyframes(key: str) -> Dict[str, Any]:
+        """A frozen session's keyframes: mesh id, sensor stamp, 4x4 pose (16 floats, row-major), point count."""
+        kfs = _sessions_or_404().keyframes(key)
+        if kfs is None:
+            raise HTTPException(status_code=404, detail=f"unknown session {key}")
+        return {"key": key, "keyframes": kfs}
+
+    @app.get("/sessions/{key}/clouds")
+    def sessions_clouds(key: str) -> Response:
+        """A frozen session's keyframe clouds as consecutive mesh_create packets in the
+        dashboard's binary format (magic PCLD, mesh id, counts, positions, colors, pose),
+        so the client parses them with the parser it already has. X-Clouds = packet count."""
+        s = _sessions_or_404()
+        clouds = s.clouds(key)
+        if clouds is None:
+            raise HTTPException(status_code=404, detail=f"unknown session {key}")
+        from rtsm.visualization.broadcaster import pack_mesh_create
+        import numpy as _np
+        poses = {k["mesh_id"]: k["pose"] for k in (s.keyframes(key) or [])}
+        parts = []
+        for mid, (pos, col) in clouds.items():
+            pose = poses.get(mid)
+            pose_arr = _np.asarray(pose, dtype=_np.float32).reshape(4, 4) if pose else None
+            parts.append(pack_mesh_create(mid, _np.asarray(pos, dtype=_np.float32), _np.asarray(col, dtype=_np.uint8), pose_arr))
+        return Response(content=b"".join(parts), media_type="application/octet-stream",
+                        headers={"X-Clouds": str(len(parts))})
+
+    @app.get("/sessions/{key}/objects/{oid}/snapshots")
+    def sessions_object_snapshots(key: str, oid: str, index: Optional[int] = None) -> Dict[str, Any]:
+        """A frozen object's crop gallery, the shape of /objects/{oid}/snapshots (most recent first)."""
+        crops = _sessions_or_404().snapshots(key, oid)
+        if crops is None:
+            raise HTTPException(status_code=404, detail=f"unknown session {key}")
+        if not crops:
+            return {"id": oid, "count": 0, "snapshots": []}
+        if index is not None:
+            if index < 0 or index >= len(crops):
+                raise HTTPException(status_code=404, detail=f"Snapshot index {index} out of range (have {len(crops)})")
+            b64 = base64.b64encode(crops[index]).decode("ascii")
+            return {"id": oid, "index": index, "total": len(crops), "snapshot": f"data:image/jpeg;base64,{b64}"}
+        snapshots = [{"index": i, "data": f"data:image/jpeg;base64,{base64.b64encode(b).decode('ascii')}", "size_bytes": len(b)}
+                     for i, b in enumerate(crops)]
+        return {"id": oid, "count": len(snapshots), "snapshots": snapshots}
+
+    @app.get("/sessions/{key}/objects/{oid}/snapshots/{index}/image")
+    def sessions_object_snapshot_image(key: str, oid: str, index: int) -> Response:
+        crops = _sessions_or_404().snapshots(key, oid)
+        if crops is None:
+            raise HTTPException(status_code=404, detail=f"unknown session {key}")
+        if not crops:
+            raise HTTPException(status_code=404, detail=f"Object {oid} has no snapshots")
+        if index < 0 or index >= len(crops):
+            raise HTTPException(status_code=404, detail=f"Snapshot index {index} out of range")
+        return Response(content=crops[index], media_type="image/jpeg")
+
     # ---- Detailed stats endpoint ----
     @app.get("/stats/detailed")
     def stats_detailed() -> Dict[str, Any]:
@@ -991,6 +1047,8 @@ def create_app(
         async def viz_websocket(websocket: WebSocket):
             await websocket.accept()
             await vis_broadcaster.connect(websocket)
+            if vis_server is not None and hasattr(vis_server, "send_session_update_to"):
+                await vis_server.send_session_update_to(websocket)
             synced = await vis_broadcaster.sync_new_client(websocket, vis_registry)
             # Sync latest TSDF mesh to new client
             if vis_server is not None and hasattr(vis_server, 'tsdf') and vis_server.tsdf is not None:
@@ -1017,6 +1075,10 @@ def create_app(
                         if cmd == "clear":
                             vis_registry.clear()
                             await vis_broadcaster._broadcast_json({"type": "clear"})
+                        elif cmd == "resync" and vis_server is not None and hasattr(vis_server, "resync_client"):
+                            await vis_server.resync_client(websocket)
+                        elif cmd == "viewing" and vis_server is not None and hasattr(vis_server, "note_viewing"):
+                            vis_server.note_viewing(msg.get("session"))
                     except Exception:
                         pass
             except WebSocketDisconnect:

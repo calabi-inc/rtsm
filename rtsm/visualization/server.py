@@ -246,6 +246,9 @@ class VisualizationServer:
         self._pending_timer: Optional[threading.Timer] = None
         self._pending_flush_s = 0.2
         self._corrections_unaliased = 0
+        if sessions is not None:
+            sessions.on_change = self.broadcast_session_update
+            sessions.on_refined = self.broadcast_session_refined
 
         # Server state
         self._app: Optional[FastAPI] = None
@@ -301,6 +304,7 @@ class VisualizationServer:
         async def websocket_endpoint(websocket: WebSocket):
             await websocket.accept()
             await self.broadcaster.connect(websocket)
+            await self.send_session_update_to(websocket)
 
             # Sync existing keyframes/TSDF mesh to new client
             synced = await self.broadcaster.sync_new_client(websocket, self.registry)
@@ -356,6 +360,12 @@ class VisualizationServer:
                 self.tsdf.reset()
             await self.broadcaster._broadcast_json({"type": "clear"})
             logger.info(f"[visualization] Cleared {count} keyframes (TSDF reset: {self.tsdf is not None})")
+
+        elif cmd == "resync":
+            await self.resync_client(websocket)
+
+        elif cmd == "viewing":
+            self.note_viewing(data.get("session"))
 
         elif cmd == "stats":
             stats = self.registry.stats()
@@ -715,6 +725,51 @@ class VisualizationServer:
         if next_key is not None:
             self._live_session_key = str(next_key)
         return state
+
+    def session_update_payload(self) -> Dict[str, Any]:
+        """The session list as the dashboard's session_update message carries it."""
+        if self.sessions is None:
+            return {"enabled": False, "live": None, "sessions": []}
+        try:
+            d = self.sessions.list_summaries()
+            d["enabled"] = bool(getattr(self.sessions, "enabled", False))
+            return d
+        except Exception as e:  # noqa: BLE001
+            logger.error(f"[visualization] session list failed: {e}")
+            return {"enabled": False, "live": None, "sessions": []}
+
+    def broadcast_session_update(self) -> None:
+        """Registry hook: the list changed (any thread)."""
+        if self._running:
+            self.broadcaster.schedule(self.broadcaster.send_session_update(self.session_update_payload()))
+
+    def broadcast_session_refined(self, key: str, poses: Dict[str, Any], objects: List[Dict[str, Any]]) -> None:
+        """Registry hook: a frozen session's keyframes / objects moved."""
+        if self._running:
+            self.broadcaster.schedule(self.broadcaster.send_session_refined(
+                {"session": key, "poses": poses, "objects": objects}))
+
+    async def send_session_update_to(self, websocket: WebSocket) -> None:
+        """The first message a new client gets when sessions are wired."""
+        if self.sessions is not None:
+            await self.broadcaster._try_send_json(websocket, {"type": "session_update", **self.session_update_payload()})
+
+    async def resync_client(self, websocket: WebSocket) -> int:
+        """Client command resync: the live keyframes again, then the latest objects (the
+        dashboard returning from a frozen session to live)."""
+        n = await self.broadcaster.sync_new_client(websocket, self.registry)
+        objects = self._get_wm_objects() if self.wm is not None else []
+        await self.broadcaster._try_send_json(websocket, {"type": "objects_update", "objects": objects})
+        return n
+
+    def note_viewing(self, session: Any) -> None:
+        """Client command viewing: a frozen session on screen counts as served (retention grace)."""
+        if self.sessions is None or not session or session == "live":
+            return
+        try:
+            self.sessions.mark_served(str(session))
+        except Exception as e:  # noqa: BLE001
+            logger.error(f"[visualization] viewing: {e}")
 
     def session_stats(self) -> Dict[str, Any]:
         with self._pending_lock:
