@@ -35,6 +35,17 @@ def _kw_tuples(code):
             if isinstance(c, tuple) and c and all(isinstance(x, str) for x in c)]
 
 
+def _kw_uses(code, name: str) -> int:
+    """How many calls pass keyword ``name``. A call with up to 15 keywords keeps
+    its names in one tuple constant (KW_NAMES); past that CPython builds a dict
+    (CALL_FUNCTION_EX) and each name is a string constant loaded for the key, so
+    both shapes are counted."""
+    tuples = sum(1 for t in _kw_tuples(code) if name in t)
+    loads = sum(1 for c in _codes(code) for i in dis.get_instructions(c)
+                if i.opname == "LOAD_CONST" and i.argval == name)
+    return tuples + loads
+
+
 def _attr_calls_on(code, var: str, attr: str):
     """Offsets of `<var>.<attr>` loads in the top-level function body
     (EXTENDED_ARG prefixes, present once a body has > 256 names, are skipped).
@@ -69,9 +80,9 @@ def test_runner_builds_wires_starts_and_stops_the_ticker(modname, fn):
         assert old not in names, f"{modname}.{fn} constructs {old} directly: a second rollup owner or none"
 
     kw = _kw_tuples(code)
-    assert sum(1 for t in kw if "analytics_ticker" in t) >= 2, \
+    assert _kw_uses(code, "analytics_ticker") >= 2, \
         f"{modname}.{fn} must pass analytics_ticker to both create_app and VisualizationServer: {kw}"
-    assert any("ingest_provider" in t for t in kw), f"{modname}.{fn} must wire /healthz.ingest (ingest_provider)"
+    assert _kw_uses(code, "ingest_provider") >= 1, f"{modname}.{fn} must wire /healthz.ingest (ingest_provider)"
 
     starts = _attr_calls_on(code, "analytics", "start")
     stops = _attr_calls_on(code, "analytics", "stop")

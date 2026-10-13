@@ -145,6 +145,7 @@ class ZeroMQSubscriber:
         self._map_corr_received = 0
         self._map_corr_applied = 0
         self._map_corr_malformed = 0
+        self._enqueue_kf_id: Optional[str] = None       # the node id of the keyframe being paired (set by _handle_kf_pose)
 
         # ZMQ context and sockets
         self.ctx = zmq.Context()
@@ -459,8 +460,11 @@ class ZeroMQSubscriber:
 
             # Enqueue as keyframe; the node id rides on the header so a correction
             # keyed by it (kf_pose_update) finds this keyframe (FramePacket.kf_id).
-            self._try_enqueue_frame(ts_ns, t_wc, q_xyzw, is_keyframe=True,
-                                    kf_id=(str(kf_id) if kf_id not in (None, -1, "") else None))
+            self._enqueue_kf_id = str(kf_id) if kf_id not in (None, -1, "") else None
+            try:
+                self._try_enqueue_frame(ts_ns, t_wc, q_xyzw, is_keyframe=True)
+            finally:
+                self._enqueue_kf_id = None
             logger.debug(f"[zmq] kf_pose: kf_id={kf_id}{'' if stamped else ' (stamp inherited)'}")
 
         except Exception as e:
@@ -714,6 +718,8 @@ class ZeroMQSubscriber:
         """
         if self.ingest_q is None:
             return
+        if kf_id is None and is_keyframe:
+            kf_id = self._enqueue_kf_id
         rx_seq = self._fe.next_rx_seq()
         # Skip duplicates (except keyframes always get enqueued)
         if not is_keyframe and self._fe.is_repeat_stamp(ts_ns):

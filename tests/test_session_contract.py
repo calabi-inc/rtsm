@@ -83,3 +83,24 @@ def test_session_change_callback_error_is_swallowed():
     fe = _fe(on_session_change=boom)
     assert fe.new_session("A") == 1
     assert fe.frame_epoch == 1
+
+
+def test_replay_source_names_its_session_from_the_recording(tmp_path, monkeypatch):
+    import json as _json
+    from rtsm.io.replayer import ReplayReceiver, recording_session_id
+    rec = tmp_path / "rec_a"
+    rec.mkdir()
+    (rec / "messages.bin").write_bytes(b"")
+    (rec / "index.jsonl").write_text("")
+    (rec / "meta.json").write_text(_json.dumps({"session_id": "4F4E55A3-SESSION", "hello": {"session_id": "4F4E55A3-SESSION"}}))
+    assert recording_session_id(str(rec)) == "4F4E55A3-SESSION"
+    (rec / "meta.json").write_text(_json.dumps({"session_id": "unknown"}))
+    assert recording_session_id(str(rec)) == "rec_a"
+    (rec / "meta.json").unlink()
+    assert recording_session_id(str(rec)) == "rec_a"
+    seen = []
+    rx = ReplayReceiver(recording_dir=str(rec), ingest_queue=IngestQueue(2), on_session_change=lambda sid, e: seen.append((sid, e)))
+    monkeypatch.setattr(rx, "_replay_loop", lambda: None)
+    rx.start()
+    rx.stop()
+    assert rx.frontend._epoch_session_id == "rec_a" and seen == [("rec_a", 1)]

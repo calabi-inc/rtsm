@@ -90,6 +90,15 @@ duplicate GPU pass per such keyframe). Add `stamp_ms` on the bridge to remove
 both the lag and the duplicate. A tracking stamp that jumps back by more than 5 s (bag loop, bridge
 restart) starts a new `frame_epoch` on the robot pose.
 
+### The two correction topics
+
+A SLAM emits two different corrections, and the bridge publishes both:
+
+- **`rtabmap.map_correction`** is the *pose correction*: RTAB-Map's map→odom transform (`Statistics::mapCorrection()`), `{"T_w_odom": {"t": [x, y, z], "q": [qx, qy, qz, qw]}, "map_id": int, "ts_ns": int}`, once per RTAB-Map update. The bridge's `tracking_pose` is the **odometry** pose (`OdometryEvent::pose()`, despite its `frame: "world"` label), while `kf_pose` comes from the optimised graph and is already in the map frame. RTSM composes `T_w_odom @ T_odom_c` onto every tracking pose at receive time (`io.apply_map_correction`, default true), so objects seen on non-keyframe frames land in the same frame as the keyframes; with no message yet the identity applies. The message's `map_id` is RTAB-Map's map id, which RTSM takes as the session id `rtabmap-map-<id>`: a new map (an odometry reset, `RGBD/NewMapOdomChangeDistance`, `trigger_new_map`) starts a new session (see [Sessions](../api/rest-api.md#sessions)). `/stats.source.map_correction` counts received / applied / malformed messages and the current map id.
+- **`rtabmap.kf_pose_update`** is the *map correction*: a node whose optimised pose moved (loop closure, graph optimisation), `{"kf_id": int, "T_wc": [x, y, z, roll, pitch, yaw]}`, one message per node after each optimisation. RTSM translates the node id to the pipeline's keyframe (the node id rides on the keyframe packet) and coalesces the burst into one correction batch, flushed by the next `map_correction` or after 200 ms, so the working memory's objects, the TSDF, the pose history and the session registry are refined exactly as by a Lens `pose_corrections` batch. Before this, only the bridge's thumbnail cloud was re-posed.
+
+Not emitted by the bridge today: a *link into a previous map* (`info.loop_closure_id` naming a node whose map id differs from the current one). Emitting it as a correction of kind `relocalized_in_prior_map` with `map_ref` = that map id would let the session registry merge the two sessions on its own; until then `POST /sessions/{key}/merge` does it by hand.
+
 ---
 
 ## Configuration

@@ -1434,7 +1434,7 @@ class Pipeline:
                 close_model()
             except Exception:
                 logger.warning("Failed to close %s during shutdown", name, exc_info=True)
-        if self.sessions is not None:
+        if getattr(self, "sessions", None) is not None:
             try:
                 self.sessions.on_process_exit()
             except Exception:
