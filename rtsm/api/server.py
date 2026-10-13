@@ -1093,6 +1093,18 @@ def create_app(
         import os
         if os.path.isdir(static_dir):
             from fastapi.staticfiles import StaticFiles
+
+            @app.middleware("http")
+            async def _no_cache_for_the_page(request, call_next):
+                """The dashboard page must not be cached: it names the hashed bundle, and a
+                browser holding yesterday's index.html keeps loading yesterday's dashboard
+                after a rebuild (the hashed assets themselves may be cached)."""
+                response = await call_next(request)
+                path = request.url.path
+                if path == "/" or path.endswith("/index.html"):
+                    response.headers["Cache-Control"] = "no-cache, must-revalidate"
+                return response
+
             app.mount("/", StaticFiles(directory=static_dir, html=True), name="frontend")
 
     return app
