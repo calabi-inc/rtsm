@@ -123,6 +123,9 @@ class PoseSample:
     map_ref: Optional[str] = None
 
 
+CORRECTION_KINDS = ("loop_closure", "relocalized_in_prior_map", "reset", "unknown")
+
+
 @dataclass(slots=True)
 class FrameCorrection:
     """A retroactive pose correction event (field 5): loop closure, relocalisation

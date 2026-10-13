@@ -23,6 +23,7 @@ live here are re-exported from rtsm/io/codecs.py so existing imports work.
 
 from __future__ import annotations
 import asyncio
+import inspect
 import json
 import struct
 import time
@@ -53,7 +54,7 @@ from rtsm.io.codecs import (  # noqa: F401
     normalize_matrix_convention, normalize_pose_convention, parse_arkit_pose, parse_pose, rescale_intrinsics,
 )
 from rtsm.io.contracts import (
-    CONVENTION_ARKIT, CONVENTION_OPENCV, EncodedImage, FrameCorrection, FrameHeader, RawFrame,
+    CONVENTION_ARKIT, CONVENTION_OPENCV, CORRECTION_KINDS, EncodedImage, FrameCorrection, FrameHeader, RawFrame,
 )
 from rtsm.io.ingest_frontend import WEBSOCKET_POLICY, IngestFrontEnd
 
@@ -225,6 +226,21 @@ def corrections_pose_to_4x4(pose_data: list) -> Optional[np.ndarray]:
         return None
 
 
+def _call_batch_callback(cb: Callable[..., Any], batch: dict, **kw: Any) -> None:
+    """Call a batch callback with the kind / session_id / map_ref keywords when it
+    takes them (the viz server, the session registry), positionally otherwise
+    (a one-argument test sink, an older plug-in)."""
+    try:
+        params = inspect.signature(cb).parameters.values()
+    except (TypeError, ValueError):
+        cb(batch)
+        return
+    if any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params) or all(k in {p.name for p in params} for k in kw):
+        cb(batch, **kw)
+    else:
+        cb(batch)
+
+
 def handle_lens_text_message(text: str, *, apply_camera_flip: bool, session_id: Optional[str] = None,
                              on_pose_corrections: Optional[Callable[..., Any]] = None,
                              on_pose_corrections_batch: Optional[Callable[..., Any]] = None,
@@ -236,9 +252,12 @@ def handle_lens_text_message(text: str, *, apply_camera_flip: bool, session_id: 
     msg = json.loads(text)
     msg_type = msg.get("type")
     if msg_type == "pose_corrections":
-        corrections = msg.get("corrections", {})
-        if not corrections:
-            return
+        corrections = msg.get("corrections") or {}
+        kind = str(msg.get("kind") or "loop_closure")
+        if kind not in CORRECTION_KINDS:
+            kind = "unknown"
+        map_ref = msg.get("map_ref")
+        map_ref = str(map_ref) if map_ref is not None else None
         batch = {}
         for kf_id, pose_data in corrections.items():
             pose_4x4 = corrections_pose_to_4x4(pose_data)
@@ -246,24 +265,30 @@ def handle_lens_text_message(text: str, *, apply_camera_flip: bool, session_id: 
                 if apply_camera_flip:
                     pose_4x4 = normalize_matrix_convention(pose_4x4, CONVENTION_ARKIT)
                 batch[kf_id] = pose_4x4
-        if not batch:
-            return
+        if corrections and not batch:
+            return                                    # every pose malformed: nothing to say
+        # An EMPTY batch is "announced-only": the SLAM reports a map change
+        # (a loop closure, a relocalisation into a prior map) without
+        # delivering poses. It still reaches the session registry as an event.
         if on_frame_correction is not None:
             try:
                 on_frame_correction(FrameCorrection(t_wall_utc_s=time.time(), session_id=session_id,
-                                                    kind="loop_closure", corrections=dict(batch)))
+                                                    kind=kind, corrections=dict(batch), map_ref=map_ref))
             except Exception as e:  # noqa: BLE001
                 logger.error(f"[{source}] on_frame_correction callback error: {e}")
-        # Prefer batch callback (TSDF), fall back to per-correction
+        # Prefer batch callback (the viz server / session registry), fall back to per-correction
         if on_pose_corrections_batch is not None:
-            on_pose_corrections_batch(batch)
+            _call_batch_callback(on_pose_corrections_batch, batch, kind=kind, session_id=session_id, map_ref=map_ref)
         elif on_pose_corrections is not None:
             for kf_id, pose in batch.items():
                 on_pose_corrections(kf_id, pose)
         else:
             logger.debug(f"[{source}] pose_corrections received but no callback registered")
             return
-        logger.info(f"[{source}] Applied {len(batch)} pose corrections (loop closure)")
+        if batch:
+            logger.info(f"[{source}] Applied {len(batch)} pose corrections ({kind})")
+        else:
+            logger.info(f"[{source}] map change announced ({kind}), no poses delivered")
     else:
         logger.debug(f"[{source}] Ignoring text message type: {msg_type}")
 

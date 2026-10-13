@@ -741,6 +741,12 @@ class SessionRegistry:
                             started_wall_utc=now, started_sensor_ns=t_sensor_ns, discarded_predecessor=discarded)
         self.live = rec
         self._last_admitted_ns = None
+        vs = self.live_components.vis_server
+        if vs is not None and hasattr(vs, "set_live_session"):
+            try:
+                vs.set_live_session(rec.key, rec.session_id)
+            except Exception as e:  # noqa: BLE001
+                logger.error("[sessions] viz server refused the live key: %s", e)
         self._event(rec, "start", t_sensor_ns, {"source": self.source, "discarded_predecessor": discarded})
         self._ledger("start", rec, {})
         return rec
