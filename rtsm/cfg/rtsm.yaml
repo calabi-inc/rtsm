@@ -187,6 +187,22 @@ io:
       odom: null
       tracking: null
       seq: null
+    # Publish RTSM's objects on ROS 2 topics (off by default). Two standard message types, no ament package:
+    # vision_msgs/Detection3DArray (the objects) and visualization_msgs/MarkerArray (the same objects for RViz).
+    # Every tick publishes the whole object list (idempotent); latched = transient-local durability, depth 1, so a
+    # late subscriber gets the last snapshot. Independent of the ingest source (Lens, bag or ros2). Needs rclpy
+    # and the two packages: apt install ros-$ROS_DISTRO-vision-msgs ros-$ROS_DISTRO-visualization-msgs.
+    publish:
+      enable: false
+      objects_topic: /rtsm/objects   # vision_msgs/Detection3DArray
+      markers_topic: /rtsm/markers   # visualization_msgs/MarkerArray; empty = no markers
+      frame_id: auto                 # auto = the ros2 source's world frame, else map; or a frame name
+      rate_hz: 5.0
+      confirmed_only: true           # false = provisional objects too
+      qos: reliable                  # reliable | best_effort
+      latched: true                  # transient-local durability, depth 1
+      marker_size_m: 0.15            # sphere diameter and bbox size (RTSM estimates no extent)
+      max_hypotheses: 5              # label scores per object, best first
 
 # -------------------- Ingest (frame admission timing) --------------------
 ingest:

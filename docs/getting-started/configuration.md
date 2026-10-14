@@ -296,6 +296,17 @@ io:
       odom: null
       tracking: null
       seq: null
+    publish:                        # RTSM's objects on ROS 2 topics; off by default (see the API page)
+      enable: false
+      objects_topic: /rtsm/objects  # vision_msgs/Detection3DArray
+      markers_topic: /rtsm/markers  # visualization_msgs/MarkerArray; empty = off
+      frame_id: auto                # the ros2 source's world frame, else map
+      rate_hz: 5.0
+      confirmed_only: true
+      qos: reliable                 # reliable | best_effort
+      latched: true                 # transient-local, depth 1
+      marker_size_m: 0.15
+      max_hypotheses: 5
 ```
 
 | key | meaning |

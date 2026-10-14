@@ -30,6 +30,7 @@ from rtsm.io.ingest_lanes import LaneConfig, lane_drop_handler, make_ingest_queu
 from rtsm.io.websocket import WebSocketReceiver
 from rtsm.io.contracts import SourceContext
 from rtsm.io.sources import UnknownSourceError, available_sources, make_source
+from rtsm.io.ros2_publisher import Ros2Publisher
 from rtsm.utils.net import print_server_addresses, get_local_ipv4_addresses
 from rtsm.utils.static_dir import find_static_dir
 from rtsm.stores.sweep_policy import SweepPolicy
@@ -392,6 +393,12 @@ def main(argv: "list[str] | None" = None):
         logger.info("ZeroMQ dual-socket subscriber started (camera + RTABMap)")
     else:
         logger.info(f"Ingest source {source.name!r} started")
+    # ── The ros2 publisher (off unless io.ros2.publish.enable): the objects as a periodic snapshot on two topics,
+    # independent of the source. Explicitly enabled without rclpy or the message packages = refuse at start.
+    ros2_pub = Ros2Publisher.maybe(
+        cfg, wm, world_frame=(lambda: (_source_stats(source).get("world_frame") if source.name == "ros2" else None)))
+    if ros2_pub is not None:
+        ros2_pub.start()
 
     # Visualization tasks start via API server lifespan (start_tasks())
     if vis_server:
@@ -454,6 +461,7 @@ def main(argv: "list[str] | None" = None):
             "pose_conversion_failures": pipe.pose_conversion_failures,
             # the source's own counters when it keeps some (bag, ros2: frames_seen, paired, pose_missing, enqueued, ...)
             **({"source": _source_stats(source)} if hasattr(source, "stats") else {}),
+            **({"ros2_publish": ros2_pub.stats()} if ros2_pub is not None else {}),
         },
         reset_components=reset_components,
         seg_analytics=seg_analytics,
@@ -542,6 +550,11 @@ def main(argv: "list[str] | None" = None):
         # node left running tears its DDS threads down under the C++ runtime
         # ("terminate called without an active exception", found by the ros2
         # gate). Every source has stop(); the ones with a teardown have wait().
+        if ros2_pub is not None:          # before the source: the source may own the rclpy context
+            try:
+                ros2_pub.stop()
+            except Exception as e:  # noqa: BLE001
+                logger.warning("[run] ros2 publisher stop failed: %s", e)
         try:
             source.stop()
             wait = getattr(source, "wait", None)
