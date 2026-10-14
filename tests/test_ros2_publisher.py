@@ -241,6 +241,15 @@ def test_tick_errors_are_counted_not_raised(monkeypatch):
     pub.stop()
 
 
+def test_preflight_is_a_noop_when_disabled_and_refuses_early_when_enabled(monkeypatch):
+    monkeypatch.setitem(sys.modules, "rclpy", None)
+    assert Ros2Publisher.preflight({}) is None                                     # disabled: nothing imported
+    with pytest.raises(Ros2Unavailable):
+        Ros2Publisher.preflight({"io": {"ros2": {"publish": {"enable": True}}}})
+    with pytest.raises(ValueError):
+        Ros2Publisher.preflight({"io": {"ros2": {"publish": {"enable": True, "rate_hz": -1}}}})
+
+
 def test_start_refuses_with_the_hint_when_rclpy_is_missing(monkeypatch):
     monkeypatch.setitem(sys.modules, "rclpy", None)
     pub = Ros2Publisher(PublishConfig(enable=True), _WM([]))

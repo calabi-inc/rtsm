@@ -31,6 +31,7 @@ from rtsm.io.websocket import WebSocketReceiver
 from rtsm.io.contracts import SourceContext
 from rtsm.io.sources import UnknownSourceError, available_sources, make_source
 from rtsm.io.ros2_publisher import Ros2Publisher
+from rtsm.io.ros2_source import Ros2Unavailable
 from rtsm.utils.net import print_server_addresses, get_local_ipv4_addresses
 from rtsm.utils.static_dir import find_static_dir
 from rtsm.stores.sweep_policy import SweepPolicy
@@ -182,6 +183,12 @@ def main(argv: "list[str] | None" = None):
                         {k: v for k, v in _probe.topics.items() if k != "rules" and v}, _probe.pose_kind, _probe.world_frame,
                         _probe.camera_frame, _probe.registration)
 
+    # The ros2 publisher, when enabled: its configuration, rclpy and the two message packages are checked here,
+    # so a refusal costs seconds, not a model load (same reason as the bag probe above).
+    try:
+        Ros2Publisher.preflight(cfg)
+    except (Ros2Unavailable, ValueError) as exc:
+        parser.error(f"io.ros2.publish: {exc}")
     # After the ingest validation on purpose: a bad config exits through
     # parser.error on any machine (CPU test), before this check can return.
     # ── Check GPU dependencies unless in record-only mode ──

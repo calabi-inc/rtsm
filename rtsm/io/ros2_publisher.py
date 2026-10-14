@@ -240,6 +240,17 @@ class Ros2Publisher:
                                           "last_tick_wall_utc": None}
 
     @classmethod
+    def preflight(cls, cfg_root: Dict[str, Any]) -> Optional[PublishConfig]:
+        """Before any model loads: the configuration (ValueError) and, when enabled, rclpy and the two message
+        packages (Ros2Unavailable with the hint). None when disabled."""
+        pc = PublishConfig.from_cfg(cfg_root)
+        if not pc.enable:
+            return None
+        _import_rclpy()
+        MsgTypes.resolve()
+        return pc
+
+    @classmethod
     def maybe(cls, cfg_root: Dict[str, Any], wm: Any, **kw: Any) -> Optional["Ros2Publisher"]:
         """None unless ``io.ros2.publish.enable``."""
         pc = PublishConfig.from_cfg(cfg_root)
