@@ -192,3 +192,17 @@ def test_dashboard_page_is_not_cached(tmp_path):
     asset = api.get("/assets/index-abc.js")
     assert asset.status_code == 200 and "no-cache" not in asset.headers.get("cache-control", "")
     assert "cache-control" not in {k.lower() for k in api.get("/healthz").headers} or "no-cache" not in api.get("/healthz").headers.get("cache-control", "")
+
+
+def test_websocket_without_a_viz_server_is_refused_cleanly(tmp_path):
+    """A dashboard tab reconnecting to /ws while the process runs with --no-viz: a refused handshake, not an
+    AssertionError from the static-files mount (2026-10-14)."""
+    from starlette.websockets import WebSocketDisconnect
+    static = tmp_path / "static"
+    static.mkdir()
+    (static / "index.html").write_text("<html></html>", encoding="utf-8")
+    api = TestClient(create_app(working_memory=_WM(), registry=CollectorRegistry(), static_dir=str(static)))
+    assert api.get("/").status_code == 200
+    with pytest.raises(WebSocketDisconnect):
+        with api.websocket_connect("/ws"):
+            pass

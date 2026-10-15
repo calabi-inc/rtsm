@@ -403,9 +403,19 @@ def run_demo(argv: list[str] | None = None) -> None:
         event_log.close()   # no-op if the pipeline already closed it
         sessions.wait_idle(10.0)   # the writer thread finishes the last session folder
         analytics.stop()
-        # Print summary
+        # Print summary. The exit freeze (sessions) moved the live memory into the newest session record and
+        # cleared the working memory, so count from the record when the memory is empty.
         all_objs = list(wm.iter_objects())
-        confirmed = sum(1 for o in all_objs if o.confirmed)
-        proto = sum(1 for o in all_objs if not o.confirmed)
-        print(f"\n  Demo complete: {confirmed} confirmed objects, {proto} proto")
+        where = ""
+        if all_objs:
+            confirmed = sum(1 for o in all_objs if o.confirmed)
+            proto = sum(1 for o in all_objs if not o.confirmed)
+        else:
+            frozen = sessions.frozen[0] if getattr(sessions, "frozen", None) else None
+            objs = list(frozen.objects) if frozen is not None else []
+            confirmed = sum(1 for o in objs if o.get("confirmed"))
+            proto = len(objs) - confirmed
+            if frozen is not None:
+                where = f" (session {frozen.key}{' on disk' if frozen.on_disk else ''})"
+        print(f"\n  Demo complete: {confirmed} confirmed objects, {proto} proto{where}")
         print(f"  Query the API: curl http://{display_host}:{port}/objects")
