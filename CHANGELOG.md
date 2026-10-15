@@ -2,7 +2,9 @@
 
 All notable changes to `rtsm`. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [Semantic Versioning](https://semver.org/) with the caveat that anything before 1.0 may change between minor versions when the changelog says so.
 
-## [Unreleased]
+## [0.3.0] - 2026-10-14
+
+The release after 0.2.1: sessions (a SLAM boundary freezes the live session; a dashboard picker and `GET /sessions`), the `ros2` live source with an optional publisher, `rtsm eval --save-crops`, run provenance down to the weight files' hashes, validated weight files with `segmentation.weights_policy`, the prompt-free label switch, dashboard navigation, and the fixes from the pre-release review (all reproduced before they were fixed). No metric, report or ledger schema number changes; `resolved.json` gains fields. The `io.websocket.*` timing aliases stay until 0.4.0.
 
 ### Added
 - `io.ros2.publish` (off by default): RTSM's objects as a periodic state snapshot on ROS 2 topics, `vision_msgs/Detection3DArray` and `visualization_msgs/MarkerArray`, independent of the ingest source; latched QoS, configurable topics, rate and frame; counters on `/stats.ros2_publish`. Standard message types only, no `ament` package.
@@ -40,6 +42,7 @@ All notable changes to `rtsm`. The format follows [Keep a Changelog](https://kee
 - `python -m rtsm.cli ...` ran nothing (no main guard); it now behaves like the `rtsm` console script.
 - Sessions: the in-RAM cap evicted a frozen session's clouds, vectors and crops before the writer had persisted them, so the folder on disk was empty (deterministic with `keep_in_memory: 0`, and with the default whenever boundaries outran the writer); a record is never evicted until it is on disk. `DELETE /sessions/{key}` during an in-flight write no longer leaves a folder that reappears at the next start.
 - `rtsm demo` lists the sessions on disk and runs retention at start, and waits for the writer at exit, as `python -m rtsm` does.
+- Sessions: a keyframe of the next session admitted on the receiver thread before the pipeline decided the boundary was frozen into the ending session; keyframes now carry the packet's frame epoch and a freeze keeps newer-epoch keyframes live.
 - ZeroMQ receiver: `stop()` now signals the poll loop and waits for it before closing the sockets; closing them from the main thread while the loop polled aborted the process inside libzmq on every Ctrl-C and skipped the rest of the shutdown. RTAB-Map map id 0 (a fresh database's first map) now names its session like every other map id.
 - ROS 2 live source: the RGB / depth pairer and the TF buffer are bounded on a live stream (one stalled image stream no longer buffers the other without limit; TF keeps a 10 s horizon per hop and inserts out-of-order samples in place). A refusal destroys the node but leaves the rclpy context up for the publisher; the context is shut down at process exit.
 - `segmentation.weights_policy: off` written bare in YAML (which PyYAML reads as the boolean False) is accepted as `off`.

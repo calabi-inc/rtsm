@@ -12,7 +12,7 @@
 ## Install RTSM
 
 !!! note "What's new"
-    0.2.0 (October 2026) is the first release since April: `rtsm eval` on bags and recordings with the single-bag report, the bag readers, the Python client, the detections adapter, and headless by default (`--viz` turns the dashboard on). The full list, with the behaviour changes a 0.1.1 user should read first, is in the [changelog](https://github.com/calabi-inc/rtsm/blob/main/CHANGELOG.md); `rtsm version` prints what you have.
+    0.3.0 (October 2026): sessions (a SLAM boundary freezes the live session, with a dashboard picker and `GET /sessions`), the `ros2` live source with an optional publisher, `rtsm eval --save-crops`, run provenance down to the weight files' hashes, and validated weight files with `segmentation.weights_policy`. The full list, with the behaviour changes a 0.2.x user should read first, is in the [changelog](https://github.com/calabi-inc/rtsm/blob/main/CHANGELOG.md); `rtsm version` prints what you have.
 
 ### Option A: pip install (recommended)
 
