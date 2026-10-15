@@ -117,7 +117,7 @@ io:
     require_tracking_normal: true               # drop frames where tracking_state != "normal"
     confidence_threshold: 2                     # 0=accept all, 1=medium+high, 2=high only (2 matches official RTABMap)
     # keyframe_every_n / nonkf_min_interval_s moved to ingest: (P1 task 6); the
-    # old paths still work here with a deprecation warning until 0.3.0.
+    # old paths still work here with a deprecation warning until 0.4.0.
 
   # Receive-time forward clearance (websocket receiver only; opt-in). When
   # enabled, every frame that passes the tracking filter and the non-KF
@@ -241,7 +241,7 @@ ingest:
   max_frame_age_s: 2.0            # latest: non-keyframe older than this at dequeue is discarded (null disables)
   lossless_depth: 32              # lossless: FIFO depth before the producer waits (~8.5 MB per decoded frame)
   # Receiver timing (moved here from io.websocket.* in P1 task 6; the old paths
-  # are aliased with a deprecation warning until 0.3.0):
+  # are aliased with a deprecation warning until 0.4.0):
   keyframe_every_n: 30            # websocket / replay: every Nth frame is a keyframe (ZeroMQ keyframes are the SLAM node's)
   nonkf_min_interval_s: 0.5       # every receiver: min interval between admitted non-keyframes, on the ingest clock (~2/s)
   # ZeroMQ pairing window (rtsm/stores/frame_window.py): how long an encoded

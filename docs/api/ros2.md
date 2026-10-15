@@ -148,5 +148,5 @@ What a consumer sees is the memory as it is: on a recording where the associatio
 ## Limits
 
 - No services or actions, no `ament` package, no launch files. Publishing is the optional snapshot above; nothing is published per event.
-- Exercised on ROS 2 Humble under WSL2 (Ubuntu 22.04, Python 3.10) against one recording replayed with `ros2 bag play`; `tests/test_ros2_source.py` pins that a frame built live equals the frame the bag reader builds from the same stream. Jazzy is supported by the environment recipe but has not been exercised. There is no ROS 2 container in CI.
+- Exercised on ROS 2 Humble under WSL2 (Ubuntu 22.04, Python 3.10) against one recording replayed with `ros2 bag play`; `tests/test_ros2_source.py` pins that a frame built live equals the frame the bag reader builds from the same stream, on a locally generated `session1_bag` (CI checks out without LFS and skips that test). Jazzy is supported by the environment recipe but has not been exercised. There is no ROS 2 container in CI.
 - `rclpy` exists only inside a sourced ROS 2 environment on Linux; elsewhere the source refuses at start with a one-line hint.

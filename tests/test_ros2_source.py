@@ -287,3 +287,61 @@ def test_session1_bag_through_the_live_ingress_matches_the_bag_reader():
         assert ha.extra == hb.extra
     assert ing.stats.pose_missing == 0 and ing.before_ready_dropped == 0
     assert fe.require_tracking_normal is True                 # session1 carries a tracking topic
+
+
+# ───────────── live bounds and context ownership (0.3.0 review, 2026-10-14) ─────────────
+
+def test_live_pairer_is_bounded_when_the_other_stream_stalls():
+    from rtsm.io.ros2_source import LIVE_PAIR_BUFFER
+    _fe, ing = _ingress()
+    for i in range(200):                                      # RGB at 30 Hz, no depth at all
+        ing.on_message("rgb", _rgb(1.0 + i / 30.0), 10 + i)
+    ing.step()
+    assert len(ing._pairer.rgb) <= LIVE_PAIR_BUFFER
+    assert ing.stats.unpaired_rgb == 200 - LIVE_PAIR_BUFFER
+    _fe2, ing2 = _ingress()
+    for i in range(200):                                      # depth only
+        ing2.on_message("depth", _depth(1.0 + i / 30.0), 10 + i)
+    ing2.step()
+    assert len(ing2._pairer.depth_stamps) <= LIVE_PAIR_BUFFER
+    assert ing2.stats.unpaired_depth >= 200 - LIVE_PAIR_BUFFER
+
+
+def test_refusal_keeps_the_rclpy_context_until_stop():
+    """A refusal (no camera within the deadline) destroys the node but leaves the shared rclpy context up for the
+    optional publisher; stop() at process exit shuts it down, once."""
+    import threading
+    from types import SimpleNamespace
+    from rtsm.io.ros2_source import Ros2Source
+    calls = []
+
+    class FakeRclpy:
+        def __init__(self):
+            self._ok = True
+
+        def ok(self):
+            return self._ok
+
+        def shutdown(self):
+            calls.append("shutdown")
+            self._ok = False
+
+    class FakeNode:
+        def destroy_node(self):
+            calls.append("destroy")
+
+    src = Ros2Source.__new__(Ros2Source)
+    src._rclpy = FakeRclpy()
+    src._node = FakeNode()
+    src._we_initialised = True
+    src._stop_event = threading.Event()
+    src._done = threading.Event()
+    src._threads = []
+    src._executor = None
+    src._ctx = SimpleNamespace(ingest_queue=SimpleNamespace(policy="latest"))
+    src._teardown(shutdown_context=src._stop_event.is_set())      # the setup thread's finally after a refusal
+    assert calls == ["destroy"] and src._rclpy.ok() and src._node is None
+    src.stop(timeout=0.1)
+    assert calls == ["destroy", "shutdown"] and not src._rclpy.ok()
+    src.stop(timeout=0.1)
+    assert calls == ["destroy", "shutdown"]                       # idempotent
