@@ -21,6 +21,7 @@ class KeyframeRecord:
     pose: Optional[np.ndarray] = None  # (4, 4) float32 Twc row-major, or None if not yet received
     map_id: str = "0"               # SLAM map ID
     session_key: str = ""          # the session registry's key of the session that produced it ("" = untagged)
+    epoch: Optional[int] = None    # FramePacket.frame_epoch when known: a freeze keeps keyframes of a newer epoch live
 
 
 class KeyframeRegistry:
@@ -44,6 +45,7 @@ class KeyframeRegistry:
         pose: Optional[np.ndarray] = None,
         map_id: str = "0",
         session_key: str = "",
+        epoch: Optional[int] = None,
     ) -> KeyframeRecord:
         """
         Register a new keyframe or update existing.
@@ -62,6 +64,8 @@ class KeyframeRegistry:
                 rec.map_id = map_id
                 if session_key:
                     rec.session_key = session_key
+                if epoch is not None:
+                    rec.epoch = int(epoch)
             else:
                 # Create new
                 rec = KeyframeRecord(
@@ -72,6 +76,7 @@ class KeyframeRegistry:
                     pose=pose,
                     map_id=map_id,
                     session_key=session_key,
+                    epoch=(int(epoch) if epoch is not None else None),
                 )
                 self._keyframes[mesh_id] = rec
             return rec
@@ -108,11 +113,21 @@ class KeyframeRegistry:
                 return list(self._keyframes.values())
             return [r for r in self._keyframes.values() if r.session_key == session_key]
 
-    def detach(self, session_key: str) -> List[KeyframeRecord]:
-        """Remove and return the keyframes of one session (a session freeze)."""
+    def detach(self, session_key: str, *, epoch: Optional[int] = None,
+               retag_newer_to: Optional[str] = None) -> List[KeyframeRecord]:
+        """Remove and return the keyframes of one session (a session freeze). With ``epoch``, a keyframe tagged with
+        this key but carrying a NEWER epoch belongs to the next session (it was admitted on the receiver thread
+        before the pipeline thread decided the boundary): it stays, re-tagged with ``retag_newer_to``."""
         with self._lock:
-            out = [r for r in self._keyframes.values() if r.session_key == session_key]
-            for r in out:
+            out = []
+            for r in list(self._keyframes.values()):
+                if r.session_key != session_key:
+                    continue
+                if epoch is not None and r.epoch is not None and r.epoch > epoch:
+                    if retag_newer_to:
+                        r.session_key = retag_newer_to
+                    continue
+                out.append(r)
                 del self._keyframes[r.mesh_id]
             return out
 

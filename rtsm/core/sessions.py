@@ -811,7 +811,8 @@ class SessionRegistry:
         # 1. snapshots (store locks nest inside mutate)
         snap = lc.wm.snapshot_for_session() if (lc.wm is not None and hasattr(lc.wm, "snapshot_for_session")) else SessionSnapshot()
         next_key = self._make_key(now, next_epoch, next_session_id) if open_next else None
-        viz = lc.vis_server.freeze_live(next_key) if (lc.vis_server is not None and hasattr(lc.vis_server, "freeze_live")) else LiveVizState()
+        viz = (lc.vis_server.freeze_live(next_key, epoch=live.epoch)
+               if (lc.vis_server is not None and hasattr(lc.vis_server, "freeze_live")) else LiveVizState())
         vec = lc.vectors.export() if (lc.vectors is not None and hasattr(lc.vectors, "export")) else None
         self.counters["boundaries"] += 1
         self.last_boundary = {"reason": reason, "t_wall_utc_s": now, "from": live.key}

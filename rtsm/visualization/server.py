@@ -241,6 +241,7 @@ class VisualizationServer:
         self._live_session_id: Optional[str] = None
         self._kf_alias: Dict[str, str] = {}
         self._alias_stamp: Dict[str, int] = {}
+        self._kf_epoch: Dict[str, int] = {}          # mesh id -> FramePacket.frame_epoch (freeze keeps newer epochs live)
         self._pending: Dict[str, np.ndarray] = {}
         self._pending_lock = threading.Lock()
         self._pending_timer: Optional[threading.Timer] = None
@@ -708,25 +709,39 @@ class VisualizationServer:
         self._live_session_key = str(key or "")
         self._live_session_id = session_id
 
-    def freeze_live(self, next_key: Optional[str]) -> LiveVizState:
+    def freeze_live(self, next_key: Optional[str], *, epoch: Optional[int] = None) -> LiveVizState:
         """A session boundary (the registry holds its lock): hand over the live
         session's keyframes, pose history and alias tables, clear them, reset the
-        TSDF, tell the clients the scene restarts, adopt the next live key."""
+        TSDF, tell the clients the scene restarts, adopt the next live key.
+
+        ``epoch`` is the ending session's frame epoch. Keyframes are tagged on the
+        receiver thread at admission with whichever key is live then, while the
+        boundary is decided on the pipeline thread when the first packet of the new
+        epoch is dequeued; keyframes of a newer epoch admitted in between belong to
+        the next session and stay live (found 2026-10-14)."""
         self.flush_pending_corrections()          # pending updates belong to the session that ends
-        records = self.registry.detach(self._live_session_key)
-        state = LiveVizState(records=records, pose_history=dict(self._pose_history),
-                             kf_alias=dict(self._kf_alias), alias_stamp=dict(self._alias_stamp))
-        self._pose_history.clear()
-        self._kf_alias.clear()
-        self._alias_stamp.clear()
+        next_key_s = str(next_key) if next_key is not None else None
+        records = self.registry.detach(self._live_session_key, epoch=epoch, retag_newer_to=next_key_s)
+        keep = {k for k, e in self._kf_epoch.items() if epoch is not None and e > epoch}
+        state = LiveVizState(records=records,
+                             pose_history={k: v for k, v in self._pose_history.items() if k not in keep},
+                             kf_alias={k: v for k, v in self._kf_alias.items() if v not in keep},
+                             alias_stamp={k: v for k, v in self._alias_stamp.items() if k not in keep})
+        self._pose_history = {k: v for k, v in self._pose_history.items() if k in keep}
+        self._kf_alias = {k: v for k, v in self._kf_alias.items() if v in keep}
+        self._alias_stamp = {k: v for k, v in self._alias_stamp.items() if k in keep}
+        self._kf_epoch = {k: v for k, v in self._kf_epoch.items() if k in keep}
         with self._pending_lock:
             self._pending.clear()
         if self.tsdf is not None:
             self.tsdf.reset()
         if self._running:
             self.broadcaster.schedule(self.broadcaster._broadcast_json({"type": "clear"}))
+            if keep and next_key_s:                 # the clients just cleared the scene: re-send the keyframes that stay
+                for r in self.registry.get_all(next_key_s):
+                    self.broadcaster.schedule(self.broadcaster.send_mesh_create(r.mesh_id, r.positions, r.colors, r.pose))
         if next_key is not None:
-            self._live_session_key = str(next_key)
+            self._live_session_key = next_key_s
         return state
 
     def session_update_payload(self) -> Dict[str, Any]:
@@ -947,11 +962,15 @@ class VisualizationServer:
             if kf_src is not None:
                 self._kf_alias[str(kf_src)] = mesh_id
             self._alias_stamp[mesh_id] = int(pkt.time.t_sensor_ns or 0)
+            pkt_epoch = getattr(pkt, "frame_epoch", None)
+            if pkt_epoch is not None:
+                self._kf_epoch[mesh_id] = int(pkt_epoch)
             if len(self._pose_history) > self._pose_history_max:
                 # Evict oldest entries (dict preserves insertion order in Python 3.7+)
                 excess = len(self._pose_history) - self._pose_history_max
                 for key in list(self._pose_history.keys())[:excess]:
                     del self._pose_history[key]
+                    self._kf_epoch.pop(key, None)
 
             # Note: ARKit→OpenCV camera flip is applied at ingestion
             # (WebSocketReceiver) so pose is already in OpenCV convention.
@@ -1002,6 +1021,7 @@ class VisualizationServer:
                 pose=pose,
                 map_id="websocket",
                 session_key=self._live_session_key,
+                epoch=(int(pkt_epoch) if pkt_epoch is not None else None),
             )
 
             if self._running:

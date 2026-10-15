@@ -200,3 +200,28 @@ def test_correction_during_freeze_is_applied_once(tmp_path, iteration):
     assert np.allclose(o1["xyz_world"], [1.0, 0.0, 0.7]), "the delta must land exactly once"
     assert np.allclose(f.pose_history["ws_1"][:3, 3], [1.0, 0.0, 0.2])
     assert f.counters["refinements"] + reg.live.counters["refinements"] == 1 or f.counters["corrections_applied"] == 1
+
+
+def test_next_sessions_keyframes_admitted_before_the_boundary_stay_live(tmp_path):
+    """Keyframes are tagged on the receiver thread with whichever key is live at admission; the boundary is decided
+    on the pipeline thread later. A keyframe of the new epoch admitted in between must not be frozen into the ending
+    session (0.3.0 review, 2026-10-14)."""
+    wm, vs, reg = world(tmp_path)
+    feed(vs, reg, make_pkt(1, 1_000_000_000, 1.0, epoch=0, kf_id="1"))
+    feed(vs, reg, make_pkt(2, 2_000_000_000, 2.0, epoch=0, kf_id="2"))
+    old_key = reg.live.key
+    nxt = make_pkt(3, 3_000_000_000, 3.0, epoch=1, sid="B", kf_id="3")
+    vs.handle_frame_packet(nxt)                               # the receiver thread, before the pipeline sees the packet
+    assert vs.registry.get("ws_3").session_key == old_key     # tagged with the ending session's key, as before
+    b = reg.observe_frame(nxt)                                # the pipeline thread decides the boundary
+    assert b is not None and b.frozen_key and reg.live.key != old_key
+    frozen = reg._find(b.frozen_key)
+    assert sorted(frozen.keyframes) == ["ws_1", "ws_2"] and "ws_3" not in frozen.pose_history
+    rec = vs.registry.get("ws_3")
+    assert rec is not None and rec.session_key == reg.live.key and rec.epoch == 1
+    assert set(vs._pose_history) == {"ws_3"} and vs._kf_alias == {"3": "ws_3"} and set(vs._alias_stamp) == {"ws_3"}
+    assert vs.registry.count(reg.live.key) == 1 and vs.registry.count(old_key) == 0
+    # a plain freeze (no newer epoch admitted) behaves as before
+    feed(vs, reg, make_pkt(4, 4_000_000_000, 4.0, epoch=1, sid="B", kf_id="4"))
+    b2 = reg.observe_frame(make_pkt(5, 5_000_000_000, 5.0, epoch=2, sid="C"))
+    assert sorted(reg._find(b2.frozen_key).keyframes) == ["ws_3", "ws_4"] and vs._pose_history == {}

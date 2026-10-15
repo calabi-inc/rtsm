@@ -122,7 +122,7 @@ class FakeViz:
             self.kf_alias[str(kf_id)] = mesh_id
         return r
 
-    def freeze_live(self, next_key):
+    def freeze_live(self, next_key, epoch=None):
         self.freeze_calls.append(next_key)
         st = LiveVizState(records=list(self.records), pose_history=dict(self.pose_history), kf_alias=dict(self.kf_alias),
                           alias_stamp=dict(self.alias_stamp))
