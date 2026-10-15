@@ -1,6 +1,6 @@
 # ROS 2 Ingest
 
-The contract a ROS 2 graph has to meet for RTSM to consume it. The `ros2` source is a **subscriber-only node**: it reads RGB, depth, camera intrinsics and pose from the graph and feeds the same ingest front-end as the bag reader. It publishes nothing. RTSM's outputs stay on the [REST API](rest-api.md), [MCP](mcp.md) and the [WebSocket](websocket.md).
+The contract a ROS 2 graph has to meet for RTSM to consume it. The `ros2` source is a **subscriber-only node**: it reads RGB, depth, camera intrinsics and pose from the graph and feeds the same ingest front-end as the bag reader. By default it publishes nothing; RTSM's outputs stay on the [REST API](rest-api.md), [MCP](mcp.md) and the [WebSocket](websocket.md). `io.ros2.publish` adds an optional state snapshot on two topics ([below](#publishing-optional-off-by-default)).
 
 This page is the reference. Running it (environment, the probe walkthrough, threads and timing, replaying RTSM's own recordings into a graph) is in the [Ingest Sources guide](../guides/ingest-sources.md#ros-2-live); the discovery rules it shares with the bag reader are in [Reading Bags](../guides/bags.md#what-the-reader-needs-and-how-it-finds-it).
 
@@ -106,8 +106,47 @@ Discovery polls the graph for up to `discovery_timeout_s` (10 s) until an RGB, a
 | `ready`, `error`, `refusal_codes` | the source's state |
 | `node`, `graph` | the node name and the discovery result (topics, QoS chosen and offered, advertised topics, refusal) |
 
+## Publishing (optional, off by default)
+
+`io.ros2.publish.enable: true` publishes the memory's objects as a **periodic state snapshot** on two topics. Two standard message types, so no `ament` package; RTSM stays pip-installable. The publisher is independent of the ingest source: frames may come from Lens, a bag or a ROS 2 graph. It runs its own node, `<io.ros2.node_name>_publisher`, and needs `rclpy` plus the two message packages (`apt install ros-$ROS_DISTRO-vision-msgs ros-$ROS_DISTRO-visualization-msgs`); enabled without them, RTSM refuses at start with the hint.
+
+```yaml
+io:
+  ros2:
+    publish:
+      enable: true
+      objects_topic: /rtsm/objects   # vision_msgs/Detection3DArray
+      markers_topic: /rtsm/markers   # visualization_msgs/MarkerArray; empty = off
+      frame_id: auto                 # the ros2 source's world frame, else map; or a frame name
+      rate_hz: 5.0
+      confirmed_only: true
+      qos: reliable                  # reliable | best_effort
+      latched: true                  # transient-local durability, depth 1
+      marker_size_m: 0.15
+      max_hypotheses: 5
+```
+
+Every tick publishes the whole list of (confirmed) objects as it stands. That is idempotent: a subscriber that joins late, drops a message or restarts is right again at the next tick, and with `latched` the last snapshot is delivered to anyone who subscribes afterwards. There is no per-event stream and no service; queries (semantic, spatial) stay on the [REST API](rest-api.md) and [MCP](mcp.md).
+
+**The field mapping** (the contract):
+
+| message field | value |
+|---|---|
+| `Detection3DArray.header` | `frame_id` = the world frame; `stamp` = the node clock at the tick |
+| `Detection3D.id` | the object id |
+| `Detection3D.results[k].hypothesis` | `class_id` = a label, `score` = its smoothed score; best first, at most `max_hypotheses` |
+| `Detection3D.results[k].pose.pose.position` | the object's world position; orientation identity |
+| `Detection3D.bbox.center.position` | the world position |
+| `Detection3D.bbox.size` | `marker_size_m` on every axis: RTSM estimates no extent |
+| `Marker` ns `rtsm/objects` | a sphere of `marker_size_m` at the position; id = crc32 of the object id; dimmer when provisional |
+| `Marker` ns `rtsm/labels` | `TEXT_VIEW_FACING` with the primary label above the sphere, same id |
+| `MarkerArray` | a `DELETEALL` marker first, then the current objects |
+
+`/stats.ros2_publish` carries the configuration as resolved, the node name, `frame_id_resolved`, `ticks`, `published`, `last_objects`, `last_markers`, `errors`, `last_error`.
+
+What a consumer sees is the memory as it is: on a recording where the association gate fragments one object into several ids, every id is published.
 ## Limits
 
-- Subscriber only: no publishers, services or actions; no `ament` package, no launch files. RTSM's objects do not appear on ROS topics.
+- No services or actions, no `ament` package, no launch files. Publishing is the optional snapshot above; nothing is published per event.
 - Exercised on ROS 2 Humble under WSL2 (Ubuntu 22.04, Python 3.10) against one recording replayed with `ros2 bag play`; `tests/test_ros2_source.py` pins that a frame built live equals the frame the bag reader builds from the same stream. Jazzy is supported by the environment recipe but has not been exercised. There is no ROS 2 container in CI.
 - `rclpy` exists only inside a sourced ROS 2 environment on Linux; elsewhere the source refuses at start with a one-line hint.
