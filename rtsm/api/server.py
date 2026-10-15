@@ -1041,7 +1041,15 @@ def create_app(
             )
 
     # ---- Visualization WebSocket (optional, for single-port demo) ----
-    if vis_broadcaster is not None and vis_registry is not None:
+    if vis_broadcaster is None or vis_registry is None:
+
+        @app.websocket("/ws")
+        async def viz_websocket_unavailable(websocket: WebSocket):
+            # No visualization server in this process (--no-viz): refuse the handshake. Without a route here the
+            # upgrade fell through to the static-files mount, which asserts on a websocket scope and logged an
+            # ASGI traceback per reconnect attempt of an open dashboard tab (seen 2026-10-14).
+            await websocket.close(code=1008)
+    else:
 
         @app.websocket("/ws")
         async def viz_websocket(websocket: WebSocket):

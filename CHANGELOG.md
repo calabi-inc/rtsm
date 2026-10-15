@@ -2,6 +2,12 @@
 
 All notable changes to `rtsm`. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [Semantic Versioning](https://semver.org/) with the caveat that anything before 1.0 may change between minor versions when the changelog says so.
 
+## [Unreleased]
+
+### Fixed
+- `rtsm demo`: the completion summary counted the working memory after the exit freeze had moved it into the session record, so it always read 0; it now counts the frozen session.
+- A websocket to `/ws` on a process without a visualization server (`--no-viz`) fell through to the static-files mount and logged an ASGI traceback per attempt; the handshake is refused (close code 1008).
+
 ## [0.3.0] - 2026-10-14
 
 The release after 0.2.1: sessions (a SLAM boundary freezes the live session; a dashboard picker and `GET /sessions`), the `ros2` live source with an optional publisher, `rtsm eval --save-crops`, run provenance down to the weight files' hashes, validated weight files with `segmentation.weights_policy`, the prompt-free label switch, dashboard navigation, and the fixes from the pre-release review (all reproduced before they were fixed). No metric, report or ledger schema number changes; `resolved.json` gains fields. The `io.websocket.*` timing aliases stay until 0.4.0.
