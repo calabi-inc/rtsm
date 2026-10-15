@@ -165,15 +165,24 @@ def _walk_cfg(node: Any, prefix: str = ""):
         yield prefix, node
 
 
+_BACKEND_WEIGHT_KEYS = {"fastsam": ("segmentation.fastsam.model_path",),
+                        "yoloe": ("segmentation.yoloe.model_path",),
+                        "dual": ("segmentation.fastsam.model_path", "segmentation.yoloe.model_path")}
+
+
 def _model_files(cfg: dict, root: Optional[Path] = None) -> Dict[str, Dict[str, Any]]:
-    """Every ``*model_path`` string in the config: the file's size and sha256 when it exists, ``exists: false`` when it
-    does not (a backend then downloads whatever its library serves, which the config fingerprint cannot tell apart:
-    two runs with one fingerprint and one commit gave different labels on 2026-10-05 because one worktree had no
-    model_store and ultralytics fetched other weights)."""
+    """The weight files the ACTIVE segmentation backend loads (fastsam, yoloe, dual; the hub-fetched backends have
+    none): the file's size and sha256 when it exists, ``exists: false`` when it does not (the backend's library then
+    downloads whatever it serves, which the config fingerprint cannot tell apart: two runs with one fingerprint and
+    one commit gave different labels on 2026-10-05 because one worktree had no model_store). Files of backends not
+    in use are not listed: the packaged config always names them, and a grounded_sam2 run was reported as
+    "missing at run start" for files it never loads (2026-10-14)."""
     out: Dict[str, Dict[str, Any]] = {}
     base = root or Path.cwd()
+    backend = str(((cfg or {}).get("segmentation") or {}).get("backend", "")).lower()
+    wanted = set(_BACKEND_WEIGHT_KEYS.get(backend, ()))
     for key, val in _walk_cfg(cfg):
-        if not key.endswith("model_path") or not isinstance(val, str) or not val:
+        if key not in wanted or not isinstance(val, str) or not val:
             continue
         p = Path(val)
         if not p.is_absolute():

@@ -247,6 +247,15 @@ def run_demo(argv: list[str] | None = None) -> None:
         vis_broadcaster = vis_server.broadcaster
         vis_server_registry = vis_server.registry
 
+    # Sessions on disk from earlier runs: list them and run retention, as run.py does. Without this an
+    # exit-frozen session folder was never listed and never garbage-collected (found 2026-10-14).
+    try:
+        n_disk = sessions.load_from_disk()
+        if n_disk:
+            logger.info("[sessions] %d session(s) on disk under %s", n_disk, sessions.dir)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[sessions] load_from_disk failed: %s", e)
+
     # ── Frame-flow trace (diagnostics.*): one writer shared by the replay
     # thread and the pipeline thread; disabled => every hook is a no-op.
     from rtsm.evaluation.event_log import EventLogWriter
@@ -392,6 +401,7 @@ def run_demo(argv: list[str] | None = None) -> None:
         pass
     finally:
         event_log.close()   # no-op if the pipeline already closed it
+        sessions.wait_idle(10.0)   # the writer thread finishes the last session folder
         analytics.stop()
         # Print summary
         all_objs = list(wm.iter_objects())

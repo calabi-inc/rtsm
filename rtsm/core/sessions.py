@@ -126,6 +126,7 @@ class FrozenSession(SessionRecord):
     dirty: bool = False
     on_disk: bool = False
     payload_loaded: bool = True                 # objects / keyframes / clouds / vectors in memory
+    deleted: bool = False                       # DELETE arrived; a write still in flight must not publish the folder
 
 
 @dataclass
@@ -810,7 +811,8 @@ class SessionRegistry:
         # 1. snapshots (store locks nest inside mutate)
         snap = lc.wm.snapshot_for_session() if (lc.wm is not None and hasattr(lc.wm, "snapshot_for_session")) else SessionSnapshot()
         next_key = self._make_key(now, next_epoch, next_session_id) if open_next else None
-        viz = lc.vis_server.freeze_live(next_key) if (lc.vis_server is not None and hasattr(lc.vis_server, "freeze_live")) else LiveVizState()
+        viz = (lc.vis_server.freeze_live(next_key, epoch=live.epoch)
+               if (lc.vis_server is not None and hasattr(lc.vis_server, "freeze_live")) else LiveVizState())
         vec = lc.vectors.export() if (lc.vectors is not None and hasattr(lc.vectors, "export")) else None
         self.counters["boundaries"] += 1
         self.last_boundary = {"reason": reason, "t_wall_utc_s": now, "from": live.key}
@@ -908,10 +910,17 @@ class SessionRegistry:
                 logger.error("[sessions] clearing %s at the boundary failed: %s", name, e)
 
     def _enforce_keep_cap(self) -> None:
+        """At most ``keep_in_memory`` frozen payloads stay in RAM. A record that is not on disk yet is never evicted
+        while persist_on_freeze is on: its payload is what the writer is about to write (or failed to write), and
+        evicting it first persisted an empty session (clouds.npz without keys, no vectors, no crops; found
+        2026-10-14 with keep_in_memory 0, and with the default 3 whenever a boundary outran the writer). The cap
+        runs again when a write completes (``_persist_full``)."""
         for rec in self.frozen[self.cfg.keep_in_memory:]:
             if rec.clouds is None and rec.vectors is None:
                 continue
-            if not rec.on_disk and not self.cfg.persist_on_freeze:
+            if not rec.on_disk:
+                if self.cfg.persist_on_freeze:
+                    continue
                 logger.warning("[sessions] %s evicted from RAM without a copy on disk (persist_on_freeze is off)", rec.key)
                 rec.timeline.append(TimelineEvent(self._now(), None, "freeze", {"evicted_unpersisted": True}))
             self._evict_payload(rec)
@@ -1102,6 +1111,7 @@ class SessionRegistry:
         return {"removable_after": removable_after, "protected_by": protected}
 
     def _remove_locked(self, rec: FrozenSession, *, reason: str) -> None:
+        rec.deleted = True                      # a write still in flight sees this before it publishes (``_persist_full``)
         folder = self.dir / rec.key
         if folder.exists():
             gc_folder = self.dir / (rec.key + GC_SUFFIX)
@@ -1303,10 +1313,13 @@ class SessionRegistry:
                 d.mkdir(parents=True, exist_ok=True)
                 for i, b in enumerate(jpegs):
                     (d / f"{i}.jpg").write_bytes(b)
-            if final.exists():
-                shutil.rmtree(final, ignore_errors=True)
-            os.replace(tmp, final)
             with self.mutate:
+                if rec.deleted:                        # DELETE /sessions/{key} arrived while the folder was being written
+                    shutil.rmtree(tmp, ignore_errors=True)
+                    return
+                if final.exists():
+                    shutil.rmtree(final, ignore_errors=True)
+                os.replace(tmp, final)
                 rec.on_disk = True
                 rec.persisted = True
                 rec.persist_error = None
@@ -1314,6 +1327,7 @@ class SessionRegistry:
                 rec.crops = None
                 if rec.dirty:
                     self._write_meta_files(rec)
+                self._enforce_keep_cap()               # this payload is on disk now: the RAM cap may evict it
             self._notify_change()                      # on_disk / persisted changed
         except Exception as e:  # noqa: BLE001
             with self.mutate:

@@ -112,7 +112,15 @@ def validation_state(path: str | Path, sha256: str) -> Optional[str]:
 
 
 def policy_from(seg_cfg: Dict[str, Any]) -> str:
-    policy = str((seg_cfg or {}).get("weights_policy", "warn")).lower()
+    """YAML 1.1 (PyYAML) reads a bare ``off`` as the boolean False, so ``weights_policy: off`` in a file or
+    ``--set segmentation.weights_policy=off`` arrives here as False: that is the documented value, not an error."""
+    raw = (seg_cfg or {}).get("weights_policy", "warn")
+    if raw is False or raw is None:
+        return "off"
+    if raw is True:
+        raise ValueError("segmentation.weights_policy must be one of ('warn', 'strict', 'off'); YAML read the value as the "
+                         "boolean True (write it as a word, or quote it)")
+    policy = str(raw).lower()
     if policy not in POLICIES:
         raise ValueError(f"segmentation.weights_policy must be one of {POLICIES}, got {policy!r}")
     return policy

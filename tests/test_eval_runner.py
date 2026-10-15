@@ -368,3 +368,8 @@ def test_model_files_and_hub_ids_in_provenance(tmp_path):
     assert files["segmentation.yoloe.model_path"] == {"path": str(tmp_path / "missing.pt"), "exists": False}
     assert R._hf_models(cfg) == {"segmentation.sam2.model_id": "facebook/sam2.1-hiera-small",
                                  "segmentation.grounded_sam2.gdino_model_id": "IDEA-Research/grounding-dino-tiny"}
+    # only the active backend's files: a grounded_sam2 run never loads the AGPL weights the packaged config names
+    cfg["segmentation"]["backend"] = "grounded_sam2"
+    assert R._model_files(cfg, root=tmp_path) == {}
+    cfg["segmentation"]["backend"] = "yoloe"
+    assert set(R._model_files(cfg, root=tmp_path)) == {"segmentation.yoloe.model_path"}

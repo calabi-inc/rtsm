@@ -123,10 +123,10 @@ def test_map_id_change_bumps_epoch_once():
     seen = []
     sub = _sub(on_session_change=lambda sid, epoch: seen.append((sid, epoch)))
     try:
-        for mid in (1, 1, 2, 0, 2):
+        for mid in (1, 1, 2, 0, 2):                   # 0 is a real map (a fresh database's first), not "unset"
             sub._handle_map_correction(_map_corr(map_id=mid))
-        assert sub._fe.frame_epoch == 2 and sub._fe._epoch_session_id == "rtabmap-map-2"
-        assert seen == [("rtabmap-map-1", 1), ("rtabmap-map-2", 2)]
+        assert sub._fe.frame_epoch == 4 and sub._fe._epoch_session_id == "rtabmap-map-2"
+        assert seen == [("rtabmap-map-1", 1), ("rtabmap-map-2", 2), ("rtabmap-map-0", 3), ("rtabmap-map-2", 4)]
         assert sub.stats()["map_correction"]["map_id"] == 2
     finally:
         sub.close()

@@ -17,6 +17,7 @@ on a stamp regression.
 """
 
 from __future__ import annotations
+import threading
 import time
 import sys
 import json
@@ -201,6 +202,8 @@ class ZeroMQSubscriber:
 
         # The subscriber thread is created externally; run.py assigns it to self._thread.
         self._thread: Optional[Any] = None
+        self._stop = threading.Event()        # stop(): the poll loop leaves, THEN the sockets close (libzmq sockets are not thread-safe)
+        self._closed = False
 
     # ── Compatibility delegates: the chain's state lives on the front-end ──
 
@@ -255,7 +258,10 @@ class ZeroMQSubscriber:
         self._fe.throttle.last_admit_sensor_ns = v
 
     def close(self):
-        """Clean up ZMQ resources."""
+        """Clean up ZMQ resources (once; the loop's own finally and stop() both call it)."""
+        if self._closed:
+            return
+        self._closed = True
         try:
             self.camera_sock.close(0)
         except Exception:
@@ -582,7 +588,7 @@ class ZeroMQSubscriber:
             map_id = int(map_id) if map_id is not None else None
         except (TypeError, ValueError):
             map_id = None
-        if map_id is not None and map_id > 0 and map_id != self._map_id:
+        if map_id is not None and map_id >= 0 and map_id != self._map_id:      # 0 is RTAB-Map's first map in a fresh database
             self._map_id = map_id
             self._fe.new_session(f"rtabmap-map-{map_id}")
             logger.info(f"[zeromq] RTAB-Map map id {map_id}: session rtabmap-map-{map_id} (frame_epoch {self._fe.frame_epoch})")
@@ -816,8 +822,17 @@ class ZeroMQSubscriber:
         self._thread = threading.Thread(target=self.run_forever, daemon=True, name="zeromq-subscriber")
         self._thread.start()
 
-    def stop(self) -> None:
-        """Best-effort: close the sockets; the daemon loop exits with the process."""
+    def stop(self, timeout: float = 2.0) -> None:
+        """Signal the loop, wait for its thread to leave ``poller.poll``, then close. Closing the sockets from
+        another thread while the loop polls them aborted the process inside libzmq (``ctx.cpp`` errno_assert,
+        exit 21) on every Ctrl-C, skipping the rest of the runner's finally block (found 2026-10-14)."""
+        self._stop.set()
+        t = self._thread
+        if t is not None and getattr(t, "is_alive", lambda: False)() and t is not threading.current_thread():
+            t.join(timeout=timeout)
+            if t.is_alive():
+                logger.warning("[zeromq] subscriber thread still polling after %.1f s; its sockets are left to the process exit", timeout)
+                return
         self.close()
 
     def run_forever(self) -> None:
@@ -837,7 +852,7 @@ class ZeroMQSubscriber:
         )
 
         try:
-            while True:
+            while not self._stop.is_set():
                 # Poll with 100ms timeout
                 socks = dict(self.poller.poll(100))
 

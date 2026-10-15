@@ -52,7 +52,7 @@ DEPRECATED_PATHS = {
     "io.websocket.keyframe_every_n": "ingest.keyframe_every_n",
     "io.websocket.nonkf_min_interval_s": "ingest.nonkf_min_interval_s",
 }
-DEPRECATED_REMOVAL = "0.3.0"
+DEPRECATED_REMOVAL = "0.4.0"
 
 
 def _prune_empty(tree: dict, parts: list) -> None:

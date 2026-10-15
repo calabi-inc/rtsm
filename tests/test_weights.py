@@ -104,3 +104,14 @@ def test_fetch_script_verify_reports_every_validated_file(tmp_path, capsys):
     assert mod.main(["--verify", "--model-store", str(tmp_path)]) == 1
     out = capsys.readouterr().out
     assert "NOT the validated file" in out and "missing" in out
+
+
+def test_policy_off_survives_yaml_boolean_parsing():
+    """PyYAML reads a bare ``off`` as False (YAML 1.1); the documented value must still mean off."""
+    import yaml
+    assert W.policy_from(yaml.safe_load("weights_policy: off")) == "off"
+    assert W.policy_from(yaml.safe_load("weights_policy: 'off'")) == "off"
+    assert W.policy_from({"weights_policy": None}) == "off"
+    assert W.policy_from(yaml.safe_load("weights_policy: strict")) == "strict"
+    with pytest.raises(ValueError, match="boolean True"):
+        W.policy_from(yaml.safe_load("weights_policy: on"))

@@ -235,7 +235,7 @@ The keyframe cadence and the non-keyframe throttle live under `ingest:`
 Timing](#ingest-clock-admission-timing). Their former paths
 `io.websocket.keyframe_every_n` / `io.websocket.nonkf_min_interval_s` still
 work in a config file, a profile or `--set` with a deprecation warning until
-0.3.0 (see "Deprecated paths" below).
+0.4.0 (see "Deprecated paths" below).
 
 ### Receive-Time Forward Clearance (opt-in)
 
@@ -458,8 +458,8 @@ them explicitly.
 
 | Old path | New path | Removed in |
 |----------|----------|------------|
-| `io.websocket.keyframe_every_n` | `ingest.keyframe_every_n` | 0.3.0 |
-| `io.websocket.nonkf_min_interval_s` | `ingest.nonkf_min_interval_s` | 0.3.0 |
+| `io.websocket.keyframe_every_n` | `ingest.keyframe_every_n` | 0.4.0 |
+| `io.websocket.nonkf_min_interval_s` | `ingest.nonkf_min_interval_s` | 0.4.0 |
 
 An old path in a full `--config` file, a profile or a `--set` is applied to
 the new path before validation and merging (ordinary last-write-wins order),

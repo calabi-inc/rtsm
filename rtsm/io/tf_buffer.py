@@ -122,10 +122,14 @@ class _Hop:
 
 
 class TfBuffer:
-    def __init__(self, *, extrapolation_s: float = 0.05) -> None:
+    def __init__(self, *, extrapolation_s: float = 0.05, horizon_s: Optional[float] = None) -> None:
+        """``horizon_s``: on a live stream, samples older than a hop's newest sample minus the horizon are dropped
+        on insert (None keeps everything: a bag is read in one pass). Out-of-order samples are inserted in place."""
         self._hops: Dict[Tuple[str, str], _Hop] = {}
         self._parents: Dict[str, List[str]] = {}
         self.extrapolation_ns = int(float(extrapolation_s) * 1e9)
+        self.horizon_ns = int(float(horizon_s) * 1e9) if horizon_s is not None else None
+        self.n_dropped = 0
         self.n_static = 0
         self.n_timed = 0
         self._sorted = True
@@ -150,13 +154,26 @@ class TfBuffer:
             hop.static = (tt, qq)
             self.n_static += 1
             return
-        if hop.stamps and int(t_ns) < hop.stamps[-1]:
-            self._sorted = False
         hop.constant = None
-        hop.stamps.append(int(t_ns))
-        hop.ts.append(tt)
-        hop.qs.append(qq)
+        t_ns = int(t_ns)
+        if hop.stamps and t_ns < hop.stamps[-1]:
+            i = bisect.bisect_right(hop.stamps, t_ns)             # keep the hop sorted; no whole-hop re-sort later
+            hop.stamps.insert(i, t_ns)
+            hop.ts.insert(i, tt)
+            hop.qs.insert(i, qq)
+        else:
+            hop.stamps.append(t_ns)
+            hop.ts.append(tt)
+            hop.qs.append(qq)
         self.n_timed += 1
+        if self.horizon_ns is not None:
+            cutoff = hop.stamps[-1] - self.horizon_ns
+            n = bisect.bisect_left(hop.stamps, cutoff)
+            if n > 0:
+                del hop.stamps[:n]
+                del hop.ts[:n]
+                del hop.qs[:n]
+                self.n_dropped += n
 
     def _ensure_sorted(self) -> None:
         if self._sorted:

@@ -65,6 +65,9 @@ RCLPY_HINT = ("rclpy is not importable: the ros2 source runs inside a sourced RO
 
 QOS_MODES = ("auto", "reliable", "best_effort")
 READY_BUFFER = 256          # resolved pairs held until the stream is ready (camera info + world frame + registration)
+LIVE_PAIR_BUFFER = 32       # unpaired RGB (and depth) messages a live stream may hold while the other stream stalls
+LIVE_DEPTH_GRACE_S = 1.0    # depth older than the newest depth minus (tolerance + grace) is dropped while no RGB waits
+LIVE_TF_HORIZON_S = 10.0    # TF samples older than this behind a hop's newest sample are dropped on a live stream
 DEFAULT_TF_WAIT_S = 0.5     # how long a resolved pair waits for its TF (measured on the newest TF stamp seen)
 _LIVE_ROLES = ("rgb", "depth", "rgb_info", "depth_info", "confidence", "tf", "tf_static", "odom", "tracking", "seq")
 
@@ -152,7 +155,10 @@ class Ros2Ingress:
         self.tm = tm
         self._types = msgtypes                                   # role -> msgtype of the chosen topic
         self._pairer = _Pairer(int(float(pair_tolerance_s) * 1e9))
-        self._buf = TfBuffer(extrapolation_s=float(tf_extrapolation_s))
+        # A live stream never ends: TF history is bounded to a horizon that covers the head-of-line wait plus the
+        # extrapolation window (a bag is read in one pass and keeps everything).
+        self._buf = TfBuffer(extrapolation_s=float(tf_extrapolation_s),
+                             horizon_s=max(LIVE_TF_HORIZON_S, float(tf_wait_s) + float(tf_extrapolation_s) + 1.0))
         self._tf_wait_ns = int(float(tf_wait_s) * 1e9)
         self._world_cfg = world_frame
         self._cam_cfg = camera_frame
@@ -316,8 +322,32 @@ class Ros2Ingress:
             self._awaiting = pack if (self.tm.seq and pack.seq is None) or (self.tm.tracking and pack.tracking is None) else None
             self._rgb_index += 1
             self._pairer.add_rgb(stamp, pack, rx_ns)
+            self._bound_live_buffers()
         elif role == "depth":
             self._pairer.add_depth(stamp, msg)
+            self._bound_live_buffers()
+
+    def _bound_live_buffers(self) -> None:
+        """The bag reader's pairer keeps every message until a newer depth or the end of the log; a live stream has no
+        end, so when one image stream stalls the other must not buffer without bound (an RGB stream at 30 Hz is
+        ~80 MB/s; found 2026-10-14). RGB: at most LIVE_PAIR_BUFFER waiting, the oldest evicted and counted as
+        unpaired. Depth: while no RGB waits, nothing older than the newest depth minus (tolerance + grace); at most
+        LIVE_PAIR_BUFFER in any case."""
+        p = self._pairer
+        while len(p.rgb) > LIVE_PAIR_BUFFER:
+            p.rgb.popleft()
+            self.stats.unpaired_rgb += 1
+        if not p.rgb and p.depth_stamps:
+            horizon = p.newest_depth - (p.tol + int(LIVE_DEPTH_GRACE_S * 1e9))
+            while p.depth_stamps and p.depth_stamps[0] < horizon:
+                p.depth_stamps.pop(0)
+                p.depth_msgs.pop(0)
+                p.dropped_depth += 1
+        while len(p.depth_stamps) > LIVE_PAIR_BUFFER:
+            p.depth_stamps.pop(0)
+            p.depth_msgs.pop(0)
+            p.dropped_depth += 1
+        self.stats.unpaired_depth = p.dropped_depth
 
     def _settle_awaiting(self) -> None:
         a = self._awaiting
@@ -615,6 +645,7 @@ class Ros2Source:
             pass
         if self._threads and not self._done.wait(timeout=timeout):
             logger.warning("[ros2] teardown did not finish within %.0f s", timeout)
+        self._shutdown_context()                # a refusal left the context up on purpose; process exit takes it down
 
     def wait(self, timeout: Optional[float] = None) -> bool:
         return self._done.wait(timeout=timeout)
@@ -694,7 +725,10 @@ class Ros2Source:
             self._error = e
             logger.exception("[ros2] source failed")
         finally:
-            self._teardown()
+            # A refusal or a failure destroys the node but leaves the rclpy context up: the context is shared with the
+            # optional publisher (and anything else in the process); shutting it down here silently stopped the
+            # publisher when the camera was not up (found 2026-10-14). stop() shuts the context down at process exit.
+            self._teardown(shutdown_context=self._stop_event.is_set())
             self._done.set()
             st = self._stats
             logger.info("[ros2] stopped: %s frames seen, %s paired, %s enqueued, %s unpaired rgb, %s without pose",
@@ -712,15 +746,22 @@ class Ros2Source:
                 self._error = e
                 logger.exception("[ros2] executor stopped")
 
-    def _teardown(self) -> None:
+    def _teardown(self, *, shutdown_context: bool = True) -> None:
         try:
             if self._node is not None:
                 self._node.destroy_node()
+                self._node = None
         except Exception:  # noqa: BLE001
             pass
+        if shutdown_context:
+            self._shutdown_context()
+
+    def _shutdown_context(self) -> None:
+        """Shut the rclpy context down once, only if this source initialised it."""
         try:
             if self._we_initialised and self._rclpy is not None and self._rclpy.ok():
                 self._rclpy.shutdown()
+                self._we_initialised = False
         except Exception:  # noqa: BLE001
             pass
 
