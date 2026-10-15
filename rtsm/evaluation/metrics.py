@@ -35,6 +35,15 @@ Definitions (the report repeats them in its method notes):
   did not recognise it), ``missed`` when neither happened. A frame on which a
   member is matched or created counts as a presence frame even when the view
   line does not list the cluster (the view precedes association).
+* **Detection by object state**: the same per-view outcomes split by the
+  cluster's state AT VIEW TIME, from the ``confirmed`` flag the view line
+  carries per object (written before association): ``confirmed`` when any
+  member the view line lists was confirmed, ``proto`` otherwise. A presence
+  frame on which a member matched although the view line did not list the
+  cluster has no state and is counted in the totals only
+  (``n_views_without_state``). Per frame: ``n_in_frustum_confirmed``,
+  ``n_reidentified_confirmed``, ``n_duplicated_confirmed``; per cluster and at
+  the id level the same split. Not restricted under the shadow mask.
 * **Label disagreement** of a track: ``1 - modal_count / n`` over the top-1
   labels of its observations (0 for a single observation).
 * **Scatter**: per track with >= ``min_obs_scatter`` observations, the
@@ -365,6 +374,8 @@ def compute_metrics(rows: Sequence[dict], summary: Optional[dict], params: Optio
     per_id_range_bins: Dict[str, List[str]] = defaultdict(list)     # (bin, detected) at id level
     range_tab: Dict[str, Counter] = defaultdict(Counter)
     presence: Dict[int, List[Tuple[int, str, bool]]] = defaultdict(list)   # cluster -> [(ts, outcome, shadowed)]
+    presence_state: Dict[int, Dict[int, str]] = defaultdict(dict)          # cluster -> {ts: "confirmed" | "proto"} where the view line listed it
+    id_state: Dict[str, Counter] = {"confirmed": Counter(), "proto": Counter()}
     unknown_view_ids = 0
     dup_records: List[dict] = []
     dups_by_frame = Counter()
@@ -422,12 +433,14 @@ def compute_metrics(rows: Sequence[dict], summary: Optional[dict], params: Optio
         shadowed = bool(dq.get("gate_shadow"))
         in_ids: List[str] = []
         depth_by_id: Dict[str, Optional[float]] = {}
+        confirmed_by_id: Dict[str, bool] = {}
         if view is not None:
             for e in (view.get("objects") or []):
                 oid = e.get("id")
                 if oid is None:
                     continue
                 in_ids.append(str(oid))
+                confirmed_by_id[str(oid)] = bool(e.get("confirmed"))
                 ed = e.get("expected_depth")
                 depth_by_id[str(oid)] = float(ed) if isinstance(ed, (int, float)) and math.isfinite(float(ed)) else None
         matched_ids = {str(r["object_id"]) for r in idx["obs"].get(ts, []) if r.get("outcome") == OBS_MATCHED and r.get("object_id")}
@@ -450,6 +463,8 @@ def compute_metrics(rows: Sequence[dict], summary: Optional[dict], params: Optio
                 per_id_reid[oid] += 1
             else:
                 per_id_missed[oid] += 1
+            st_id = id_state["confirmed" if confirmed_by_id.get(oid) else "proto"]
+            st_id["views"] += 1; st_id["reidentified" if hit else "missed"] += 1
             d = depth_by_id.get(oid)
             if d is not None and d > 0:
                 b = _range_bin(d, p.range_bin_m)
@@ -460,7 +475,8 @@ def compute_metrics(rows: Sequence[dict], summary: Optional[dict], params: Optio
                     range_tab[b]["reid_masked" if hit else "missed_masked"] += 1
         # cluster level
         n_reid = n_dup = n_missed = 0
-        for ci in in_clusters:
+        n_in_conf = n_reid_conf = n_dup_conf = 0
+        for ci, members in in_clusters.items():
             if ci in matched_clusters:
                 out = "reidentified"; n_reid += 1
             elif ci in created_clusters:
@@ -468,6 +484,15 @@ def compute_metrics(rows: Sequence[dict], summary: Optional[dict], params: Optio
             else:
                 out = "missed"; n_missed += 1
             presence[ci].append((ts, out, shadowed))
+            # state at view time: the memory held a confirmed object there when any listed member was confirmed
+            state = "confirmed" if any(confirmed_by_id.get(o) for o in members) else "proto"
+            presence_state[ci][ts] = state
+            if state == "confirmed":
+                n_in_conf += 1
+                if out == "reidentified":
+                    n_reid_conf += 1
+                elif out == "duplicated":
+                    n_dup_conf += 1
         n_outside = 0
         for ci in (matched_clusters | created_clusters) - set(in_clusters):
             if ci in matched_clusters:
@@ -478,19 +503,29 @@ def compute_metrics(rows: Sequence[dict], summary: Optional[dict], params: Optio
             "is_keyframe": (view or dq or {}).get("is_keyframe"), "gate_shadow": dq.get("gate_shadow"),
             "n_obs": n_obs, "n_in_frustum_ids": len(in_ids), "n_in_frustum_clusters": len(in_clusters),
             "n_reidentified": n_reid, "n_duplicated": n_dup, "n_missed": n_missed, "n_reidentified_outside_frustum": n_outside, "n_created": len(created_ids),
+            "n_in_frustum_confirmed": n_in_conf, "n_reidentified_confirmed": n_reid_conf, "n_duplicated_confirmed": n_dup_conf,
             "n_duplicate_spawns": int(dups_by_frame.get(ts, 0)),
             "frame_rejected": (str(dq.get("reason")) if dq.get("outcome") == "frame_rejected" else None),
         })
 
     # ── detection over views (cluster level) ─────────────────────────
     det = Counter(); det_masked = Counter()
+    det_state: Dict[str, Counter] = {"confirmed": Counter(), "proto": Counter()}
+    n_views_without_state = 0
     cluster_det: Dict[int, Counter] = {c.index: Counter() for c in clusters}
     for ci, seq in presence.items():
+        states = presence_state.get(ci) or {}
         for ts, out, shadowed in seq:
             if out == "created":
                 continue                           # the creation frame is presence, not a view
             det["views"] += 1; det[out] += 1
             cluster_det[ci]["views"] += 1; cluster_det[ci][out] += 1
+            state = states.get(ts)
+            if state is None:
+                n_views_without_state += 1         # matched although the view line did not list the cluster: no state
+            else:
+                det_state[state]["views"] += 1; det_state[state][out] += 1
+                cluster_det[ci]["views@" + state] += 1; cluster_det[ci][out + "@" + state] += 1
             if not shadowed:
                 det_masked["views"] += 1; det_masked[out] += 1
                 cluster_det[ci]["views_masked"] += 1; cluster_det[ci][out + "_masked"] += 1
@@ -501,7 +536,10 @@ def compute_metrics(rows: Sequence[dict], summary: Optional[dict], params: Optio
         return {"views": int(v), "reidentified": int(reid), "duplicated": int(dup), "missed": int(miss),
                 "detection_rate": _div(reid + dup, v), "reid_rate": _div(reid, v)}
 
-    detection = {"all": det_block(det), "by_range": {}}
+    detection = {"all": det_block(det),
+                 "by_state": {"confirmed": det_block(det_state["confirmed"]), "proto": det_block(det_state["proto"]),
+                              "n_views_without_state": int(n_views_without_state)},
+                 "by_range": {}}
     for b in sorted(range_tab, key=lambda s: float(s.split("-")[0])):
         c = range_tab[b]
         detection["by_range"][b] = {"views": int(c["views"]), "reidentified": int(c["reid"]), "reid_rate": _div(c["reid"], c["views"])}
@@ -510,7 +548,9 @@ def compute_metrics(rows: Sequence[dict], summary: Optional[dict], params: Optio
     if shadow_mode:
         detection["masked"] = det_block(det_masked)
     detection["id_level"] = {"views": int(sum(per_id_views.values())), "reidentified": int(sum(per_id_reid.values())),
-                             "missed": int(sum(per_id_missed.values())), "unknown_view_ids": int(unknown_view_ids)}
+                             "missed": int(sum(per_id_missed.values())), "unknown_view_ids": int(unknown_view_ids),
+                             "by_state": {st: {"views": int(c["views"]), "reidentified": int(c["reidentified"]), "missed": int(c["missed"]),
+                                               "reid_rate": _div(c["reidentified"], c["views"])} for st, c in id_state.items()}}
 
     # ── revisits ─────────────────────────────────────────────────────
     gap_ns = int(p.revisit_gap_s * 1e9)
@@ -713,7 +753,8 @@ def compute_metrics(rows: Sequence[dict], summary: Optional[dict], params: Optio
                "n_obs": int(sum(tracks[oid].n_obs for oid in c.members)),
                "first_seen_s": rel(min((tracks[oid].first_ts for oid in c.members if tracks[oid].first_ts is not None), default=None)),
                "last_seen_s": rel(max((tracks[oid].last_ts for oid in c.members if tracks[oid].last_ts is not None), default=None)),
-               "detection": det_block(cd), "visits": cluster_visits.get(c.index, {"n_visits": 0, "n_revisits": 0, "revisits": {}, "visit_starts_s": []}),
+               "detection": {**det_block(cd), "by_state": {st: det_block(cd, "@" + st) for st in ("confirmed", "proto")}},
+               "visits": cluster_visits.get(c.index, {"n_visits": 0, "n_revisits": 0, "revisits": {}, "visit_starts_s": []}),
                "labels": cluster_labels.get(c.index),
                "moments": {"n_seen": len(seen), "n_missed": len(missed), "seen_s": [rel(t) for t in seen[:p.moments_cap]], "missed_s": [rel(t) for t in missed[:p.moments_cap]]}}
         if shadow_mode:
@@ -751,6 +792,8 @@ def compute_metrics(rows: Sequence[dict], summary: Optional[dict], params: Optio
         "clusters.n_at_radius": n_at_radius,
         "detection": {"views": detection["all"]["views"], "reidentified": detection["all"]["reidentified"], "duplicated": detection["all"]["duplicated"],
                       "missed": detection["all"]["missed"], "detection_rate": detection["all"]["detection_rate"], "reid_rate": detection["all"]["reid_rate"],
+                      "by_state": {st: {"views": detection["by_state"][st]["views"], "reidentified": detection["by_state"][st]["reidentified"],
+                                        "reid_rate": detection["by_state"][st]["reid_rate"]} for st in ("confirmed", "proto")},
                       **({"masked": detection["masked"]} if shadow_mode else {})},
         "labels": {"tracks_ge2": labels["tracks_ge2"], "disagreement_mean": labels["disagreement"]["mean"], "disagreement_p50": labels["disagreement"]["p50"],
                    "disagreement_p95": labels["disagreement"]["p95"], "frac_tracks_disagreeing": labels["frac_tracks_disagreeing"],

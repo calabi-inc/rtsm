@@ -279,7 +279,9 @@ def render_markdown(agg: dict, ref: dict, *, resolved: Optional[dict], input_nam
     L.append("")
     L += _table(agg, [("detection.views", "views (cluster in the frustum on a processed frame)"), ("detection.reidentified", "re-identified (a member matched)"),
                       ("detection.duplicated", "duplicated (a member created instead)"), ("detection.missed", "missed"),
-                      ("detection.detection_rate", "detection rate (re-identified + duplicated)"), ("detection.reid_rate", "re-identification rate")] +
+                      ("detection.detection_rate", "detection rate (re-identified + duplicated)"), ("detection.reid_rate", "re-identification rate"),
+                      ("detection.by_state.confirmed.views", "confirmed at view time: views"), ("detection.by_state.confirmed.reid_rate", "confirmed at view time: re-identification rate"),
+                      ("detection.by_state.proto.views", "proto at view time: views"), ("detection.by_state.proto.reid_rate", "proto at view time: re-identification rate")] +
                ([("detection.masked.views", "masked: views"), ("detection.masked.reid_rate", "masked: re-identification rate"), ("detection.masked.detection_rate", "masked: detection rate")] if ref.get("shadow_mode") else []))
     L.append("")
     det = ref.get("detection") or {}
@@ -294,6 +296,10 @@ def render_markdown(agg: dict, ref: dict, *, resolved: Optional[dict], input_nam
                 line += f" {row.get('views_masked', 0)} | {_fmt('rate', row.get('reid_rate_masked'))} |"
             L.append(line)
         L.append("")
+    bs = det.get("by_state") or {}
+    L.append("The state at view time is the `confirmed` flag the view line carries per object before association: a cluster is confirmed when any member it lists was confirmed, proto otherwise. "
+             f"{int(bs.get('n_views_without_state') or 0)} view(s) on which a member matched although the view line did not list the cluster carry no state and are in the totals only.")
+    L.append("")
     L.append("The frustum model is occlusion-agnostic (`v1_occlusion_agnostic`): an object behind another counts as a view, so every rate here is a lower bound on what the perception could see.")
     L.append("")
 

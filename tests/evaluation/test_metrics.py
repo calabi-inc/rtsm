@@ -124,6 +124,41 @@ def test_duplicated_counts_as_detected_but_not_reidentified():
     assert m["scalars"]["duplicates.n"] == 1 and m["duplicate_spawns"][0]["dup_of"] == "A" and m["duplicate_spawns"][0]["original_in_view"] is True
 
 
+def test_detection_split_by_object_state_at_view_time():
+    # A is confirmed at view time, B a proto. Both are in the frustum on two frames: on the first both match; on the
+    # second A is missed and a spawn (C) lands on B's cluster. A third frame has no view line and A matches anyway.
+    kw = dict(cos_sim=0.9, dist_m=0.01, n_nearby=1, n_gate_survivors=1, max_cos=0.9)
+    rows = rows_of([
+        S.dequeue_line(T0), S.obs_line(T0, "A", "created", [0.0, 0.0, 2.0]), S.obs_line(T0, "B", "created", [3.0, 0.0, 2.0], cand_idx=1),
+        S.dequeue_line(T0 + S_), S.view_line(T0 + S_, ["A", "B"], confirmed={"B": False}),
+        S.obs_line(T0 + S_, "A", "matched", [0.0, 0.0, 2.0], **kw), S.obs_line(T0 + S_, "B", "matched", [3.0, 0.0, 2.0], cand_idx=1, **kw),
+        S.dequeue_line(T0 + 2 * S_), S.view_line(T0 + 2 * S_, ["A", "B"], confirmed={"B": False}),
+        S.obs_line(T0 + 2 * S_, "C", "created", [3.1, 0.0, 2.0], n_nearby=1, n_gate_survivors=0),
+        S.dequeue_line(T0 + 3 * S_), S.obs_line(T0 + 3 * S_, "A", "matched", [0.0, 0.0, 2.0], **kw),
+    ])
+    m = M.compute_metrics(rows, S.summary_for([{"id": "A", "confirmed": True, "hits": 3}, {"id": "B"}, {"id": "C"}]), P())
+    d = m["detection"]
+    assert d["all"] == {"views": 5, "reidentified": 3, "duplicated": 1, "missed": 1, "detection_rate": 0.8, "reid_rate": 0.6}
+    assert d["by_state"]["confirmed"] == {"views": 2, "reidentified": 1, "duplicated": 0, "missed": 1, "detection_rate": 0.5, "reid_rate": 0.5}
+    assert d["by_state"]["proto"] == {"views": 2, "reidentified": 1, "duplicated": 1, "missed": 0, "detection_rate": 1.0, "reid_rate": 0.5}
+    assert d["by_state"]["n_views_without_state"] == 1                      # the third frame: matched, no view line
+    assert d["by_state"]["confirmed"]["views"] + d["by_state"]["proto"]["views"] + d["by_state"]["n_views_without_state"] == d["all"]["views"]
+    # id level: B itself is missed on the spawn frame (the cluster is "duplicated", the id is not)
+    assert d["id_level"]["by_state"] == {"confirmed": {"views": 2, "reidentified": 1, "missed": 1, "reid_rate": 0.5},
+                                         "proto": {"views": 2, "reidentified": 1, "missed": 1, "reid_rate": 0.5}}
+    # per frame and per cluster
+    by_ts = {f["t_sensor_ns"]: f for f in m["frames"]}
+    assert (by_ts[T0 + S_]["n_in_frustum_confirmed"], by_ts[T0 + S_]["n_reidentified_confirmed"], by_ts[T0 + S_]["n_duplicated_confirmed"]) == (1, 1, 0)
+    assert (by_ts[T0 + 2 * S_]["n_in_frustum_confirmed"], by_ts[T0 + 2 * S_]["n_reidentified_confirmed"]) == (1, 0)
+    assert by_ts[T0 + 3 * S_]["n_in_frustum_confirmed"] == 0
+    ca, cb = (c for c in m["clusters"] if c["leader"] == "A"), (c for c in m["clusters"] if c["leader"] == "B")
+    ca, cb = next(ca), next(cb)
+    assert ca["detection"]["by_state"]["confirmed"]["views"] == 2 and ca["detection"]["by_state"]["proto"]["views"] == 0
+    assert cb["detection"]["by_state"]["proto"] == {"views": 2, "reidentified": 1, "duplicated": 1, "missed": 0, "detection_rate": 1.0, "reid_rate": 0.5}
+    assert cb["detection"]["by_state"]["confirmed"]["reid_rate"] is None
+    assert m["scalars"]["detection.by_state.proto.reid_rate"] == 0.5 and m["scalars"]["detection.by_state.confirmed.views"] == 2
+
+
 # ───────────────────────────── labels ─────────────────────────────
 
 def test_label_disagreement():

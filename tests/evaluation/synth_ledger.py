@@ -191,9 +191,11 @@ def obs_line(ts_ns: int, oid: Optional[str], outcome: str, p_world: Optional[Seq
 
 
 def view_line(ts_ns: int, ids: Sequence[str], *, expected: float = 2.0, observed: Optional[float] = 2.0, frame_seq: Optional[int] = None,
-              n_live: Optional[int] = None, is_keyframe: bool = False, expected_by_id: Optional[dict] = None) -> dict:
-    """One schema-1 view line listing ``ids`` (pre-existing objects in the frustum)."""
-    objs = [{"id": oid, "confirmed": True, "hits": 2, "stability": 0.8, "label_primary": "mug", "u": 5.0 + i, "v": 6.0,
+              n_live: Optional[int] = None, is_keyframe: bool = False, expected_by_id: Optional[dict] = None,
+              confirmed: Optional[dict] = None) -> dict:
+    """One schema-1 view line listing ``ids`` (pre-existing objects in the frustum); every object is confirmed unless
+    ``confirmed`` says otherwise for its id."""
+    objs = [{"id": oid, "confirmed": bool((confirmed or {}).get(oid, True)), "hits": 2, "stability": 0.8, "label_primary": "mug", "u": 5.0 + i, "v": 6.0,
              "expected_depth": ((expected_by_id or {}).get(oid, expected)), "observed_depth": observed} for i, oid in enumerate(ids)]
     return {"kind": "view", "timestamp": ts_ns / 1e9 - 0.001, "frame_seq": frame_seq, "t_sensor_ns": int(ts_ns), "epoch": 1,
             "is_keyframe": is_keyframe, "frustum_model": "v1_occlusion_agnostic", "rgb_hw": [12, 16], "depth_hw": [6, 8],

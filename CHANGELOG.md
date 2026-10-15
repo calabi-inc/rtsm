@@ -4,6 +4,9 @@ All notable changes to `rtsm`. The format follows [Keep a Changelog](https://kee
 
 ## [Unreleased]
 
+### Added
+- Metrics: detection over views split by the object's state at view time, from the `confirmed` flag the `view` ledger already records per object: `detection.by_state.{confirmed,proto}` (+ `n_views_without_state`), `detection.id_level.by_state`, per-cluster `detection.by_state`, per-frame `n_in_frustum_confirmed` / `n_reidentified_confirmed` / `n_duplicated_confirmed`, scalars `detection.by_state.*`; the report prints the split. Additive keys, metrics schema stays 1.
+
 ### Fixed
 - `rtsm demo`: the completion summary counted the working memory after the exit freeze had moved it into the session record, so it always read 0; it now counts the frozen session.
 - A websocket to `/ws` on a process without a visualization server (`--no-viz`) fell through to the static-files mount and logged an ASGI traceback per attempt; the handshake is refused (close code 1008).
