@@ -174,9 +174,9 @@ class ProximityIndexLike(Protocol):
       - remove: remove an object from the index
     """
 
-    def insert(self, oid: str, xyz_world: Vec3, wm_lookup: Optional[Callable[[str], Optional[Tuple[bool, float, float]]]] = None) -> None: ...
+    def insert(self, oid: str, xyz_world: Vec3, wm_lookup: Optional[Callable[[str], Optional[Tuple[bool, float, float]]]] = None) -> Optional[List[str]]: ...
 
-    def update(self, oid: str, old_xyz_world: Vec3, new_xyz_world: Vec3, wm_lookup: Optional[Callable[[str], Optional[Tuple[bool, float, float]]]] = None) -> None: ...
+    def update(self, oid: str, old_xyz_world: Vec3, new_xyz_world: Vec3, wm_lookup: Optional[Callable[[str], Optional[Tuple[bool, float, float]]]] = None) -> Optional[List[str]]: ...
 
     def remove(self, oid: str, last_xyz_world: Optional[Vec3] = None) -> None: ...
 
@@ -242,6 +242,9 @@ class WorkingMemory:
         # refine event reads it): corrected / direct / fallback counts, the
         # demoted object ids, the largest object shift in metres.
         self.last_correction: Optional[Dict[str, Any]] = None
+        # Memory events (ledger kind mem, B2): the pipeline sets this to its writer; the memory hands it one plain dict per
+        # expiry / eviction / correction (see _mem_record), outside its lock. None = nobody listens (the live default).
+        self.event_sink: Optional[Callable[[Dict[str, Any]], None]] = None
         # Min-heap of (deadline_mono, oid) for proto expiry (lazy re-schedule on matches)
         self._proto_heap: List[Tuple[float, str]] = []
 
@@ -410,7 +413,9 @@ class WorkingMemory:
             # schedule proto expiry (confirmed objects are never scheduled here)
             self._schedule_proto(oid, o)
         if self.index is not None:
-            self.index.insert(oid, o.xyz_world, wm_lookup=self.lookup_min)
+            victims = self.index.insert(oid, o.xyz_world, wm_lookup=self.lookup_min) or []
+            if victims:
+                self._emit([self._mem_record(v_o, "evict", "cell_overflow", t_mono) for v in victims if (v_o := self.get(v)) is not None])
         logger.debug(
             f"[WM] create oid={oid} label={label_primary if label_primary else '-'} "
             f"xyz=[{p_world[0]:.2f},{p_world[1]:.2f},{p_world[2]:.2f}]"
@@ -537,7 +542,9 @@ class WorkingMemory:
                 self._schedule_proto(oid, o)
 
         if self.index is not None and np.any(self.index.grid.cell(old_xyz) != self.index.grid.cell(o.xyz_world)):
-            self.index.update(oid, old_xyz, o.xyz_world, wm_lookup=self.lookup_min)
+            victims = self.index.update(oid, old_xyz, o.xyz_world, wm_lookup=self.lookup_min) or []
+            if victims:
+                self._emit([self._mem_record(v_o, "evict", "cell_overflow", now_m) for v in victims if (v_o := self.get(v)) is not None])
 
         # --- logging: match update (DEBUG level to reduce noise) ---
 
@@ -727,6 +734,7 @@ class WorkingMemory:
         """Expire proto objects past TTL using a min-heap. Returns list of removed IDs."""
         now_m = self._clock.now_mono()
         removed: List[str] = []
+        records: List[Dict[str, Any]] = []
         with self._lock:
             while self._proto_heap and self._proto_heap[0][0] <= now_m:
                 _, oid = heapq.heappop(self._proto_heap)
@@ -747,12 +755,39 @@ class WorkingMemory:
                         if not fset:
                             del self._frame_to_objects[o.last_update_frame_id]
                 # really expired
+                records.append(self._mem_record(o, "expire", "proto_ttl", now_m))
                 removed.append(oid)
                 del self._map[oid]
         if self.index is not None:
             for oid in removed:
                 self.index.remove(oid, None)
+        self._emit(records)
         return removed
+
+    # ---------- memory events (ledger kind mem) ----------
+
+    def _mem_record(self, o: ObjectState, action: str, reason: str, now_m: Optional[float] = None, **extra: Any) -> Dict[str, Any]:
+        """One memory-event record: the object's state BEFORE the event (call it before mutating ``o``), plus the extras the
+        action adds (correct: p_after, shift_m, demoted, frame_id). The pipeline turns it into a ``mem`` ledger line."""
+        rec: Dict[str, Any] = {"action": action, "object_id": o.id, "reason": reason, "confirmed": bool(o.confirmed), "hits": int(o.hits),
+                               "stability": float(o.stability), "label_primary": o.label_primary,
+                               "p_before": [float(v) for v in o.xyz_world], "frame_id": o.last_update_frame_id}
+        if now_m is not None:
+            rec["age_s"] = round(max(0.0, float(now_m) - float(o.last_seen_mono)), 3)
+            rec["lifetime_s"] = round(max(0.0, float(now_m) - float(o.created_mono)), 3)
+        rec.update(extra)
+        return rec
+
+    def _emit(self, records: List[Dict[str, Any]]) -> None:
+        """Hand memory-event records to the sink, outside the lock; a sink error never reaches the memory."""
+        sink = self.event_sink
+        if sink is None or not records:
+            return
+        for r in records:
+            try:
+                sink(r)
+            except Exception:  # noqa: BLE001
+                logger.debug("[WM] event sink failed", exc_info=True)
 
     # ---------- internal: proto scheduling ----------
     def _schedule_proto(self, oid: str, o: ObjectState) -> None:
@@ -843,6 +878,8 @@ class WorkingMemory:
         corrected = 0
         max_shift = 0.0
         thresh = self.pose_demote_thresh_m
+        now_m = self._clock.now_mono()
+        records: List[Dict[str, Any]] = []       # mem lines: one per corrected object (state before the move), plus evictions
 
         with self._lock:
             # Phase 1: Direct frame_id → object lookup
@@ -856,6 +893,8 @@ class WorkingMemory:
                     new_xyz = (delta_R @ old_xyz + delta_t).astype(np.float32)
                     shift_m = float(np.linalg.norm(new_xyz - old_xyz))
                     max_shift = max(max_shift, shift_m)
+                    records.append(self._mem_record(o, "correct", "direct", now_m, p_after=[float(v) for v in new_xyz],
+                                                    shift_m=round(shift_m, 4), demoted=bool(shift_m >= thresh), frame_id=frame_id))
                     o.xyz_world = new_xyz
                     corrected += 1
                     corrected_oids.add(oid)
@@ -871,7 +910,9 @@ class WorkingMemory:
                         old_cell = self.index.grid.cell(old_xyz)
                         new_cell = self.index.grid.cell(new_xyz)
                         if old_cell != new_cell:
-                            self.index.update(oid, old_xyz, new_xyz, wm_lookup=self.lookup_min)
+                            for v in (self.index.update(oid, old_xyz, new_xyz, wm_lookup=self.lookup_min) or []):
+                                if v in self._map:
+                                    records.append(self._mem_record(self._map[v], "evict", "cell_overflow", now_m))
 
             # Phase 2: Spatial fallback for objects not linked to any corrected frame
             uncorrected = [o for o in self._map.values() if o.id not in corrected_oids]
@@ -880,6 +921,7 @@ class WorkingMemory:
                     [v[0] for v in frame_corrections.values()], dtype=np.float32
                 )
                 deltas_list = list(frame_corrections.values())
+                frame_ids = list(frame_corrections.keys())
                 for o in uncorrected:
                     old_xyz = o.xyz_world.copy()
                     diffs = cam_positions - old_xyz[None, :]
@@ -889,6 +931,8 @@ class WorkingMemory:
                     new_xyz = (delta_R @ old_xyz + delta_t).astype(np.float32)
                     shift_m = float(np.linalg.norm(new_xyz - old_xyz))
                     max_shift = max(max_shift, shift_m)
+                    records.append(self._mem_record(o, "correct", "fallback", now_m, p_after=[float(v) for v in new_xyz],
+                                                    shift_m=round(shift_m, 4), demoted=bool(shift_m >= thresh), frame_id=frame_ids[nearest_idx]))
                     o.xyz_world = new_xyz
                     corrected += 1
 
@@ -900,8 +944,11 @@ class WorkingMemory:
                         old_cell = self.index.grid.cell(old_xyz)
                         new_cell = self.index.grid.cell(new_xyz)
                         if old_cell != new_cell:
-                            self.index.update(o.id, old_xyz, new_xyz, wm_lookup=self.lookup_min)
+                            for v in (self.index.update(o.id, old_xyz, new_xyz, wm_lookup=self.lookup_min) or []):
+                                if v in self._map:
+                                    records.append(self._mem_record(self._map[v], "evict", "cell_overflow", now_m))
 
+        self._emit(records)
         if corrected > 0:
             direct = len(corrected_oids)
             fallback = corrected - direct

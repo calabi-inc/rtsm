@@ -37,7 +37,7 @@ Every line is one JSON object with a `kind`. The first line is `kind: "meta"`:
 | `schema_version` | 3 (2 = trace only; 3 adds the ledger kinds — additive) |
 | `created_wall_utc_s`, `created_mono_s`, `pid` | when and where the file was opened |
 | `ingest_clock`, `ingest_policy` | the resolved `ingest.clock` / `ingest.policy` of the run |
-| `ledgers` | `{"enabled": false}` or `{"enabled": true, "schema": 2, "format": "jsonl"}` |
+| `ledgers` | `{"enabled": false}` or `{"enabled": true, "schema": 3, "format": "jsonl"}` |
 
 All timestamps named `timestamp` are `time.monotonic()` at the write; `*_ns` are integer nanoseconds on the sensor clock; `*_s` are float seconds; `*_frac` are fractions in [0, 1].
 
@@ -132,6 +132,23 @@ The projection is the associator's own (`_project_px`) vectorised and tested aga
 ### Frame outcomes
 
 `rtsm.evaluation.ledger.frame_outcomes(rows)` joins the `receiver`, lane-drop and `dequeue` lines into one outcome per sensor frame, precedence dequeue > lane drop > receiver: `processed`, `gate_rejected:<reason>`, `frame_rejected:<dark|flat|depth>`, `dropped:<reason>`, `throttled`, `tracking_state`, `malformed`, `parse_error`, `duplicate_ts`, `no_camera_frame`, or `enqueued` (still queued at shutdown). `outcome_histogram(rows)` counts them; `summarize` prints it.
+
+## Ledger schema 3 — `mem`
+
+One line per change the **working memory makes to an object on its own**, so a reader can say why an id is gone or moved instead of inferring it from its absence. Written by the pipeline from the memory's event sink; the state fields are the object's *before* the event.
+
+| field | type | meaning |
+|---|---|---|
+| `action` | str | `expire`: a proto past its TTL was deleted · `evict`: the proximity index's cell was over its cap and dropped the id from the index (the object stays in memory, but no candidate can reach it until it expires) · `correct`: a pose correction moved the stored position |
+| `reason` | str | `proto_ttl` · `cell_overflow` · `direct` (the object's last-update frame was in the correction batch) / `fallback` (the nearest corrected camera's delta) |
+| `object_id`, `confirmed`, `hits`, `stability`, `label_primary` | | the object, as it was before the event |
+| `p_before` [3], `p_after` [3]?, `shift_m` | | the stored position before; after and the shift on `correct` lines |
+| `demoted` | bool | `correct`: the shift reached `object.pose.demote_thresh_m` and the object went back to proto |
+| `frame_id` | str? | the object's last-update frame id (`expire` / `evict`) or the corrected frame id (`correct`) |
+| `age_s`, `lifetime_s` | float? | seconds since last seen and since creation, on the ingest clock |
+| `t_sensor_ns`, `frame_seq` | | the processed frame current at the event; a correction arrives on another thread, so this is the last frame processed before it applied |
+
+A reset or a session freeze writes no `mem` lines (the `session` kind records those). Joined to the `obs` ledger on `object_id`, an id created and never matched again now has a stated end: expired after `lifetime_s`, evicted from the index, or alive to the end of the run.
 
 ## Parquet
 

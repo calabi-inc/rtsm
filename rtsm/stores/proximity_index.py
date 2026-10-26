@@ -118,14 +118,15 @@ class ProximityIndex:
         self,
         cell: Cell,
         wm_lookup: Optional[Callable[[str], Optional[Tuple[bool, float, float]]]] = None,
-    ) -> None:
-        """Evict immediately if cell exceeds cap. Uses WM info if available; else LRU fallback."""
+    ) -> List[str]:
+        """Evict immediately if cell exceeds cap. Uses WM info if available; else LRU fallback.
+        Returns the evicted ids (the memory records them as `evict` events)."""
         s = self._members.get(cell)
         if not s:
-            return
+            return []
         overflow = len(s) - self.per_cell_cap
         if overflow <= 0:
-            return
+            return []
 
         def rank(oid: str) -> Tuple[int, float, float]:
             # Lower is evicted first
@@ -144,6 +145,7 @@ class ProximityIndex:
             s.discard(v)
             self._oid_cell.pop(v, None)
             # leave WM to expire it; index only mirrors membership
+        return list(victims)
 
     # ----- public API -----
 
@@ -160,14 +162,14 @@ class ProximityIndex:
         xyz_world: np.ndarray,
         *,
         wm_lookup: Optional[Callable[[str], Optional[Tuple[bool, float, float]]]] = None,
-    ) -> None:
-        """Add an object to its current cell (called by WM on create)."""
+    ) -> List[str]:
+        """Add an object to its current cell (called by WM on create). Returns the ids the cell evicted to make room."""
         c = self.grid.cell(xyz_world)
         with self._lock:
             self._members[c].add(oid)
             self._oid_cell[oid] = c
             self._touch_oid(oid)
-            self._evict_overflow(c, wm_lookup)
+            victims = self._evict_overflow(c, wm_lookup)
         try:
             logger.info(
                 "[PI] insert oid=%s cell=%s size_cell=%d total=%d",
@@ -178,6 +180,7 @@ class ProximityIndex:
             )
         except Exception:
             pass
+        return victims
 
     def update(
         self,
@@ -186,15 +189,16 @@ class ProximityIndex:
         new_xyz_world: np.ndarray,
         *,
         wm_lookup: Optional[Callable[[str], Optional[Tuple[bool, float, float]]]] = None,
-    ) -> None:
+    ) -> List[str]:
         """
-        Move object if it crossed a cell boundary (called by WM after EMA/KF pose update).
+        Move object if it crossed a cell boundary (called by WM after EMA/KF pose update). Returns the ids the new cell
+        evicted to make room.
         """
         c_old = self.grid.cell(old_xyz_world)
         c_new = self.grid.cell(new_xyz_world)
         if c_old == c_new:
             self._touch_oid(oid)
-            return
+            return []
         with self._lock:
             # remove from old
             s_old = self._members.get(c_old)
@@ -204,7 +208,7 @@ class ProximityIndex:
             self._members[c_new].add(oid)
             self._oid_cell[oid] = c_new
             self._touch_oid(oid)
-            self._evict_overflow(c_new, wm_lookup)
+            victims = self._evict_overflow(c_new, wm_lookup)
         try:
             logger.info(
                 "[PI] update oid=%s %s->%s size_new=%d",
@@ -215,6 +219,7 @@ class ProximityIndex:
             )
         except Exception:
             pass
+        return victims
 
     def remove(self, oid: str, last_xyz_world: Optional[np.ndarray] = None) -> None:
         """Remove object from its recorded cell (called by WM on expire/merge)."""
