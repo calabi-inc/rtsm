@@ -149,3 +149,32 @@ def test_session1_bag_reproduces_the_replay_path():
         assert np.array_equal(b.pose.t_wc, r.pose.t_wc) and np.array_equal(b.pose.q_wc_xyzw, r.pose.q_wc_xyzw)
         assert b.ingest.depth_valid_frac == r.ingest.depth_valid_frac
         assert b.rgb_jpeg is None                                                     # the bag path never carries JPEG bytes
+
+
+def test_pacing_is_an_absolute_schedule_and_reports_lag(tmp_path, monkeypatch):
+    """The pace is anchored at the first frame, so a reader that takes time per frame does not stretch it: at 0.5x (200 ms per
+    100 ms stamp gap) a 60 ms reader never runs late and the pace is held; at 4x (25 ms per gap) the same reader falls 35 ms
+    further behind on every frame, which is counted as late with its lag and never slept on, and the pace is not held."""
+    import time
+    import rtsm.io.bag_source as BS
+    from test_bag_reader import simple_bag_messages, write_bag
+    bag = write_bag(tmp_path / "b", simple_bag_messages(6))                       # stamps 100 ms apart
+    real_iter = BS.iter_bag_frames
+
+    def slow_iter(*a, **k):
+        for raw in real_iter(*a, **k):
+            time.sleep(0.06)
+            yield raw
+
+    monkeypatch.setattr(BS, "iter_bag_frames", slow_iter)
+    src = make_source("bag", {"io": {"bag": {"speed": 0.5}}}, _ctx(IngestQueue(64), nonkf_min_interval_s=0.0), path=str(bag))
+    t0 = time.monotonic(); src.start(); assert src.wait(30); dt = time.monotonic() - t0
+    pace = src.stats()["pace"]
+    assert pace == {"speed": 0.5, "late_frames": 0, "max_lag_s": 0.0, "held": True} and 0.95 <= dt < 5.0     # 5 gaps x 200 ms
+    fast = make_source("bag", {"io": {"bag": {"speed": 4.0}}}, _ctx(IngestQueue(64), nonkf_min_interval_s=0.0), path=str(bag))
+    fast.start(); assert fast.wait(30)
+    pace = fast.stats()["pace"]
+    assert pace["speed"] == 4.0 and pace["late_frames"] >= 3 and pace["held"] is False and 0.1 < pace["max_lag_s"] < 2.0
+    unpaced = make_source("bag", {}, _ctx(IngestQueue(64), nonkf_min_interval_s=0.0), path=str(bag))
+    unpaced.start(); assert unpaced.wait(30)
+    assert unpaced.stats()["pace"] == {"speed": None, "late_frames": 0, "max_lag_s": 0.0, "held": True}
