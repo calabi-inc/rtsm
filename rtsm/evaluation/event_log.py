@@ -39,6 +39,14 @@ Line kinds (schema_version 4: 2 = P1 task 0 2026-09-09, 3 = the P2 ledgers 2026-
             received by this receiver in this process (malformed and
             tracking-dropped included, never reset per session); zeromq =
             count of enqueue attempts (None on its malformed-pose lines).
+            t_arrival_mono / t_arrival_wall_utc (schema_version 4, B3): the
+            transport's arrival stamps of the frame (RawFrame, before decode)
+            on every line of the admit chain and on the lane-side drop lines
+            (the admitted packet carries them in IngestMeta); None on a
+            transport-level reject that has no frame. With the frame line's
+            timestamp and timing_ms.total this gives ingest-to-commit on one
+            monotonic clock; the wall stamp relates arrival to a live
+            source's sensor stamp.
   dequeue   one per DEQUEUED frame (pipeline thread), including the frames the
             ingest gate or the frame-quality gate rejects and the frames whose
             present pose fails conversion: outcome (processed | gate_rejected
@@ -261,6 +269,8 @@ class ReceiverEvent:
     depth_valid_frac: Optional[float] = None  # finite fraction of the decoded depth BEFORE the confidence filter (websocket/replay; dropped frames included)
     lane: Optional[str] = None       # IngestMeta.lane once admitted (keyframe | latest | fifo; None = legacy queue / not admitted)
     rx_seq: Optional[int] = None     # receiver-local count: binary messages received (websocket/replay) | enqueue attempts (zeromq)
+    t_arrival_mono: Optional[float] = None      # time.monotonic() when the transport received the frame (before decode); None without a frame
+    t_arrival_wall_utc: Optional[float] = None  # time.time() at the same instant
     kind: str = "receiver"
 
 

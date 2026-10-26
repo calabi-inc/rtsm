@@ -466,3 +466,19 @@ def test_bare_front_end_reproduces_the_websocket_golden_trace():
     assert packets == fixture["packets"]
     assert (fe.frame_count, fe.frame_epoch, fe.tracking_drops, q.qsize()) == tuple(
         fixture["state"][k] for k in ("frame_count", "frame_epoch", "tracking_drops", "queue"))
+
+
+def test_arrival_stamps_ride_on_the_packet_and_every_receiver_line():
+    """The raw frame's arrival (mono + wall, before decode) is on the packet's IngestMeta and on every receiver line of the admit
+    chain, the throttle's drop line included; a transport-level reject has no frame to stamp."""
+    h = Harness(WEBSOCKET_POLICY)
+    raws = [_raw(i, i * 200_000_000) for i in range(1, 5)]
+    for r in raws:
+        h.fe.offer(r)
+    pk = h.packets()
+    assert [p.ingest.t_arrival_mono for p in pk] == [r.t_arrival_mono for r in raws[:3]] and pk[0].ingest.t_arrival_wall == raws[0].t_arrival_wall
+    assert h.lines()[3][:2] == (RX_DROPPED, RX_THROTTLE)
+    assert [e.t_arrival_mono for e in h.events] == [r.t_arrival_mono for r in raws]
+    assert all(e.t_arrival_wall_utc == r.t_arrival_wall for e, r in zip(h.events, raws))
+    h.fe.reject("malformed", is_keyframe=None)
+    assert h.events[-1].t_arrival_mono is None and h.events[-1].t_arrival_wall_utc is None

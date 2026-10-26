@@ -142,6 +142,8 @@ class IngestMeta:
     depth_valid_frac: Optional[float] = None  # finite fraction of the decoded depth BEFORE the confidence filter
     rx_seq: Optional[int] = None             # receiver-local count: binary messages received (websocket/replay) | enqueue attempts (zeromq)
     drop_reason: Optional[str] = None        # set when the queue refused or later discarded the frame
+    t_arrival_mono: Optional[float] = None   # the transport's arrival stamp of the frame (RawFrame.t_arrival_mono), before decode
+    t_arrival_wall: Optional[float] = None   # time.time() at the same instant
 
 
 @dataclass(slots=True)
