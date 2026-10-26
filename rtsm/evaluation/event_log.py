@@ -128,6 +128,25 @@ Line kinds (schema_version 4: 2 = P1 task 0 2026-09-09, 3 = the P2 ledgers 2026-
             fields or kinds and bump LEDGER_SCHEMA; nothing is renamed.
             Schema 2 (2026-10-26): the obs `mask` block gains bbox_rgb and
             mask_hw; nothing else changed.
+  mem       LEDGER (schema 3, 2026-10-26, B2): one per change the working
+            memory makes to an object ON ITS OWN, so a reader can tell why an
+            id is gone or moved. action expire (a proto past its TTL is
+            deleted; reason proto_ttl), evict (the proximity index's cell was
+            over its cap and dropped the id from the index; the object stays in
+            memory but no candidate can reach it until it expires; reason
+            cell_overflow) or correct (a pose correction moved the stored
+            position: p_before -> p_after, shift_m, demoted when the shift was
+            at or above object.pose.demote_thresh_m and the object went back to
+            proto; reason direct = the object's last frame was in the batch,
+            fallback = the nearest corrected camera's delta). Carries the
+            object's state BEFORE the event (confirmed, hits, stability,
+            label_primary, p_before, frame_id = its last-update frame id, or
+            the corrected frame id on correct lines), age_s / lifetime_s on the
+            ingest clock, and t_sensor_ns / frame_seq of the processed frame
+            current at the event (a correction arrives on another thread: that
+            is the last frame processed before it applied). A reset / session
+            freeze writes no mem lines (the session ledger has them). Written
+            by the pipeline from the memory's event sink.
 
 A/A comparator contract: compare the receiver and dequeue streams PER (KIND,
 SOURCE) as ordered sequences of (frame_seq, t_sensor_ns, decision/outcome,
@@ -198,12 +217,17 @@ DQ_REASON_POSE_CONVERSION = "pose_conversion_failed"
 
 # ---- Ledgers (P2). Additive kinds with their own schema number in the meta
 # line's `ledgers` block (frozen at G2-C). Stage A = pose; obs / view follow.
-LEDGER_SCHEMA = 2
+LEDGER_SCHEMA = 3
 LEDGER_FORMATS = ("jsonl", "parquet")
 KIND_POSE = "pose"
 KIND_OBS = "obs"
 KIND_VIEW = "view"
-LEDGER_KINDS = (KIND_POSE, KIND_OBS, KIND_VIEW)
+KIND_MEM = "mem"
+LEDGER_KINDS = (KIND_POSE, KIND_OBS, KIND_VIEW, KIND_MEM)
+MEM_EXPIRE = "expire"
+MEM_EVICT = "evict"
+MEM_CORRECT = "correct"
+MEM_ACTIONS = (MEM_EXPIRE, MEM_EVICT, MEM_CORRECT)
 # Observation outcomes (the associator's six exits per candidate)
 OBS_MATCHED = "matched"
 OBS_CREATED = "created"
@@ -347,6 +371,31 @@ class ViewEvent:
     objects: List[Dict[str, Any]]             # {id, confirmed, hits, stability, label_primary, u, v, expected_depth, observed_depth}
     view_ms: float                            # cost of the projection + sampling
     kind: str = "view"
+
+
+@dataclass
+class MemoryEvent:
+    """One line per change the working memory makes to an object on its own (ledger schema 3): a proto expired past its
+    TTL, an id evicted from the proximity index's cell, or a stored position moved by a pose correction. The pipeline writes
+    it from the memory's event sink with the processed frame current at the event. State fields are the object's BEFORE."""
+    timestamp: float                          # time.monotonic() at the write
+    action: str                               # expire | evict | correct (MEM_ACTIONS)
+    object_id: str
+    reason: str                               # expire: proto_ttl; evict: cell_overflow; correct: direct | fallback
+    t_sensor_ns: Optional[int]                # the processed frame current at the event (None before the first frame)
+    frame_seq: Optional[int]
+    confirmed: bool
+    hits: int
+    stability: float
+    label_primary: Optional[str]
+    p_before: Optional[List[float]]           # the stored position before the event
+    p_after: Optional[List[float]] = None     # correct: the position after the delta
+    shift_m: Optional[float] = None           # correct: |p_after - p_before|
+    demoted: bool = False                     # correct: the object went back to proto (shift at or above the demote threshold)
+    frame_id: Optional[str] = None            # expire / evict: the object's last-update frame id; correct: the corrected frame id
+    age_s: Optional[float] = None             # seconds since the object was last seen, on the ingest clock
+    lifetime_s: Optional[float] = None        # seconds since the object was created, on the ingest clock
+    kind: str = "mem"
 
 
 @dataclass

@@ -28,7 +28,7 @@ from rtsm.core.clock import Clock, WallClock
 from rtsm.evaluation.event_log import (
     DQ_DROPPED, DQ_FRAME_REJECTED, DQ_GATE_REJECTED, DQ_PROCESSED,
     DQ_REASON_GATE_ERROR, DQ_REASON_KEYFRAME, DQ_REASON_NO_POSE, DQ_REASON_POSE_CONVERSION,
-    DequeueEvent, EventLogWriter, FrameEvent, ObservationEvent, ViewEvent, summarize_sources,
+    DequeueEvent, EventLogWriter, FrameEvent, MemoryEvent, ObservationEvent, ViewEvent, summarize_sources,
 )
 from rtsm.core.frustum import FRUSTUM_MODEL_V1, frustum_view
 
@@ -289,6 +289,11 @@ class Pipeline:
         self.pose_conversion_failures = 0
         # Frame-quality gate (gates.*): skips unusable frames before segmentation
         self.frame_gate = FrameQualityGate(cfg)
+        # Memory events (ledger kind mem): the working memory hands its expiry / eviction / correction records to the
+        # pipeline, which writes them with the processed frame current at the event.
+        self._cur_frame: Tuple[Optional[int], Optional[int]] = (None, None)
+        if self.working_mem is not None and hasattr(self.working_mem, "event_sink"):
+            self.working_mem.event_sink = self._mem_event
         # eval.gate_mode: enforce (default) | shadow -- shadow logs the sweep
         # gate's rejection on the dequeue line (gate_shadow) and processes the
         # frame anyway (the eval runner's dense mode; never the live default).
@@ -475,6 +480,8 @@ class Pipeline:
             self._trace_dequeue(pkt, t_deq, DQ_FRAME_REJECTED, str(getattr(fq, "reason", "") or ""))
             return
         self._trace_dequeue(pkt, t_deq, DQ_PROCESSED, gate_reason, gate_shadow=shadow_reason)
+        self._cur_frame = ((int(pkt.time.t_sensor_ns) if pkt is not None and pkt.time.t_sensor_ns is not None else None),
+                           (int(pkt.time.seq) if pkt is not None and pkt.time.seq is not None else None))
 
         t_step_start = time.perf_counter()
         t_step_start_mono = time.monotonic()   # same clock as the other trace kinds
@@ -919,6 +926,16 @@ class Pipeline:
                 ))
             except Exception:
                 logger.debug("observation ledger: line skipped", exc_info=True)
+
+    def _mem_event(self, rec: Dict[str, Any]) -> None:
+        """Ledger kind mem: one line per change the working memory made to an object on its own (expire / evict / correct),
+        with the processed frame current at the event. No-op when the ledgers are off; never raises into the memory."""
+        if not self._event_log.ledgers_enabled:
+            return
+        try:
+            self._event_log.write(MemoryEvent(timestamp=time.monotonic(), t_sensor_ns=self._cur_frame[0], frame_seq=self._cur_frame[1], **rec))
+        except Exception:
+            logger.debug("memory ledger: line skipped", exc_info=True)
 
     def _dropped_rows(self, fd: Any, st: Any, seg: Any, sx: float = 1.0, sy: float = 1.0) -> List[Dict[str, Any]]:
         """Every candidate of this frame that did not reach association, located (trace schema_version 4): the mask

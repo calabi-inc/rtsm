@@ -153,7 +153,7 @@ def test_frame_line_serialises_the_located_drops(tmp_path):
                                  "detector_label": "cup", "detector_score": 0.8, "confirmation_source": "dual"}]))
     w.close()
     meta, frame = _lines(w.path)
-    assert meta["schema_version"] == SCHEMA_VERSION == 4 and LEDGER_SCHEMA == 2
+    assert meta["schema_version"] == SCHEMA_VERSION == 4 and LEDGER_SCHEMA == 3
     assert frame["kind"] == "frame" and frame["rgb_hw"] == [480, 640] and frame["mask_hw"] == [480, 640]
     assert frame["dropped"][0]["reason"] == "topk" and frame["dropped"][0]["bbox"] == [1, 2, 3, 4]
     # an older-style write (no dropped rows) still serialises, with the defaults

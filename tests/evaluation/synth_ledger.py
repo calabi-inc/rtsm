@@ -167,6 +167,17 @@ def frame_flow_rows(spec: Sequence[Tuple[str, str, str]], *, source: str = "repl
 
 # ───────────────────────────── P3 task 3: single-line builders for the metric tests ─────────────────────────────
 
+def mem_rows(n: int = 3, *, t0_ns: int = 1_000_000_000) -> List[dict]:
+    """Schema-3 memory-event lines shaped like the pipeline's writer: an expiry, an index eviction and a correction."""
+    base = {"kind": "mem", "timestamp": 101.0, "t_sensor_ns": t0_ns, "frame_seq": 1, "confirmed": False, "hits": 1, "stability": 0.1,
+            "label_primary": "mug", "p_before": [0.0, 0.0, 2.0], "p_after": None, "shift_m": None, "demoted": False, "frame_id": "ws_1",
+            "age_s": 10.5, "lifetime_s": 12.0}
+    rows = [{**base, "action": "expire", "object_id": "obj0", "reason": "proto_ttl"},
+            {**base, "action": "evict", "object_id": "obj1", "reason": "cell_overflow"},
+            {**base, "action": "correct", "object_id": "obj2", "reason": "direct", "confirmed": True, "hits": 5, "p_after": [0.1, 0.0, 2.0], "shift_m": 0.1}]
+    return rows[:n]
+
+
 def obs_line(ts_ns: int, oid: Optional[str], outcome: str, p_world: Optional[Sequence[float]], *, cam: Sequence[float] = (0.0, 0.0, 0.0),
              label: Optional[str] = "mug", frame_seq: Optional[int] = None, cand_idx: int = 0, n_nearby: int = 0, n_gate_survivors: int = 0,
              max_cos: Optional[float] = None, cos_sim: Optional[float] = None, dist_m: Optional[float] = None,
