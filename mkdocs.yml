@@ -10,9 +10,7 @@ theme:
   custom_dir: docs/overrides
   logo: assets/calabi-wordmark-white.svg
   favicon: assets/favicon-for-light-tab.png
-  font:
-    text: Geist
-    code: Geist Mono
+  font: false   # self-hosted in docs/stylesheets/extra.css + docs/assets/fonts/
   palette:
     scheme: slate
     primary: custom
