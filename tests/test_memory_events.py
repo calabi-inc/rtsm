@@ -38,7 +38,7 @@ def _wm(cfg=None, *, index=None, clock=None, sink=None):
 
 
 def test_constants_and_schema():
-    assert KIND_MEM == "mem" and KIND_MEM in LEDGER_KINDS and LEDGER_SCHEMA == 3 and MEM_ACTIONS == ("expire", "evict", "correct")
+    assert KIND_MEM == "mem" and KIND_MEM in LEDGER_KINDS and LEDGER_SCHEMA == 4 and MEM_ACTIONS == ("expire", "evict", "correct")
 
 
 def test_proto_expiry_emits_the_state_before_deletion():
@@ -118,7 +118,7 @@ def test_pipeline_writes_mem_lines_with_the_current_frame(tmp_path: Path):
     wm.expire_timeouts()
     w.close()
     rows = [json.loads(l) for l in (tmp_path / "e.jsonl").read_text(encoding="utf-8").splitlines() if l.strip()]
-    assert rows[0]["ledgers"]["schema"] == 3
+    assert rows[0]["ledgers"]["schema"] == 4
     mem = [r for r in rows if r["kind"] == "mem"]
     assert len(mem) == 1 and mem[0]["object_id"] == oid and mem[0]["action"] == "expire" and mem[0]["t_sensor_ns"] == 123_000_000 and mem[0]["frame_seq"] == 7
     assert mem[0]["p_before"] == [0.0, 0.0, 2.0] and mem[0]["p_after"] is None and mem[0]["demoted"] is False and mem[0]["frame_id"] == "ws_3"

@@ -110,7 +110,9 @@ Line kinds (schema_version 4: 2 = P1 task 0 2026-09-09, 3 = the P2 ledgers 2026-
             match the associator's fallback path made without gating this
             candidate: no residuals), label_topk, detector_label / detector_score, priority, the MaskStats
             numbers (bbox / area_px in mask space; bbox_rgb and mask_hw since
-            ledger schema 2, centroid_px always RGB space), and the frame
+            ledger schema 2, centroid_px always RGB space; rle since schema 4,
+            the mask itself as COCO compressed RLE at mask resolution, present
+            only under diagnostics.save_masks), and the frame
             context (ids, epoch, lane, keyframe origin, camera pose). Join to
             `frame` / `dequeue` on t_sensor_ns.
   view      LEDGER (P2 stage C): one per PROCESSED frame, written BEFORE
@@ -127,7 +129,10 @@ Line kinds (schema_version 4: 2 = P1 task 0 2026-09-09, 3 = the P2 ledgers 2026-
             LEDGER SCHEMA 1 IS FROZEN with this kind (G2-C): later changes add
             fields or kinds and bump LEDGER_SCHEMA; nothing is renamed.
             Schema 2 (2026-10-26): the obs `mask` block gains bbox_rgb and
-            mask_hw; nothing else changed.
+            mask_hw; nothing else changed. Schema 4 (2026-10-26, B4): the obs
+            `mask` block may carry `rle` ({"size": [h, w], "counts": str}, the
+            COCO compressed form pycocotools writes; rtsm/utils/rle.py encodes
+            and decodes it) when diagnostics.save_masks is on; absent otherwise.
   mem       LEDGER (schema 3, 2026-10-26, B2): one per change the working
             memory makes to an object ON ITS OWN, so a reader can tell why an
             id is gone or moved. action expire (a proto past its TTL is
@@ -217,7 +222,7 @@ DQ_REASON_POSE_CONVERSION = "pose_conversion_failed"
 
 # ---- Ledgers (P2). Additive kinds with their own schema number in the meta
 # line's `ledgers` block (frozen at G2-C). Stage A = pose; obs / view follow.
-LEDGER_SCHEMA = 3
+LEDGER_SCHEMA = 4
 LEDGER_FORMATS = ("jsonl", "parquet")
 KIND_POSE = "pose"
 KIND_OBS = "obs"

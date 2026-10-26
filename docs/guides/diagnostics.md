@@ -9,6 +9,7 @@ RTSM can write one append-only JSONL file per run describing what happened to ev
 diagnostics:
   enabled: false        # master switch. false = zero overhead, no file created
   track_drops: false    # per-dropped-mask detail (reason + box) on the frame line (~10 µs + the box per drop); rtsm eval turns it on
+  save_masks: false     # each selected candidate's mask on its obs line as COCO compressed RLE (~0.3–2 KB per observation); rtsm eval --save-masks
   event_log_path: null  # null = eval_output/<YYYYMMDD_HHMMSS>/events.jsonl
                         # "my_dir/"          = auto-named file inside that directory
                         # "my_dir/run01.jsonl" = exact path (overwritten with a warning)
@@ -37,7 +38,7 @@ Every line is one JSON object with a `kind`. The first line is `kind: "meta"`:
 | `schema_version` | 3 (2 = trace only; 3 adds the ledger kinds — additive) |
 | `created_wall_utc_s`, `created_mono_s`, `pid` | when and where the file was opened |
 | `ingest_clock`, `ingest_policy` | the resolved `ingest.clock` / `ingest.policy` of the run |
-| `ledgers` | `{"enabled": false}` or `{"enabled": true, "schema": 3, "format": "jsonl"}` |
+| `ledgers` | `{"enabled": false}` or `{"enabled": true, "schema": 4, "format": "jsonl"}` |
 
 All timestamps named `timestamp` are `time.monotonic()` at the write; `*_ns` are integer nanoseconds on the sensor clock; `*_s` are float seconds; `*_frac` are fractions in [0, 1].
 
@@ -107,7 +108,7 @@ One line per **candidate the associator looked at**, on every processed frame, w
 | `matched_without_scoring` | bool | the associator's "scan all objects when the index returns nothing" fallback matched this candidate to the previous candidate's object without gating or scoring it — a known flaw the ledger exposes (no residuals on such lines) |
 | `label_topk` | [{label, score}] | detection label first, then the vocabulary classifier's (records rather than pairs so Parquet can type the column) |
 | `priority` | float | the scoring priority that selected this candidate |
-| `mask` | dict | `area_px`, `bbox` (mask space), `bbox_rgb` and `mask_hw` (ledger schema 2: the same box in RGB pixel space and the mask grid it came from; equal to `bbox` and the RGB size when the backend's masks are at RGB resolution), `coverage`, `border_fraction`, `depth_valid`, `depth_p50`, `depth_spread`, `planar_inlier_pct`, `planar_rms_m`, `centroid_px` (RGB pixel space) |
+| `mask` | dict | `area_px`, `bbox` (mask space), `bbox_rgb` and `mask_hw` (ledger schema 2: the same box in RGB pixel space and the mask grid it came from; equal to `bbox` and the RGB size when the backend's masks are at RGB resolution), `coverage`, `border_fraction`, `depth_valid`, `depth_p50`, `depth_spread`, `planar_inlier_pct`, `planar_rms_m`, `centroid_px` (RGB pixel space); `rle` (ledger schema 4, only under `diagnostics.save_masks`): the mask itself as COCO compressed RLE at mask resolution, `{"size": [h, w], "counts": "<string>"}`, the form pycocotools and FiftyOne read; `rtsm.utils.rle` encodes and decodes it |
 
 Invariants a reader can check: every `matched` line without `matched_without_scoring` has `cos_sim ≥ assoc.cos_min` and `dist_m ≤ assoc.gate_dist_base_m`; a `created` line with `n_gate_survivors > 0` has `max_cos < assoc.cos_min`; the working memory's position of any object is a convex combination of its `created` and `matched` `p_world` values, so it lies inside their bounding box (absent pose corrections).
 
