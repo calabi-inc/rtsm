@@ -16,6 +16,10 @@ Current scope:
   raw measurement and the association outcome; `view` (stage C) -- one line
   per processed frame listing the live objects in the camera frustum before
   association (expected vs observed depth). Schema 1 frozen at G2-C.
+  schema_version 4 / ledger schema 2 (2026-10-26, additive): the frame line
+  locates every candidate that did not reach association (`dropped`, with
+  the stage, the reason and the box in RGB space); the obs mask block gains
+  bbox_rgb / mask_hw.
 - ledger: reader + rollups over that file (read_events, by_kind,
   pose_health, to_parquet) and the `python -m rtsm.evaluation.ledger` CLI.
 - recording_mcap: the Lens recording -> rosbag2/MCAP converter (P3 task 0).

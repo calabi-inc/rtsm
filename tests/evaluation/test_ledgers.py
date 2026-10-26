@@ -89,7 +89,7 @@ class TestWriterAndConfig:
                           pose_clock="sender", epoch=0, tracking_state="normal", mailbox_write=True))
         w.close()
         rows = _lines(w.path)
-        assert rows[0]["schema_version"] == SCHEMA_VERSION == 3 and rows[0]["ledgers"] == {"enabled": False}
+        assert rows[0]["schema_version"] == SCHEMA_VERSION == 4 and rows[0]["ledgers"] == {"enabled": False}
         # the writer itself is kind-agnostic: the guarantee is that no PRODUCER
         # gets a sink, so a real run never contains the kind (tested below)
         assert [r["kind"] for r in rows] == ["meta", "pose"]

@@ -6,8 +6,8 @@ fresh, auto-timestamped file (no appending across runs). Every line is a JSON
 object with a ``kind`` field; the first line is ``kind: "meta"`` and carries
 ``schema_version``.
 
-Line kinds (schema_version 3: 2 = P1 task 0 2026-09-09, 3 = the P2 ledgers 2026-09-21,
-additive):
+Line kinds (schema_version 4: 2 = P1 task 0 2026-09-09, 3 = the P2 ledgers 2026-09-21,
+4 = located drops 2026-10-26; every bump additive):
 
   meta      once per file: schema_version, wall time, pid, and what the runner
             adds (ingest_clock: wall | sensor; ingest_policy: latest | lossless
@@ -58,6 +58,17 @@ additive):
   frame     one per PROCESSED frame: masks, filter, scoring, association,
             timings (the schema_version-1 line, plus kind and t_sensor_ns;
             timestamp is now time.monotonic() like the other kinds).
+            schema_version 4 adds rgb_hw, mask_hw and `dropped`: one row per
+            candidate that did NOT reach association -- idx (mask index), stage
+            (filter | select), reason (filter: area | depth_valid |
+            depth_spread, present only under diagnostics.track_drops; select:
+            dedup with dup_of = the kept candidate's index, or topk), bbox in
+            RGB pixel space, priority (select rows), detector_label /
+            detector_score (the backend's own for that mask, None when it has
+            none) and the filter's numbers on filter rows. With the frame's
+            obs lines this accounts for every raw mask (#dropped + #obs ==
+            n_masks_raw once track_drops is on), so a reader can tell "no
+            detection" from "detected, then filtered or cut".
   pose      LEDGER (P2 stage A, ledger schema 1; written only when
             diagnostics.ledgers is on): one per SENSOR FRAME the receiver saw,
             at input rate. Websocket / replay write it at two points of the
@@ -90,8 +101,10 @@ additive):
             be audited against the gates (matched_without_scoring marks a
             match the associator's fallback path made without gating this
             candidate: no residuals), label_topk, detector_label / detector_score, priority, the MaskStats
-            numbers, and the frame context (ids, epoch, lane, keyframe origin,
-            camera pose). Join to `frame` / `dequeue` on t_sensor_ns.
+            numbers (bbox / area_px in mask space; bbox_rgb and mask_hw since
+            ledger schema 2, centroid_px always RGB space), and the frame
+            context (ids, epoch, lane, keyframe origin, camera pose). Join to
+            `frame` / `dequeue` on t_sensor_ns.
   view      LEDGER (P2 stage C): one per PROCESSED frame, written BEFORE
             association (so it lists the objects that existed when the frame
             arrived, never the ones this frame creates): every live WM object
@@ -105,6 +118,8 @@ additive):
             in its view list; a created one never is.
             LEDGER SCHEMA 1 IS FROZEN with this kind (G2-C): later changes add
             fields or kinds and bump LEDGER_SCHEMA; nothing is renamed.
+            Schema 2 (2026-10-26): the obs `mask` block gains bbox_rgb and
+            mask_hw; nothing else changed.
 
 A/A comparator contract: compare the receiver and dequeue streams PER (KIND,
 SOURCE) as ordered sequences of (frame_seq, t_sensor_ns, decision/outcome,
@@ -139,7 +154,7 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 # Receiver decisions
 RX_ENQUEUED = "enqueued"
@@ -175,7 +190,7 @@ DQ_REASON_POSE_CONVERSION = "pose_conversion_failed"
 
 # ---- Ledgers (P2). Additive kinds with their own schema number in the meta
 # line's `ledgers` block (frozen at G2-C). Stage A = pose; obs / view follow.
-LEDGER_SCHEMA = 1
+LEDGER_SCHEMA = 2
 LEDGER_FORMATS = ("jsonl", "parquet")
 KIND_POSE = "pose"
 KIND_OBS = "obs"
@@ -209,6 +224,9 @@ class FrameEvent:
     n_objects_confirmed: int = 0
     timing_ms: Dict[str, float] = field(default_factory=dict)
     t_sensor_ns: Optional[int] = None
+    rgb_hw: Optional[List[int]] = None            # the processed image (schema_version 4)
+    mask_hw: Optional[List[int]] = None           # the backend's mask grid (equal to rgb_hw at RGB resolution)
+    dropped: List[Dict[str, Any]] = field(default_factory=list)   # every candidate that did not reach association (see the module docstring)
     kind: str = "frame"
 
 

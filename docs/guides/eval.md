@@ -15,7 +15,7 @@ rtsm report eval_output/fr3                             # regenerate metrics.jso
 
 1. Resolves the settings: the **sensor clock**, the **lossless lane** (nothing is dropped, the producer waits), the keyframe rule and the non-keyframe throttle for the chosen mode, the gate mode, and records the config fingerprint, the commit and the versions in `resolved.json`.
 2. Probes a bag first (`bag_probe.json`): topics, pose source, registration. A bag v1 cannot read is refused with the reason before any model loads (see [Reading Bags](bags.md)).
-3. Loads the models once, then for each repeat builds a fresh runtime — memory, index, gate, sweep cache, queue, pipeline, event log — through the same factory the live runner uses (`rtsm/engine.py`).
+3. Loads the models once, then for each repeat builds a fresh runtime — memory, index, gate, sweep cache, queue, pipeline, event log — through the same factory the live runner uses (`rtsm/engine.py`), with diagnostics, the ledgers and the per-drop detail (`diagnostics.track_drops`) on, so the frame line locates every candidate the filter or the selection dropped.
 4. Feeds the input through the bag source (or the replay source) as fast as the queue accepts, runs the pipeline until the source is done and the queue is empty, force-flushes every object to the run's vector store, and writes `summary.json`.
 5. `repeats.json` collects the per-run fingerprints and counts; `identical_fingerprints` says whether N runs agreed.
 6. Writes the report over the run directories (`metrics.json` + `report.md`, below). `--no-report` skips it; `rtsm report <dir>` writes it later.
@@ -43,7 +43,7 @@ eval_output/<input>-<mode>-<stamp>/
   metrics.json       every metric per run + the aggregate with floors; per-object / per-cluster / per-frame records
   report.md          the number sheet
   run_1/
-    events.jsonl     the frame-flow trace + the pose / obs / view ledgers (schema 3, ledgers schema 1)
+    events.jsonl     the frame-flow trace + the pose / obs / view ledgers (schema 4, ledgers schema 2)
     summary.json     counts (receiver decisions, dequeue outcomes, gate shadows), the memory (every object in the /objects shape + the fingerprint), latency and segmentation aggregates, the source's statistics
     faiss/           this run's vector store
     crops/           (--save-crops) the memory's per-object JPEG snapshots, <id>/<k>.jpg + index.json
@@ -95,4 +95,4 @@ Not supported in v1: masks from the detector (boxes only; a mask-refiner slot ex
 
 ## For tooling built on the run directory
 
-Other tools, including Calabi's paid compare, build on three things that are versioned and changelogged: the run-directory layout above, the ledger schema (1) and the `metrics_schema` in `metrics.json`, and the modules `rtsm.evaluation.metrics` (`MetricParams`, `compute_metrics`, `object_tracks`, `leader_clusters`), `rtsm.evaluation.report` (`run_dirs`, `run_metrics`, `aggregate`, `render_markdown`, `write_report`) and `rtsm.evaluation.ledger` (`read_events`, `by_kind`). A computation a tool needs that is missing here belongs in these modules, not in the tool.
+Other tools, including Calabi's paid compare, build on three things that are versioned and changelogged: the run-directory layout above, the ledger schema (2) and the `metrics_schema` in `metrics.json`, and the modules `rtsm.evaluation.metrics` (`MetricParams`, `compute_metrics`, `object_tracks`, `leader_clusters`), `rtsm.evaluation.report` (`run_dirs`, `run_metrics`, `aggregate`, `render_markdown`, `write_report`) and `rtsm.evaluation.ledger` (`read_events`, `by_kind`). A computation a tool needs that is missing here belongs in these modules, not in the tool.

@@ -157,7 +157,7 @@ class DualConfirmationSegmenter(SegmentationAdapter):
         # Build merged output
         merged_masks = []
         merged_labels = []       # detection_labels
-        merged_conf = []         # label_confidence
+        merged_conf = []         # label_confidence (None for a FastSAM-only mask: no detector saw it)
         merged_source = []       # confirmation_source
         merged_scores = []       # detection scores (YOLOE conf or 0)
         merged_boxes = []
@@ -188,7 +188,7 @@ class DualConfirmationSegmenter(SegmentationAdapter):
                 continue
             merged_masks.append(masks_f[fi])
             merged_labels.append(None)
-            merged_conf.append(0.0)
+            merged_conf.append(None)     # no detection confidence, not 0.0 (2026-10-26); `scores` keeps 0.0 for the tensor
             merged_source.append("fastsam_only")
             merged_scores.append(0.0)
             if result_f.boxes is not None and fi < result_f.boxes.shape[0]:

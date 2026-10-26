@@ -4,6 +4,13 @@ All notable changes to `rtsm`. The format follows [Keep a Changelog](https://kee
 
 ## [Unreleased]
 
+### Added
+- **Located drops.** The `frame` line carries `dropped`: one row per candidate that did not reach association, with the stage and reason (`filter`: `area` | `depth_valid` | `depth_spread`, under `diagnostics.track_drops`; `select`: `dedup` with `dup_of`, or `topk`), the box in RGB pixel space, the selection priority and the backend's own label and confidence for that mask; plus `rgb_hw` / `mask_hw`. With the frame's `obs` lines this accounts for every raw mask, so a reader can tell "no detection" from "detected, then filtered or cut". `rtsm eval` turns `track_drops` on. Trace `schema_version` 3 → 4 (additive).
+- Observation ledger: the `mask` block gains `bbox_rgb` (the box in RGB pixel space; `bbox` stays in mask space) and `mask_hw`. Ledger schema 1 → 2 (additive).
+
+### Changed
+- `dual` backend: a FastSAM-only mask reports no detection confidence (`label_confidence` entry `null`) instead of `0.0`. The observation ledger already recorded `detector_score: null` for them (no label, so nothing was merged); the `scores` tensor is unchanged.
+
 ### Fixed
 - `rtsm demo`: the completion summary counted the working memory after the exit freeze had moved it into the session record, so it always read 0; it now counts the frozen session.
 - A websocket to `/ws` on a process without a visualization server (`--no-viz`) fell through to the static-files mount and logged an ASGI traceback per attempt; the handshake is refused (close code 1008).

@@ -269,12 +269,13 @@ def resolve_eval(cfg: dict, opts: EvalOptions) -> ResolvedEval:
 
 def configure_run(cfg: dict, resolved: ResolvedEval, run_dir: Path) -> dict:
     """The per-run config: a deep copy with the vector store and the event
-    log inside ``run_dir``, diagnostics + ledgers on, viz / MCP off, the
+    log inside ``run_dir``, diagnostics + ledgers + the per-drop detail on (so
+    the frame line locates every dropped candidate), viz / MCP off, the
     resolved gate mode. The input config object is never mutated."""
     c = copy.deepcopy(cfg)
     c.setdefault("vectors", {}).setdefault("faiss", {})["index_path"] = str(run_dir / "faiss" / "index.flatip")
     c["diagnostics"] = {**(c.get("diagnostics") or {}), "enabled": True, "event_log_path": str(run_dir / "events.jsonl"),
-                        "ledgers": True, "ledger_format": resolved.ledger_format}
+                        "ledgers": True, "ledger_format": resolved.ledger_format, "track_drops": True}
     c.setdefault("eval", {})["gate_mode"] = resolved.gate_mode
     c.setdefault("visualization", {})["enable"] = False
     c.setdefault("mcp", {})["enable"] = False

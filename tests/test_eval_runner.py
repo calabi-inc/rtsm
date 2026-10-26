@@ -171,6 +171,7 @@ def test_configure_run_isolates_paths_and_never_touches_the_input(cfg, bag, tmp_
     assert json.dumps(cfg, sort_keys=True) == before
     assert c["vectors"]["faiss"]["index_path"] == str(tmp_path / "run_1" / "faiss" / "index.flatip")
     assert c["diagnostics"]["enabled"] is True and c["diagnostics"]["ledgers"] is True and c["diagnostics"]["event_log_path"].endswith("events.jsonl")
+    assert c["diagnostics"]["track_drops"] is True
     assert c["eval"]["gate_mode"] == "shadow" and c["visualization"]["enable"] is False and c["io"]["receiver"] == "bag"
 
 
