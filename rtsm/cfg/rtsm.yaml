@@ -584,6 +584,7 @@ eval:
   out: null                       # output directory; null = eval_output/<input>-<mode>-<stamp>/
   max_wall_s: null                # abort a run after this many seconds (recorded as aborted); null = never
   report: true                    # write metrics.json + report.md after the repeats (`rtsm report <dir>` regenerates them)
+  speed: null                     # pace the input at this multiple of its recorded rate (--speed overrides); null = as fast as the ingest queue accepts
   metrics:                        # the report's parameters (rtsm/evaluation/metrics.py)
     cluster_radius_m: null        # spatial-cluster radius (m); null = assoc.gate_dist_base_m, the associator's own gate
     cluster_radii_m: null         # sensitivity radii; null = [radius / 2, radius, 2 x radius]

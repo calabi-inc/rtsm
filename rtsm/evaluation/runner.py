@@ -75,6 +75,7 @@ class EvalOptions:
     label: Optional[str] = None
     report: bool = True                      # write metrics.json + report.md after the repeats
     save_crops: bool = False                 # write the memory's per-object JPEG snapshots into run_N/crops/
+    speed: Optional[float] = None            # pace the input at this multiple of its recorded rate (None = as fast as the queue accepts)
 
 
 @dataclass
@@ -107,6 +108,12 @@ class ResolvedEval:
     tree_digest: Optional[str] = None        # sha256[:16] of `git diff HEAD` when dirty, so two dirty runs can be told apart
     model_files: Optional[Dict[str, Dict[str, Any]]] = None   # config key -> {path, exists, bytes, sha256}: the weight files the config names
     hf_models: Optional[Dict[str, str]] = None                # config key -> hub id, for models fetched from a hub cache
+    speed: Optional[float] = None            # the pacing: a multiple of the recorded rate; None = as fast as the queue accepts
+    policy_configured: str = "auto"          # ingest.policy as configured (auto resolves to lossless under eval)
+    gpu: Optional[str] = None                # torch's name for the CUDA device the run used; None on CPU or without torch
+    cuda: Optional[str] = None               # the CUDA version torch was built with; None on CPU
+    device_model: Optional[str] = None       # /proc/device-tree/model (a Jetson's board name); None elsewhere
+    power_mode: Optional[str] = None         # a Jetson's nvpmodel status line ("pmode:0000 fmode:quiet"); None elsewhere
 
 
 def input_kind(path: str | os.PathLike) -> str:
@@ -142,6 +149,38 @@ def _git_state(repo_root: Optional[Path] = None) -> tuple[Optional[bool], Option
         return True, digest
     except Exception:  # noqa: BLE001 -- provenance only
         return None, None
+
+
+DEVICE_TREE_MODEL = "/proc/device-tree/model"
+NVPMODEL_STATUS = "/var/lib/nvpmodel/status"
+
+
+def _read_text(path: Any) -> Optional[str]:
+    """The first line of a small text file with NULs and whitespace stripped (device-tree strings are NUL-terminated);
+    None when the file is missing, unreadable or empty."""
+    try:
+        raw = Path(path).read_bytes()
+    except Exception:  # noqa: BLE001 -- provenance only
+        return None
+    text = raw.decode("utf-8", errors="replace").replace("\x00", "").strip()
+    first = text.splitlines()[0].strip() if text else ""
+    return first or None
+
+
+def _platform_facts() -> Dict[str, Optional[str]]:
+    """The compute the run used, for the resolved record: the GPU's name and the CUDA version as torch reports them (None on
+    CPU or without torch), the device model from the device tree (a Jetson: "NVIDIA Jetson Orin Nano Developer Kit") and the
+    Jetson power mode as nvpmodel wrote it (``/var/lib/nvpmodel/status``, e.g. "pmode:0000 fmode:quiet"); None where a fact
+    is not there. A latency number without these is a number without a machine."""
+    gpu = cuda = None
+    try:
+        import torch
+        if torch.cuda.is_available():
+            gpu = str(torch.cuda.get_device_name(0))
+            cuda = str(torch.version.cuda) if getattr(torch.version, "cuda", None) else None
+    except Exception:  # noqa: BLE001 -- provenance only
+        gpu = cuda = None
+    return {"gpu": gpu, "cuda": cuda, "device_model": _read_text(DEVICE_TREE_MODEL), "power_mode": _read_text(NVPMODEL_STATUS)}
 
 
 def _rtsm_version() -> Optional[str]:
@@ -253,6 +292,20 @@ def resolve_eval(cfg: dict, opts: EvalOptions) -> ResolvedEval:
             up_axis_default = "z"
     diag = cfg.get("diagnostics") or {}
     git_dirty, tree_digest = _git_state()
+    speed_raw = opts.speed if opts.speed is not None else ev.get("speed")
+    speed: Optional[float] = None
+    if speed_raw is not None:
+        if isinstance(speed_raw, (bool, str)):
+            raise ValueError(f"eval.speed must be a number > 0 or null; got {speed_raw!r}")
+        try:
+            speed = float(speed_raw)
+        except (TypeError, ValueError):
+            raise ValueError(f"eval.speed must be a number > 0 or null; got {speed_raw!r}")
+        if not (speed > 0) or speed != speed or speed == float("inf"):
+            raise ValueError(f"eval.speed must be > 0; got {speed_raw!r}")
+    if lane_cfg.policy != "lossless" and speed is None:
+        logger.warning("[eval] ingest.policy=%s without --speed: frames are offered as fast as the reader goes, so the lanes drop at the "
+                       "reader's pace, not the robot's; add --speed 1.0 for a timing run", lane_cfg.policy)
     return ResolvedEval(
         mode=mode, cadence=CADENCE[mode], input=str(opts.input), input_kind=kind, clock=clock, policy=lane_cfg.policy, keyframe_rule=keyframe_rule,
         nonkf_min_interval_s=throttle, gate_mode=gate_mode,
@@ -264,6 +317,7 @@ def resolve_eval(cfg: dict, opts: EvalOptions) -> ResolvedEval:
         detector=("external" if str((cfg.get("segmentation") or {}).get("backend", "")).lower() == "external" else "model"),
         git_dirty=git_dirty, tree_digest=tree_digest,
         model_files=_model_files(cfg), hf_models=_hf_models(cfg),
+        speed=speed, policy_configured=str(lane_cfg.configured_policy), **_platform_facts(),
     )
 
 
@@ -444,7 +498,7 @@ def run_once(cfg: dict, models: Any, resolved: ResolvedEval, run_dir: Path, run_
         enabled=True, configured_path=str(run_dir / "events.jsonl"),
         extra_meta={"ingest_clock": resolved.clock, "ingest_policy": lane_cfg.policy, "eval_mode": resolved.mode,
                     "keyframe_rule": resolved.keyframe_rule, "nonkf_min_interval_s": resolved.nonkf_min_interval_s,
-                    "gate_mode": resolved.gate_mode, "run_index": run_index, "config_fingerprint": resolved.config_fingerprint},
+                    "gate_mode": resolved.gate_mode, "speed": resolved.speed, "run_index": run_index, "config_fingerprint": resolved.config_fingerprint},
         ledgers=True, ledger_format=resolved.ledger_format,
     )
     rt = runtime_factory(cfg_k, models, clock=clock, lane_cfg=lane_cfg, event_log=event_log, up_axis_default=resolved.up_axis_default)
@@ -460,11 +514,12 @@ def run_once(cfg: dict, models: Any, resolved: ResolvedEval, run_dir: Path, run_
         latency_analytics=getattr(rt.analytics, "latency", None),
     )
     if resolved.input_kind == "replay":
-        src = source_factory("replay", cfg_k, ctx, recording_dir=resolved.input, replay_speed=1e9)   # as fast as accepted
+        src = source_factory("replay", cfg_k, ctx, recording_dir=resolved.input,
+                             replay_speed=(float(resolved.speed) if resolved.speed else 1e9))   # as fast as accepted unless paced
         if opts.max_frames:
             logger.warning("[eval] --max-frames applies to bag inputs only; a recording replays whole")
     else:
-        src = source_factory("bag", cfg_k, ctx, path=resolved.input, speed=None, max_frames=opts.max_frames)
+        src = source_factory("bag", cfg_k, ctx, path=resolved.input, speed=resolved.speed, max_frames=opts.max_frames)
     logger.info("[eval] run %d: %s (%s) -> %s", run_index, resolved.input, resolved.input_kind, run_dir)
     start_analytics = getattr(rt.analytics, "start", None)
     if callable(start_analytics):
@@ -632,6 +687,9 @@ def build_parser():
     ap.add_argument("--out", type=str, default=None, help="output directory (default: eval_output/<input>-<mode>-<stamp>/)")
     ap.add_argument("--max-frames", type=int, default=None, help="stop after this many paired frames (bag inputs)")
     ap.add_argument("--max-wall-s", type=float, default=None, help="abort a run after this many seconds of wall time")
+    ap.add_argument("--speed", type=float, default=None,
+                    help="pace the input at this multiple of its recorded rate (1.0 = real time by sensor stamps; default: as fast as the queue accepts). "
+                         "With --set ingest.policy=latest this is a timing run: the deployed lanes drop what the pipeline cannot keep up with, as on the robot")
     ap.add_argument("--label", type=str, default=None, help="name for the output directory instead of the input's")
     ap.add_argument("--save-crops", action="store_true",
                     help="write the memory's per-object JPEG snapshots into run_N/crops/ (+ index.json) for report renderers")
@@ -658,6 +716,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         max_wall_s=(args.max_wall_s if args.max_wall_s is not None else ev.get("max_wall_s")), label=args.label,
         report=(False if args.no_report else bool(ev.get("report", True))),
         save_crops=bool(getattr(args, "save_crops", False)),
+        speed=args.speed,
     )
     if not Path(opts.input).exists():
         ap.error(f"input not found: {opts.input}")
@@ -668,7 +727,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     except ValueError as exc:
         ap.error(str(exc))
     print(f"rtsm eval: {resolved.input} ({resolved.input_kind}) mode={resolved.mode} ({resolved.cadence}) clock={resolved.clock} policy={resolved.policy} "
-          f"keyframes={resolved.keyframe_rule} throttle={resolved.nonkf_min_interval_s:.3f}s gate={resolved.gate_mode} repeats={opts.repeats}")
+          f"keyframes={resolved.keyframe_rule} throttle={resolved.nonkf_min_interval_s:.3f}s gate={resolved.gate_mode} repeats={opts.repeats} "
+          f"speed={(f'{resolved.speed:g}x' if resolved.speed else 'as fast as accepted')}")
     try:
         result = run_eval(cfg, opts)
     except ValueError as exc:

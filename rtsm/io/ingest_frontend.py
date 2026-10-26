@@ -305,7 +305,7 @@ class IngestFrontEnd:
         try:
             return self._admit_impl(raw, rx_seq)
         except Exception:
-            self.trace(RX_DROPPED, RX_PARSE_ERROR, seq=h.seq, ts=h.t_sensor_ns,
+            self.trace(RX_DROPPED, RX_PARSE_ERROR, seq=h.seq, ts=h.t_sensor_ns, arrival=(raw.t_arrival_mono, raw.t_arrival_wall),
                        is_kf=(bool(h.keyframe_hint) if p.parse_error_carries_keyframe else None),
                        frame_count=(self.frame_count if p.trace_frame_count else None), rx_seq=rx_seq)
             raise
@@ -332,7 +332,7 @@ class IngestFrontEnd:
             if self.latency_analytics:
                 self.latency_analytics.record_tracking_drop()
             logger.info(f"[{self.source}] dropping frame: tracking_state={h.tracking_state}")
-            self.trace(RX_DROPPED, RX_TRACKING, seq=seq, ts=ts, rx_seq=rx_seq)
+            self.trace(RX_DROPPED, RX_TRACKING, seq=seq, ts=ts, rx_seq=rx_seq, arrival=(raw.t_arrival_mono, raw.t_arrival_wall))
             return None
 
         # 2. Pose (raises -> parse_error, AFTER the filter, BEFORE frame_count)
@@ -384,7 +384,7 @@ class IngestFrontEnd:
             elif not self.throttle.admit(ts):
                 if self.latency_analytics:
                     self.latency_analytics.record_throttle_skip()
-                self.trace(RX_DROPPED, RX_THROTTLE, seq=seq, ts=ts, is_kf=False, frame_count=fc,
+                self.trace(RX_DROPPED, RX_THROTTLE, seq=seq, ts=ts, is_kf=False, frame_count=fc, arrival=(raw.t_arrival_mono, raw.t_arrival_wall),
                            depth_valid_frac=dvf, rx_seq=rx_seq)
                 return None
 
@@ -396,7 +396,7 @@ class IngestFrontEnd:
                 self.latency_analytics.sample_queue_depth(aq.qsize())
                 self.latency_analytics.record_queue_drop()
             logger.warning(f"[{self.source}] ingest queue refused {'keyframe' if is_keyframe else 'non-KF'} before decode ({refusal})")
-            self.trace(RX_DROPPED, refusal, seq=seq, ts=ts, is_kf=is_keyframe, frame_count=fc,
+            self.trace(RX_DROPPED, refusal, seq=seq, ts=ts, is_kf=is_keyframe, frame_count=fc, arrival=(raw.t_arrival_mono, raw.t_arrival_wall),
                        depth_valid_frac=dvf, rx_seq=rx_seq)
             return None
 
@@ -424,7 +424,8 @@ class IngestFrontEnd:
         return FramePacket(
             time=tb, rgb=rgb, depth_m=depth_m, pose=pose, intr=h.intrinsics, is_keyframe=is_keyframe,
             confidence=conf_map, rgb_jpeg=raw_jpeg, frame_epoch=self.frame_epoch,
-            ingest=IngestMeta(keyframe_origin=kf_origin, depth_valid_frac=dvf, rx_seq=rx_seq),
+            ingest=IngestMeta(keyframe_origin=kf_origin, depth_valid_frac=dvf, rx_seq=rx_seq,
+                              t_arrival_mono=float(raw.t_arrival_mono), t_arrival_wall=float(raw.t_arrival_wall)),
             detections=h.extra.get("detections"),
             session_id=self._epoch_session_id,
             kf_id=(str(h.extra["kf_id"]) if h.extra.get("kf_id") is not None else None),
@@ -513,10 +514,12 @@ class IngestFrontEnd:
               seq: Any = None, ts: Any = None, is_kf: Optional[bool] = None,
               frame_count: Optional[int] = None, queue_depth: Optional[int] = None,
               depth_valid_frac: Optional[float] = None, lane: Optional[str] = None,
-              rx_seq: Optional[int] = None) -> None:
+              rx_seq: Optional[int] = None, arrival: Optional[Tuple[float, float]] = None) -> None:
         """One frame-flow trace line (no-op without a sink). With a packet its
         ids and ingest bookkeeping are used (the pre-filter depth statistic
-        from pkt.ingest, never recomputed). Never raises into the receive path."""
+        from pkt.ingest, never recomputed); ``arrival`` = (mono, wall) is the
+        raw frame's arrival for a line written before a packet exists. Never
+        raises into the receive path."""
         sink = self.event_sink
         if sink is None:
             return
@@ -537,6 +540,12 @@ class IngestFrontEnd:
             if queue_depth is None:
                 q = self.admission_queue
                 queue_depth = int(q.qsize()) if q is not None else None
+            t_arr_m = t_arr_w = None
+            if pkt is not None:
+                meta_a = getattr(pkt, "ingest", None)
+                t_arr_m, t_arr_w = getattr(meta_a, "t_arrival_mono", None), getattr(meta_a, "t_arrival_wall", None)
+            if t_arr_m is None and arrival is not None:
+                t_arr_m, t_arr_w = arrival
             sink(ReceiverEvent(
                 timestamp=time.monotonic(),
                 source=self.source,
@@ -550,6 +559,8 @@ class IngestFrontEnd:
                 depth_valid_frac=depth_valid_frac,
                 lane=lane,
                 rx_seq=rx_seq,
+                t_arrival_mono=(float(t_arr_m) if t_arr_m is not None else None),
+                t_arrival_wall_utc=(float(t_arr_w) if t_arr_w is not None else None),
             ))
         except Exception:
             logger.debug(f"[{self.source}] frame-flow trace failed", exc_info=True)

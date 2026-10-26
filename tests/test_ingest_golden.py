@@ -49,8 +49,11 @@ def _r(v, nd=4):
     return v
 
 
+RX_RUN_SPECIFIC = ("timestamp", "t_arrival_mono", "t_arrival_wall_utc")     # clocks of the run, never part of the golden
+
+
 def _rx_line(e) -> dict:
-    d = {k: v for k, v in e.__dict__.items() if k != "timestamp"}
+    d = {k: v for k, v in e.__dict__.items() if k not in RX_RUN_SPECIFIC}
     return _r(d)
 
 

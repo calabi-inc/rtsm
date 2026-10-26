@@ -9,7 +9,12 @@ way a live stream is ingested.
 
 Pacing: ``speed=None`` (the eval default) offers frames as fast as the ingest
 queue accepts them -- under the lossless lane the producer waits, nothing is
-dropped; ``speed=1.0`` sleeps by header-stamp deltas like the replayer.
+dropped; ``speed=1.0`` offers each frame at its header stamp on an absolute
+schedule anchored at the first frame (so the reader's own time never
+accumulates into the pace). A frame the reader delivers after its deadline is
+counted as late with its lag (``stats()["pace"]``), and the completion log
+says when the pace was not held: a bz2-compressed bag decompresses slower
+than real time on most machines, and then "1x" is not 1x.
 
 Poses in bags are already in the OpenCV camera convention (ROS optical frames),
 so ``SourceContext.apply_camera_flip`` is ignored here (logged once).
@@ -27,6 +32,9 @@ from rtsm.io.contracts import SourceContext
 from rtsm.io.ingest_frontend import WEBSOCKET_POLICY, IngestFrontEnd
 
 logger = logging.getLogger(__name__)
+
+PACE_LATE_TOL_S = 0.005        # scheduling jitter below this is not "late"
+PACE_HELD_MAX_LAG_S = 0.1      # the pace counts as held when no frame was later than this
 
 
 class BagSource:
@@ -57,6 +65,8 @@ class BagSource:
             on_session_change=ctx.on_session_change,
         )
         self._stats = BagStats()
+        self._pace_late = 0                 # frames the reader delivered after their scheduled instant (paced runs)
+        self._pace_max_lag_s = 0.0
         self._enqueued = 0
         self._admit_errors = 0
         self._error: Optional[BaseException] = None
@@ -100,7 +110,9 @@ class BagSource:
         d = self._stats.as_dict()
         d.update({"path": self._path, "enqueued": self._enqueued, "admit_errors": self._admit_errors,
                   "done": self._done.is_set(), "error": (str(self._error) if self._error else None),
-                  "refusal_codes": (list(self._error.codes) if isinstance(self._error, BagRefusal) else None)})
+                  "refusal_codes": (list(self._error.codes) if isinstance(self._error, BagRefusal) else None),
+                  "pace": {"speed": self._speed, "late_frames": int(self._pace_late), "max_lag_s": round(float(self._pace_max_lag_s), 4),
+                           "held": bool(self._speed is None or self._pace_max_lag_s <= PACE_HELD_MAX_LAG_S)}})
         return d
 
     @property
@@ -123,7 +135,8 @@ class BagSource:
 
     def _loop_impl(self) -> None:
         first = True
-        prev_stamp: Optional[int] = None
+        pace_t0: Optional[float] = None     # monotonic instant the schedule is anchored at (the first stamped frame's arrival)
+        pace_s0: int = 0                    # that frame's stamp
         for raw in iter_bag_frames(self._path, stats=self._stats, source=self._fe.source, **self._reader_kw):
             if self._stop_event.is_set():
                 break
@@ -136,12 +149,17 @@ class BagSource:
                 logger.info("[bag] topics %s | pose %s %s -> %s | tracking filter %s",
                             {k: v for k, v in (self._stats.topics or {}).items() if k != "rules" and v}, self._stats.pose_kind,
                             self._stats.world_frame, self._stats.camera_frame, "on" if self._fe.require_tracking_normal else "off (no tracking topic)")
-            if self._speed and prev_stamp is not None and raw.header.t_sensor_ns:
-                delay = (raw.header.t_sensor_ns - prev_stamp) / 1e9 / self._speed
-                deadline = time.monotonic() + max(0.0, delay)
+            if self._speed and raw.header.t_sensor_ns:
+                stamp = int(raw.header.t_sensor_ns)
+                if pace_t0 is None:
+                    pace_t0, pace_s0 = time.monotonic(), stamp
+                deadline = pace_t0 + max(0.0, (stamp - pace_s0) / 1e9) / self._speed
+                lag = time.monotonic() - deadline            # > 0: the reader is behind the schedule, nothing to wait for
+                if lag > PACE_LATE_TOL_S:
+                    self._pace_late += 1
+                    self._pace_max_lag_s = max(self._pace_max_lag_s, lag)
                 while time.monotonic() < deadline and not self._stop_event.is_set():
                     time.sleep(min(deadline - time.monotonic(), 0.1))
-            prev_stamp = raw.header.t_sensor_ns
             self._fe.last_rx_mono = time.monotonic()
             try:
                 pkt = self._fe.admit(raw)
@@ -153,3 +171,7 @@ class BagSource:
                 self._enqueued += 1
         logger.info("[bag] complete: %s frames yielded, %s enqueued, %s unpaired rgb, %s without pose",
                     self._stats.yielded, self._enqueued, self._stats.unpaired_rgb, self._stats.pose_missing)
+        if self._speed and self._pace_max_lag_s > PACE_HELD_MAX_LAG_S:
+            logger.warning("[bag] pace not held at %gx: %d of %d frames late, max lag %.2f s. The reader cannot deliver this bag at that rate "
+                           "(a bz2-compressed bag decompresses slower than real time); the receiver lines' arrival stamps show the pace that was.",
+                           self._speed, self._pace_late, self._stats.yielded, self._pace_max_lag_s)

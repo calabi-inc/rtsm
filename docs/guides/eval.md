@@ -13,10 +13,10 @@ rtsm report eval_output/fr3                             # regenerate metrics.jso
 
 ## What a run does
 
-1. Resolves the settings: the **sensor clock**, the **lossless lane** (nothing is dropped, the producer waits), the keyframe rule and the non-keyframe throttle for the chosen mode, the gate mode, and records the config fingerprint, the commit and the versions in `resolved.json`.
+1. Resolves the settings: the **sensor clock**, the ingest lane (**lossless** by default: nothing is dropped, the producer waits; or the deployed policy with `--set ingest.policy=latest`, for a timing run), the keyframe rule and the non-keyframe throttle for the chosen mode, the gate mode, and records the config fingerprint, the commit and the versions in `resolved.json`.
 2. Probes a bag first (`bag_probe.json`): topics, pose source, registration. A bag v1 cannot read is refused with the reason before any model loads (see [Reading Bags](bags.md)).
 3. Loads the models once, then for each repeat builds a fresh runtime — memory, index, gate, sweep cache, queue, pipeline, event log — through the same factory the live runner uses (`rtsm/engine.py`), with diagnostics, the ledgers and the per-drop detail (`diagnostics.track_drops`) on, so the frame line locates every candidate the filter or the selection dropped.
-4. Feeds the input through the bag source (or the replay source) as fast as the queue accepts, runs the pipeline until the source is done and the queue is empty, force-flushes every object to the run's vector store, and writes `summary.json`.
+4. Feeds the input through the bag source (or the replay source) as fast as the queue accepts, or at `--speed` times its recorded rate, runs the pipeline until the source is done and the queue is empty, force-flushes every object to the run's vector store, and writes `summary.json`.
 5. `repeats.json` collects the per-run fingerprints and counts; `identical_fingerprints` says whether N runs agreed.
 6. Writes the report over the run directories (`metrics.json` + `report.md`, below). `--no-report` skips it; `rtsm report <dir>` writes it later.
 
@@ -37,7 +37,7 @@ rtsm report eval_output/fr3                             # regenerate metrics.jso
 
 ```
 eval_output/<input>-<mode>-<stamp>/
-  resolved.json      the resolved settings, cadence, config fingerprint, commit (+ dirty flag and diff digest), versions, the model files the config names (size, sha256, or exists: false) and the hub model ids
+  resolved.json      the resolved settings, cadence, config fingerprint, commit (+ dirty flag and diff digest), versions, the model files the config names (size, sha256, or exists: false), the hub model ids, the compute (gpu, cuda, device_model, power_mode), the pacing (speed) and the ingest policy as configured and as resolved
   bag_probe.json     (bags) topics, pose source, registration
   repeats.json       fingerprints / counts / wall time per run, identical_fingerprints
   metrics.json       every metric per run + the aggregate with floors; per-object / per-cluster / per-frame records
@@ -91,7 +91,11 @@ Not supported in v1: masks from the detector (boxes only; a mask-refiner slot ex
 
 ## Options
 
-`--mode`, `--repeats`, `--out`, `--label`, `--max-frames` (bag inputs), `--max-wall-s` (abort a run and record it), `--no-report`, `--save-crops` (write each object's JPEG snapshots into `run_N/crops/`, for report renderers), plus the usual `--config` / `--profile` / `--set` overrides. Defaults live in the `eval:` block of the configuration.
+`--mode`, `--repeats`, `--out`, `--label`, `--max-frames` (bag inputs), `--max-wall-s` (abort a run and record it), `--speed` (pace the input at this multiple of its recorded rate; unset = as fast as the queue accepts), `--no-report`, `--save-crops` (write each object's JPEG snapshots into `run_N/crops/`, for report renderers), plus the usual `--config` / `--profile` / `--set` overrides. Defaults live in the `eval:` block of the configuration.
+
+## Timing run
+
+`rtsm eval RECORDING --speed 1.0 --set ingest.policy=latest` plays the recording at its own rate through the deployed lanes, so the frames the pipeline cannot keep up with are superseded exactly as on the robot. The receiver lines carry the lane drops and the transport's arrival stamps (`t_arrival_mono`, `t_arrival_wall_utc`), the dequeue line the queue wait, the frame line the stage timings; `resolved.json` names the GPU and the CUDA version torch reports, the device model and, on a Jetson, the power mode, so a latency number is tied to the machine that produced it. The memory such a run builds is the deployed one, not the lossless one: compare timing runs with timing runs. Without `--speed` a non-lossless policy drops at the reader's pace, which means nothing; the run warns. The pace is an absolute schedule from the first frame, and `summary.json`'s `source.pace` says whether it was held (`late_frames`, `max_lag_s`): a bz2-compressed bag (the TUM distribution) decompresses slower than real time on most machines, so its "1×" is not 1× and the run says so; convert such bags once (`rosbags-convert`) before a timing run.
 
 ## For tooling built on the run directory
 

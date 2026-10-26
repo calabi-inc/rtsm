@@ -619,6 +619,8 @@ def lane_drop_handler(event_sink: Optional[Callable[[Any], None]], latency_analy
                 depth_valid_frac=getattr(meta, "depth_valid_frac", None),
                 lane=getattr(meta, "lane", None),
                 rx_seq=getattr(meta, "rx_seq", None),
+                t_arrival_mono=getattr(meta, "t_arrival_mono", None),
+                t_arrival_wall_utc=getattr(meta, "t_arrival_wall", None),
             ))
         except Exception:
             logger.debug("[ingest] lane drop trace failed", exc_info=True)
