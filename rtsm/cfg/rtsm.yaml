@@ -595,7 +595,7 @@ eval:
 
 diagnostics:
   enabled: false                  # Master switch. false = zero overhead, no file created.
-  track_drops: false              # Capture per-dropped-mask detail (~10us per drop). Counts always tracked.
+  track_drops: false              # Per-dropped-mask detail with its box on the frame line (~10us + the box per drop). Counts always tracked; rtsm eval turns this on.
   event_log_path: null            # null = auto: eval_output/<YYYYMMDD_HHMMSS>/events.jsonl
                                   # "my_dir/" = auto-name inside that dir
                                   # "my_dir/run01.jsonl" = exact path (overwrites with warning if exists)

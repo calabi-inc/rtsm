@@ -43,7 +43,7 @@ class SegmentationResult:
     # Dual-confirmation metadata (populated by DualConfirmationSegmenter)
     confirmation_source: Optional[List[str]] = None   # [N] "dual" | "fastsam_only" | "yoloe_only"
     detection_labels: Optional[List[str]] = None      # [N] YOLOE label per mask (None if fastsam_only)
-    label_confidence: Optional[List[float]] = None    # [N] YOLOE detection confidence per mask
+    label_confidence: Optional[List[Optional[float]]] = None    # [N] detection confidence per mask; None = no confidence for that mask (a FastSAM-only mask under dual, an unscored external detection)
 
     # Where the detection labels come from (2026-10-05). "vocab": drawn from the vocabulary rtsm supplied (grounded
     # phrases, prompted classes, an external detector's names). "builtin": the model's own built-in vocabulary

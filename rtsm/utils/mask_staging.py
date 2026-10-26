@@ -81,7 +81,9 @@ class FilterDiagnostics:
     """Per-frame summary of why masks were dropped by run_heuristics.
 
     Counts are always populated. `drop_details` is populated only when
-    cfg.diagnostics.track_drops is true (adds ~10us per dropped mask).
+    cfg.diagnostics.track_drops is true (~10us per dropped mask, plus the
+    dropped mask's tight bbox in mask space, so the drop is located: the
+    frame line's `dropped` rows are built from it).
     """
     total_input: int = 0
     dropped_area: int = 0
@@ -305,7 +307,7 @@ def run_heuristics(
             logger.debug(f"  mask {i}: REJECT area={area} < {area_min}")
             if track_drops:
                 drop_details.append({
-                    "idx": i, "reason": "area",
+                    "idx": i, "reason": "area", "bbox": list(_compute_mask_bbox(m)),
                     "area_px": area, "area_min": area_min,
                 })
             continue
@@ -330,7 +332,7 @@ def run_heuristics(
                 )
                 if track_drops:
                     drop_details.append({
-                        "idx": i, "reason": "depth_valid",
+                        "idx": i, "reason": "depth_valid", "bbox": list(bbox),
                         "area_px": area, "coverage": float(coverage),
                         "depth_valid": float(depth_valid),
                         "depth_valid_min": float(depth_valid_min),
@@ -344,7 +346,7 @@ def run_heuristics(
                 )
                 if track_drops:
                     drop_details.append({
-                        "idx": i, "reason": "depth_spread",
+                        "idx": i, "reason": "depth_spread", "bbox": list(bbox),
                         "area_px": area, "coverage": float(coverage),
                         "depth_valid": float(depth_valid),
                         "depth_spread": float(depth_spread),

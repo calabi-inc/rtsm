@@ -66,6 +66,40 @@ class Candidate:
     detector_score: Optional[float] = None
 
 
+def detector_lists(seg) -> Tuple[Optional[list], Optional[list]]:
+    """The backend's per-mask labels and raw confidences, indexed by mask: ``detection_labels`` / ``label_confidence``
+    (dual, external) when the result has them, else ``labels`` / ``scores``. (None, None) when it reports no labels."""
+    if seg is None:
+        return None, None
+    det_labels = getattr(seg, "detection_labels", None)
+    det_conf = getattr(seg, "label_confidence", None)
+    if det_labels is None and getattr(seg, "labels", None) is not None:
+        det_labels = seg.labels
+        det_conf = ([float(s) for s in seg.scores] if getattr(seg, "scores", None) is not None else None)
+    return det_labels, det_conf
+
+
+def detector_label_score(det_labels, det_conf, idx: int) -> Tuple[Optional[str], Optional[float]]:
+    """Label and raw confidence of mask ``idx`` from ``detector_lists``: (None, None) when the backend has no label for
+    that mask (a FastSAM-only mask under dual); the confidence is None when it is missing, unparsable or NaN (unscored)."""
+    if det_labels is None or not (0 <= idx < len(det_labels)) or not det_labels[idx]:
+        return None, None
+    conf = det_conf[idx] if (det_conf and idx < len(det_conf)) else None
+    try:
+        conf = float(conf) if conf is not None else None
+    except (TypeError, ValueError):
+        conf = None
+    if conf is not None and math.isnan(conf):       # NaN = unscored in a mixed message
+        conf = None
+    return str(det_labels[idx]), conf
+
+
+def _bbox_to_rgb(bbox, sx: float = 1.0, sy: float = 1.0) -> List[int]:
+    """A mask-space (x0, y0, x1, y1) box in RGB pixel space (the identity when the masks are at RGB resolution)."""
+    x0, y0, x1, y1 = bbox
+    return [int(round(float(x0) * sx)), int(round(float(y0) * sy)), int(round(float(x1) * sx)), int(round(float(y1) * sy))]
+
+
 def apply_detection_labels(cands, seg, unscored_prior, prompt_free_primary="detector"):
     """Merge the segmentation backend's per-mask label into each candidate's scored label list.
 
@@ -89,27 +123,16 @@ def apply_detection_labels(cands, seg, unscored_prior, prompt_free_primary="dete
     """
     if seg is None:
         return
-    det_labels = getattr(seg, "detection_labels", None)
-    det_conf = getattr(seg, "label_confidence", None)
-    if det_labels is None and getattr(seg, "labels", None) is not None:
-        det_labels = seg.labels
-        det_conf = ([float(s) for s in seg.scores] if getattr(seg, "scores", None) is not None else None)
+    det_labels, det_conf = detector_lists(seg)
     if det_labels is None:
         return
     builtin = (getattr(seg, "label_source", None) == "builtin") and prompt_free_primary == "classifier"
     for c in cands:
         src_idx = c.stats.idx  # original mask index from segmentation output
-        if not (src_idx < len(det_labels) and det_labels[src_idx]):
+        det_label, raw_conf = detector_label_score(det_labels, det_conf, int(src_idx))
+        if det_label is None:
             continue
-        det_label = det_labels[src_idx]
-        raw_conf = det_conf[src_idx] if (det_conf and src_idx < len(det_conf)) else None
-        try:
-            raw_conf = float(raw_conf) if raw_conf is not None else None
-        except (TypeError, ValueError):
-            raw_conf = None
-        if raw_conf is not None and math.isnan(raw_conf):       # NaN = unscored in a mixed message
-            raw_conf = None
-        c.detector_label = str(det_label)
+        c.detector_label = det_label
         c.detector_score = raw_conf
         if builtin:
             continue
@@ -156,9 +179,12 @@ def cut_judgment_crop(rgb: np.ndarray, x0: int, y0: int, x1: int, y1: int,
     return hires
 
 
-def _mask_stats_dict(st: Any) -> Optional[Dict[str, Any]]:
+def _mask_stats_dict(st: Any, sx: float = 1.0, sy: float = 1.0, mask_hw: Optional[Tuple[int, int]] = None) -> Optional[Dict[str, Any]]:
     """The MaskStats numbers for an `obs` line (no arrays: plane_normal_cam is
-    left out; bbox / centroid_px become lists). None without stats."""
+    left out; bbox / centroid_px become lists). None without stats. ``bbox`` and
+    ``area_px`` are in mask space; ``bbox_rgb`` is the box scaled by (sx, sy) into
+    RGB pixel space and ``mask_hw`` the mask grid (ledger schema 2); centroid_px
+    is already RGB space (scaled in place by the pipeline)."""
     if st is None:
         return None
 
@@ -176,6 +202,8 @@ def _mask_stats_dict(st: Any) -> Optional[Dict[str, Any]]:
     return {
         "area_px": (int(getattr(st, "area_px", 0) or 0)),
         "bbox": ([int(v) for v in bbox] if bbox is not None else None),
+        "bbox_rgb": (_bbox_to_rgb(bbox, sx, sy) if bbox is not None else None),
+        "mask_hw": ([int(mask_hw[0]), int(mask_hw[1])] if mask_hw is not None else None),
         "coverage": f("coverage"),
         "border_fraction": f("border_fraction"),
         "depth_valid": f("depth_valid"),
@@ -201,6 +229,9 @@ class ScoringTraceEntry:
     bbox_area_norm: float
     confirmation_source: Optional[str]   # "dual" | "yoloe_only" | "fastsam_only" | None
     selected_topk: bool                  # True for candidates that survived the top-K cut
+    bbox: Optional[Tuple[int, int, int, int]] = None   # MaskStats.bbox (mask space)
+    dropped_by: Optional[str] = None     # why it did not reach association: "dedup" | "topk"; None when selected
+    dup_of: Optional[int] = None         # dedup: the mask_idx of the kept candidate it duplicated
 
 
 @dataclass
@@ -610,7 +641,7 @@ class Pipeline:
 
         t_ledger_start = time.perf_counter()
         if obs_records:
-            self._write_obs_lines(pkt, obs_records)
+            self._write_obs_lines(pkt, obs_records, mask_to_rgb=(mask_to_rgb_sx, mask_to_rgb_sy), mask_hw=select_hw)
         t_ledger_end = time.perf_counter()
 
         # ---- Analytics collection (never kills pipeline) ----
@@ -767,6 +798,9 @@ class Pipeline:
                     n_objects_confirmed=n_conf,
                     t_sensor_ns=(int(pkt.time.t_sensor_ns)
                                  if pkt is not None and pkt.time.t_sensor_ns is not None else None),
+                    rgb_hw=[int(snap.rgb.shape[0]), int(snap.rgb.shape[1])],
+                    mask_hw=[int(select_hw[0]), int(select_hw[1])],
+                    dropped=self._dropped_rows(fd, st, seg_result, mask_to_rgb_sx, mask_to_rgb_sy),
                     timing_ms={
                         "segmentation": (t_seg_end - t_seg_start) * 1000.0,
                         "heuristics": (t_heur_end - t_heur_start) * 1000.0,
@@ -819,11 +853,14 @@ class Pipeline:
         except Exception:
             logger.debug("view ledger: line skipped", exc_info=True)
 
-    def _write_obs_lines(self, pkt: Optional[FramePacket], records: List[Dict[str, Any]]) -> None:
+    def _write_obs_lines(self, pkt: Optional[FramePacket], records: List[Dict[str, Any]], *,
+                         mask_to_rgb: Tuple[float, float] = (1.0, 1.0), mask_hw: Optional[Tuple[int, int]] = None) -> None:
         """P2 observation ledger: one `obs` line per associator record, with the
         frame context from the packet (ids, epoch, lane, keyframe origin, the
-        post-flip camera pose). No-op when the ledgers are off. Never raises
-        into the processing path; a bad record loses its own line only."""
+        post-flip camera pose). ``mask_to_rgb`` / ``mask_hw`` give the mask block
+        its RGB-space box and grid (ledger schema 2). No-op when the ledgers are
+        off. Never raises into the processing path; a bad record loses its own
+        line only."""
         if not self._event_log.ledgers_enabled or pkt is None or not records:
             return
         try:
@@ -878,10 +915,39 @@ class Pipeline:
                     detector_label=getattr(c, "detector_label", None),
                     detector_score=(float(c.detector_score) if getattr(c, "detector_score", None) is not None else None),
                     priority=float(getattr(c, "priority", 0.0) or 0.0),
-                    mask=_mask_stats_dict(st),
+                    mask=_mask_stats_dict(st, mask_to_rgb[0], mask_to_rgb[1], mask_hw),
                 ))
             except Exception:
                 logger.debug("observation ledger: line skipped", exc_info=True)
+
+    def _dropped_rows(self, fd: Any, st: Any, seg: Any, sx: float = 1.0, sy: float = 1.0) -> List[Dict[str, Any]]:
+        """Every candidate of this frame that did not reach association, located (trace schema_version 4): the mask
+        filter's drops (stage "filter"; reason area | depth_valid | depth_spread; present only under
+        diagnostics.track_drops, which `rtsm eval` turns on) and the selection's (stage "select"; reason dedup, with
+        dup_of = the kept candidate's mask index, or topk; always present). bbox is in RGB pixel space; priority is the
+        selection priority (None for filter drops, scored after the filter); detector_label / detector_score are the
+        backend's own for that mask index (None when it has none). With the frame's obs lines this covers every raw
+        mask: #dropped + #obs == n_masks_raw."""
+        det_labels, det_conf = detector_lists(seg)
+        rows: List[Dict[str, Any]] = []
+        for d in (getattr(fd, "drop_details", None) or []):
+            idx = int(d.get("idx", -1))
+            label, score = detector_label_score(det_labels, det_conf, idx)
+            bb = d.get("bbox")
+            rows.append({"idx": idx, "stage": "filter", "reason": str(d.get("reason")),
+                         "bbox": (_bbox_to_rgb(bb, sx, sy) if bb is not None else None), "priority": None, "dup_of": None,
+                         "detector_label": label, "detector_score": score,
+                         **{k: v for k, v in d.items() if k not in ("idx", "reason", "bbox")}})
+        for e in (getattr(st, "entries", None) or []):
+            if e.selected_topk or not e.dropped_by:
+                continue
+            label, score = detector_label_score(det_labels, det_conf, int(e.mask_idx))
+            rows.append({"idx": int(e.mask_idx), "stage": "select", "reason": str(e.dropped_by),
+                         "bbox": (_bbox_to_rgb(e.bbox, sx, sy) if e.bbox is not None else None), "priority": float(e.priority),
+                         "dup_of": (int(e.dup_of) if e.dup_of is not None else None), "detector_label": label, "detector_score": score,
+                         "confirmation_source": e.confirmation_source})
+        rows.sort(key=lambda r: r["idx"])
+        return rows
 
     def _trace_dequeue(self, pkt: Optional[FramePacket], t_deq: float, outcome: str, reason: str,
                        gate_shadow: Optional[str] = None) -> None:
@@ -1101,6 +1167,7 @@ class Pipeline:
                 bbox_area_norm=float(bbox_n),
                 confirmation_source=src,
                 selected_topk=False,  # filled in at the end after dedup
+                bbox=tuple(int(v) for v in s.bbox),
             ))
 
         # Scoring diagnostics: log all candidates ranked by priority
@@ -1217,6 +1284,7 @@ class Pipeline:
         use_mask_iou = bool(self.cfg.get("staging",{}).get("dedup_use_mask", False))  # off by default now
 
         kept: List[Candidate] = []
+        dup_of: Dict[int, int] = {}          # suppressed mask_idx -> the kept candidate's mask_idx
         for c in cands:
             suppress = False
             for k in kept:
@@ -1233,14 +1301,22 @@ class Pipeline:
                         break
             if not suppress:
                 kept.append(c)
+            else:
+                dup_of[int(c.stats.idx)] = int(k.stats.idx)
 
         final = kept[:topK]
 
-        # Mark which trace entries actually survived dedup + topK
+        # Mark which trace entries actually survived dedup + topK, and why the others did not
         selected_mask_idx = {int(c.stats.idx) for c in final}
+        cut_mask_idx = {int(c.stats.idx) for c in kept[topK:]}
         for entry in trace_entries:
             if entry.mask_idx in selected_mask_idx:
                 entry.selected_topk = True
+            elif entry.mask_idx in cut_mask_idx:
+                entry.dropped_by = "topk"
+            elif entry.mask_idx in dup_of:
+                entry.dropped_by = "dedup"
+                entry.dup_of = dup_of[entry.mask_idx]
         self._last_scoring_trace = ScoringTrace(
             n_candidates=len(trace_entries),
             n_selected=len(final),
