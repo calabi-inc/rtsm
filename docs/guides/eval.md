@@ -43,7 +43,7 @@ eval_output/<input>-<mode>-<stamp>/
   metrics.json       every metric per run + the aggregate with floors; per-object / per-cluster / per-frame records
   report.md          the number sheet
   run_1/
-    events.jsonl     the frame-flow trace + the pose / obs / view / mem ledgers (schema 4, ledgers schema 3)
+    events.jsonl     the frame-flow trace + the pose / obs / view / mem ledgers (schema 4, ledgers schema 4)
     summary.json     counts (receiver decisions, dequeue outcomes, gate shadows), the memory (every object in the /objects shape + the fingerprint), latency and segmentation aggregates, the source's statistics
     faiss/           this run's vector store
     crops/           (--save-crops) the memory's per-object JPEG snapshots, <id>/<k>.jpg + index.json
@@ -91,7 +91,7 @@ Not supported in v1: masks from the detector (boxes only; a mask-refiner slot ex
 
 ## Options
 
-`--mode`, `--repeats`, `--out`, `--label`, `--max-frames` (bag inputs), `--max-wall-s` (abort a run and record it), `--speed` (pace the input at this multiple of its recorded rate; unset = as fast as the queue accepts), `--no-report`, `--save-crops` (write each object's JPEG snapshots into `run_N/crops/`, for report renderers), plus the usual `--config` / `--profile` / `--set` overrides. Defaults live in the `eval:` block of the configuration.
+`--mode`, `--repeats`, `--out`, `--label`, `--max-frames` (bag inputs), `--max-wall-s` (abort a run and record it), `--speed` (pace the input at this multiple of its recorded rate; unset = as fast as the queue accepts), `--no-report`, `--save-crops` (write each object's JPEG snapshots into `run_N/crops/`, for report renderers), `--save-masks` (each selected candidate's mask on its `obs` line as COCO compressed RLE, for label export; about 0.3–2 KB per observation), plus the usual `--config` / `--profile` / `--set` overrides. Defaults live in the `eval:` block of the configuration.
 
 ## Timing run
 
@@ -99,4 +99,4 @@ Not supported in v1: masks from the detector (boxes only; a mask-refiner slot ex
 
 ## For tooling built on the run directory
 
-Other tools, including Calabi's paid compare, build on three things that are versioned and changelogged: the run-directory layout above, the ledger schema (3) and the `metrics_schema` in `metrics.json`, and the modules `rtsm.evaluation.metrics` (`MetricParams`, `compute_metrics`, `object_tracks`, `leader_clusters`), `rtsm.evaluation.report` (`run_dirs`, `run_metrics`, `aggregate`, `render_markdown`, `write_report`) and `rtsm.evaluation.ledger` (`read_events`, `by_kind`). A computation a tool needs that is missing here belongs in these modules, not in the tool.
+Other tools, including Calabi's paid compare, build on three things that are versioned and changelogged: the run-directory layout above, the ledger schema (4) and the `metrics_schema` in `metrics.json`, and the modules `rtsm.evaluation.metrics` (`MetricParams`, `compute_metrics`, `object_tracks`, `leader_clusters`), `rtsm.evaluation.report` (`run_dirs`, `run_metrics`, `aggregate`, `render_markdown`, `write_report`) and `rtsm.evaluation.ledger` (`read_events`, `by_kind`). A computation a tool needs that is missing here belongs in these modules, not in the tool.

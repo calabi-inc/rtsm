@@ -10,6 +10,7 @@ import cv2
 from PIL import Image
 
 from rtsm.core.frame_gate import FrameQualityGate
+from rtsm.utils.rle import mask_to_rle
 from rtsm.utils.mask_staging import run_heuristics, MaskStats, FilterDiagnostics
 from rtsm.utils.prepare_ann import prepare_ann
 from rtsm.utils.periodic_logger import PeriodicLogger
@@ -179,12 +180,15 @@ def cut_judgment_crop(rgb: np.ndarray, x0: int, y0: int, x1: int, y1: int,
     return hires
 
 
-def _mask_stats_dict(st: Any, sx: float = 1.0, sy: float = 1.0, mask_hw: Optional[Tuple[int, int]] = None) -> Optional[Dict[str, Any]]:
+def _mask_stats_dict(st: Any, sx: float = 1.0, sy: float = 1.0, mask_hw: Optional[Tuple[int, int]] = None,
+                     rle: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
     """The MaskStats numbers for an `obs` line (no arrays: plane_normal_cam is
     left out; bbox / centroid_px become lists). None without stats. ``bbox`` and
     ``area_px`` are in mask space; ``bbox_rgb`` is the box scaled by (sx, sy) into
     RGB pixel space and ``mask_hw`` the mask grid (ledger schema 2); centroid_px
-    is already RGB space (scaled in place by the pipeline)."""
+    is already RGB space (scaled in place by the pipeline). ``rle`` (ledger
+    schema 4) is the mask itself as COCO compressed RLE at mask resolution,
+    present only under diagnostics.save_masks."""
     if st is None:
         return None
 
@@ -199,7 +203,7 @@ def _mask_stats_dict(st: Any, sx: float = 1.0, sy: float = 1.0, mask_hw: Optiona
 
     bbox = getattr(st, "bbox", None)
     cpx = getattr(st, "centroid_px", None)
-    return {
+    d: Dict[str, Any] = {
         "area_px": (int(getattr(st, "area_px", 0) or 0)),
         "bbox": ([int(v) for v in bbox] if bbox is not None else None),
         "bbox_rgb": (_bbox_to_rgb(bbox, sx, sy) if bbox is not None else None),
@@ -213,6 +217,9 @@ def _mask_stats_dict(st: Any, sx: float = 1.0, sy: float = 1.0, mask_hw: Optiona
         "planar_rms_m": f("planar_rms_m"),
         "centroid_px": ([float(cpx[0]), float(cpx[1])] if cpx is not None else None),
     }
+    if rle is not None:
+        d["rle"] = rle
+    return d
 
 
 @dataclass
@@ -334,6 +341,8 @@ class Pipeline:
                 enabled=bool(diag_cfg.get("enabled", False)),
                 configured_path=diag_cfg.get("event_log_path"),
             )
+        # diagnostics.save_masks (ledger schema 4, B4): each selected candidate's mask on its obs line as COCO compressed RLE
+        self._save_masks = bool((cfg.get("diagnostics") or {}).get("save_masks", False))
         # Always-present attrs (populated each frame when set; default to None)
         self._last_filter_diagnostics: Optional[FilterDiagnostics] = None
         self._last_scoring_trace: Optional[ScoringTrace] = None
@@ -901,6 +910,10 @@ class Pipeline:
                 if bin_of is not None and p_cam is not None and range_m:
                     view_bin = bin_of(np.asarray(p_cam, dtype=np.float32) / range_m)
                 topk = getattr(c, "label_topk", None) or []
+                rle = None
+                if self._save_masks:
+                    m = getattr(c, "mask", None)
+                    rle = mask_to_rle(m) if m is not None else None
                 self._event_log.write(ObservationEvent(
                     **ctx,
                     cand_idx=int(getattr(st, "idx", -1)),
@@ -922,7 +935,7 @@ class Pipeline:
                     detector_label=getattr(c, "detector_label", None),
                     detector_score=(float(c.detector_score) if getattr(c, "detector_score", None) is not None else None),
                     priority=float(getattr(c, "priority", 0.0) or 0.0),
-                    mask=_mask_stats_dict(st, mask_to_rgb[0], mask_to_rgb[1], mask_hw),
+                    mask=_mask_stats_dict(st, mask_to_rgb[0], mask_to_rgb[1], mask_hw, rle=rle),
                 ))
             except Exception:
                 logger.debug("observation ledger: line skipped", exc_info=True)

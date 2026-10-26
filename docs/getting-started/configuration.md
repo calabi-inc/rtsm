@@ -731,6 +731,7 @@ slam:
 diagnostics:
   enabled: false        # master switch: false = zero overhead, no file
   track_drops: false    # per-dropped-mask detail (reason + box) on the frame line; rtsm eval turns it on
+  save_masks: false     # each selected candidate's mask on its obs line as COCO compressed RLE; rtsm eval --save-masks
   event_log_path: null  # null = eval_output/<timestamp>/events.jsonl
   ledgers: false        # P2: pose ledger (one line per sensor frame) in the same file
   ledger_format: jsonl  # jsonl | parquet (converted at close; pip install "rtsm[eval]")

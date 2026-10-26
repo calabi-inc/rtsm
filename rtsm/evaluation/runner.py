@@ -76,6 +76,7 @@ class EvalOptions:
     report: bool = True                      # write metrics.json + report.md after the repeats
     save_crops: bool = False                 # write the memory's per-object JPEG snapshots into run_N/crops/
     speed: Optional[float] = None            # pace the input at this multiple of its recorded rate (None = as fast as the queue accepts)
+    save_masks: bool = False                 # each selected candidate's mask on its obs line as COCO compressed RLE (diagnostics.save_masks)
 
 
 @dataclass
@@ -114,6 +115,7 @@ class ResolvedEval:
     cuda: Optional[str] = None               # the CUDA version torch was built with; None on CPU
     device_model: Optional[str] = None       # /proc/device-tree/model (a Jetson's board name); None elsewhere
     power_mode: Optional[str] = None         # a Jetson's nvpmodel status line ("pmode:0000 fmode:quiet"); None elsewhere
+    save_masks: bool = False                 # the obs lines carry each selected candidate's mask as COCO compressed RLE (ledger schema 4)
 
 
 def input_kind(path: str | os.PathLike) -> str:
@@ -318,6 +320,7 @@ def resolve_eval(cfg: dict, opts: EvalOptions) -> ResolvedEval:
         git_dirty=git_dirty, tree_digest=tree_digest,
         model_files=_model_files(cfg), hf_models=_hf_models(cfg),
         speed=speed, policy_configured=str(lane_cfg.configured_policy), **_platform_facts(),
+        save_masks=bool(opts.save_masks or diag.get("save_masks", False)),
     )
 
 
@@ -329,7 +332,7 @@ def configure_run(cfg: dict, resolved: ResolvedEval, run_dir: Path) -> dict:
     c = copy.deepcopy(cfg)
     c.setdefault("vectors", {}).setdefault("faiss", {})["index_path"] = str(run_dir / "faiss" / "index.flatip")
     c["diagnostics"] = {**(c.get("diagnostics") or {}), "enabled": True, "event_log_path": str(run_dir / "events.jsonl"),
-                        "ledgers": True, "ledger_format": resolved.ledger_format, "track_drops": True}
+                        "ledgers": True, "ledger_format": resolved.ledger_format, "track_drops": True, "save_masks": bool(resolved.save_masks)}
     c.setdefault("eval", {})["gate_mode"] = resolved.gate_mode
     c.setdefault("visualization", {})["enable"] = False
     c.setdefault("mcp", {})["enable"] = False
@@ -693,6 +696,8 @@ def build_parser():
     ap.add_argument("--label", type=str, default=None, help="name for the output directory instead of the input's")
     ap.add_argument("--save-crops", action="store_true",
                     help="write the memory's per-object JPEG snapshots into run_N/crops/ (+ index.json) for report renderers")
+    ap.add_argument("--save-masks", action="store_true",
+                    help="write each selected candidate's mask on its obs line as COCO compressed RLE at mask resolution (diagnostics.save_masks; about 0.3-2 KB per observation)")
     ap.add_argument("--no-report", action="store_true", help="do not write metrics.json + report.md after the repeats (`rtsm report <dir>` writes them later)")
     add_config_arguments(ap)
     return ap
@@ -717,6 +722,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         report=(False if args.no_report else bool(ev.get("report", True))),
         save_crops=bool(getattr(args, "save_crops", False)),
         speed=args.speed,
+        save_masks=bool(getattr(args, "save_masks", False)),
     )
     if not Path(opts.input).exists():
         ap.error(f"input not found: {opts.input}")
