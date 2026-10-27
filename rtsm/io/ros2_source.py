@@ -54,8 +54,9 @@ from rtsm.io.bag_reader import (
     _Pairer, _confidence_encoded, _depth_encoded, _info_at, _intrinsics_for, _registration_check, _rgb_encoded, _stamp_ns,
 )
 from rtsm.io.contracts import CONVENTION_OPENCV, POSE_FMT_PREPARED, FrameHeader, RawFrame, SourceContext
+from rtsm.io.detections import adapter_for
 from rtsm.io.ingest_frontend import WEBSOCKET_POLICY, IngestFrontEnd
-from rtsm.io.tf_buffer import TfBuffer, TfLookupError, norm_frame
+from rtsm.io.tf_buffer import TfBuffer, TfLookupError, make_T, norm_frame
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +70,8 @@ LIVE_PAIR_BUFFER = 32       # unpaired RGB (and depth) messages a live stream ma
 LIVE_DEPTH_GRACE_S = 1.0    # depth older than the newest depth minus (tolerance + grace) is dropped while no RGB waits
 LIVE_TF_HORIZON_S = 10.0    # TF samples older than this behind a hop's newest sample are dropped on a live stream
 DEFAULT_TF_WAIT_S = 0.5     # how long a resolved pair waits for its TF (measured on the newest TF stamp seen)
-_LIVE_ROLES = ("rgb", "depth", "rgb_info", "depth_info", "confidence", "tf", "tf_static", "odom", "tracking", "seq")
+_LIVE_ROLES = ("rgb", "depth", "rgb_info", "depth_info", "confidence", "tf", "tf_static", "odom", "tracking", "seq", "detections")
+LIVE_DETECTIONS_WAIT_S = 0.2   # a paired frame waits this long (wall) for its detections message before it goes out without one
 
 
 class Ros2Unavailable(RuntimeError):
@@ -125,7 +127,7 @@ def choose_qos(role: str, publishers: List[Any], mode: str = "auto") -> QosChoic
     else:
         reliability = mode
     durability = "transient_local" if role == "tf_static" else "volatile"
-    depth = 100 if role in ("rgb", "depth", "confidence") else 200 if role in ("tf", "tf_static") else 10
+    depth = 100 if role in ("rgb", "depth", "confidence", "detections") else 200 if role in ("tf", "tf_static") else 10
     return QosChoice(reliability=reliability, durability=durability, depth=depth, offered=offered)
 
 
@@ -149,7 +151,8 @@ class Ros2Ingress:
     def __init__(self, fe: IngestFrontEnd, stats: BagStats, tm: TopicMap, msgtypes: Dict[str, str], *,
                  pair_tolerance_s: float = 0.02, tf_extrapolation_s: float = 0.05, tf_wait_s: float = DEFAULT_TF_WAIT_S,
                  world_frame: Optional[str] = None, camera_frame: Optional[str] = None, assume_aligned: bool = False,
-                 require_tracking_cfg: bool = True, session_id: Optional[str] = None, setting: str = "io.ros2") -> None:
+                 require_tracking_cfg: bool = True, session_id: Optional[str] = None, detections_wait_s: float = LIVE_DETECTIONS_WAIT_S,
+                 setting: str = "io.ros2") -> None:
         self._fe = fe
         self.stats = stats
         self.tm = tm
@@ -191,6 +194,14 @@ class Ros2Ingress:
         self.before_ready_dropped = 0
         self.error: Optional[BaseException] = None
         self._session_announced = False
+        # the detections topic (optional): messages wait here for the frame nearest in stamp, as in the bag reader's joiner
+        self._dets: List[Tuple[int, Any]] = []
+        self._det_wait_ns = int(float(detections_wait_s) * 1e9)
+        self._newest_rx_ns = 0                            # the newest message arrival seen: the clock the detections wait runs on
+        self._det_type: Optional[str] = msgtypes.get("detections") if tm.detections else None
+        self._det_adapter = adapter_for(self._det_type) if self._det_type else None
+        if tm.detections and self._det_adapter is None:
+            raise BagRefusal([("unsupported_detections_type", f"{tm.detections}: no detections adapter for {self._det_type}")])
         stats.topics = {**tm.as_dict(), "rules": dict(tm.rules)}
 
     # ── intake (any thread) ──
@@ -229,6 +240,7 @@ class Ros2Ingress:
                 if not self._q:
                     break
                 role, msg, rx_ns = self._q.popleft()
+            self._newest_rx_ns = max(self._newest_rx_ns, int(rx_ns))
             self._dispatch(role, msg, rx_ns)
         for stamp, pack, rx_ns, dp in self._pairer.resolve(final=final):
             if dp is None:
@@ -243,6 +255,8 @@ class Ros2Ingress:
         self._flush_pending(final=final)
         if final:
             self.stats.unpaired_depth = self._pairer.dropped_depth
+            self.stats.detections_unpaired += len(self._dets)          # the end of the stream: nothing can pair them any more
+            self._dets = []
         return self.enqueued - before
 
     # ── dispatch ──
@@ -308,6 +322,19 @@ class Ros2Ingress:
             if len(self._confs) > 64:
                 for k in sorted(self._confs)[:-64]:
                     self._confs.pop(k, None)
+            return
+        if role == "detections":
+            try:
+                s = _stamp_ns(msg.header)
+            except Exception:  # noqa: BLE001
+                s = 0
+            if s <= 0:
+                self.stats.detections_unpaired += 1
+                return
+            self._dets.append((int(s), msg))
+            while len(self._dets) > LIVE_PAIR_BUFFER:
+                self._dets.pop(0)
+                self.stats.detections_unpaired += 1
             return
         stamp = _stamp_ns(msg.header)
         if stamp <= 0:
@@ -422,10 +449,21 @@ class Ros2Ingress:
                 self.stats.pose_missing += 1
                 logger.debug("[ros2] no pose at %d: %s", stamp, e)
                 continue
+            picked = None
+            if self._det_adapter is not None:
+                picked = self._take_detections(stamp)
+                if picked is None:
+                    later = any(ds > stamp + self._pairer.tol for ds, _m in self._dets)
+                    timed_out = (self._newest_rx_ns - int(rx_ns)) >= self._det_wait_ns      # arrivals keep coming on a live stream: no wall clock needed
+                    if not (final or later or timed_out):
+                        return                               # head of line: the detector publishes after the image
+                    self.stats.frames_without_detections += 1
             self._pending.popleft()
             raw = self._build(stamp, pack, rx_ns, dp, t_wc, q_wc)
             if raw is None:
                 continue
+            if picked is not None:
+                self._attach_detections(raw, picked[1], picked[0])
             self._fe.last_rx_mono = time.monotonic()
             try:
                 pkt = self._fe.admit(raw)
@@ -436,6 +474,47 @@ class Ros2Ingress:
             if pkt is not None and self._fe.enqueue(pkt):
                 self.enqueued += 1
             self.stats.yielded += 1
+
+    # ── the detections topic ──
+
+    def _take_detections(self, stamp: int) -> Optional[Tuple[int, Any]]:
+        """The buffered detections message nearest in stamp within the pair tolerance, removed; messages older than every frame
+        still to come are dropped and counted (frames are emitted in stamp order)."""
+        tol = self._pairer.tol
+        best = None
+        for i, (ds, _m) in enumerate(self._dets):
+            d = abs(ds - stamp)
+            if d <= tol and (best is None or d < best[0]):
+                best = (d, i)
+        picked = self._dets.pop(best[1]) if best is not None else None
+        keep = [(ds, m) for ds, m in self._dets if ds >= stamp - tol]
+        self.stats.detections_unpaired += len(self._dets) - len(keep)
+        self._dets = keep
+        return picked
+
+    def _tf_lookup(self, frame_id: str, t_ns: int) -> np.ndarray:
+        """T_cam_from_frame at t for the 3-D adapter: the camera pose inverted, composed with world <- frame."""
+        fid = norm_frame(frame_id)
+        if fid == self._cam:
+            return np.eye(4)
+        T_wc = make_T(*self._buf.lookup(self._world, self._cam, t_ns))
+        return np.linalg.inv(T_wc) @ self._buf.lookup_T(self._world, fid, t_ns)
+
+    def _attach_detections(self, raw: RawFrame, msg: Any, stamp: int) -> None:
+        h = raw.header
+        try:
+            det = self._det_adapter.convert(msg, self._det_type, rgb_hw=tuple(h.extra.get("rgb_hw") or (h.rgb.height, h.rgb.width)),
+                                            intrinsics=h.intrinsics, tf_lookup=self._tf_lookup, t_sensor_ns=stamp, source=str(self.tm.detections))
+        except Exception as e:  # noqa: BLE001 -- a bad message is counted, never fatal
+            logger.warning("[ros2] detections at %d not converted: %s", stamp, e)
+            self.stats.detections_errors += 1
+            return
+        h.extra["detections"] = det
+        h.extra["detections_dt_ms"] = round(abs(stamp - int(h.t_sensor_ns)) / 1e6, 3)
+        self.stats.detections_paired += 1
+        self.stats.detections_scoring[det.scoring] = self.stats.detections_scoring.get(det.scoring, 0) + 1
+        for k, v in det.n_dropped.items():
+            self.stats.detections_dropped[k] = self.stats.detections_dropped.get(k, 0) + int(v)
 
     def _build(self, stamp: int, pack: _RgbPack, rx_ns: int, dp: Tuple[int, Any], t_wc, q_wc) -> Optional[RawFrame]:
         try:
@@ -466,7 +545,7 @@ class Ros2Ingress:
 
     def as_dict(self) -> Dict[str, Any]:
         d = self.stats.as_dict()
-        d.update({"ready": self._ready, "enqueued": self.enqueued, "admit_errors": self.admit_errors,
+        d.update({"ready": self._ready, "enqueued": self.enqueued, "admit_errors": self.admit_errors, "detections_buffered": len(self._dets),
                   "before_ready_dropped": self.before_ready_dropped, "pending": len(self._pending), "queued": self.queued(),
                   "session_id": self.session_id, "error": (str(self.error) if self.error else None),
                   "refusal_codes": (list(self.error.codes) if isinstance(self.error, BagRefusal) else None)})
@@ -577,12 +656,13 @@ class Ros2Source:
                  camera_frame: Optional[str] = None, assume_aligned: bool = False, pair_tolerance_s: float = 0.02,
                  tf_extrapolation_s: float = 0.05, tf_wait_s: float = DEFAULT_TF_WAIT_S, qos: str = "auto", node_name: str = "rtsm",
                  discovery_timeout_s: float = 10.0, ready_timeout_s: float = 10.0, session_id: Optional[str] = None,
-                 source_name: str = "ros2") -> None:
+                 detections_wait_s: float = LIVE_DETECTIONS_WAIT_S, source_name: str = "ros2") -> None:
         if qos not in QOS_MODES:
             raise ValueError(f"io.ros2.qos must be one of {QOS_MODES}, got {qos!r}")
         self._ctx = ctx
         self._opts = dict(topics=topics, world_frame=world_frame, camera_frame=camera_frame, assume_aligned=bool(assume_aligned),
-                          pair_tolerance_s=float(pair_tolerance_s), tf_extrapolation_s=float(tf_extrapolation_s), tf_wait_s=float(tf_wait_s))
+                          pair_tolerance_s=float(pair_tolerance_s), tf_extrapolation_s=float(tf_extrapolation_s), tf_wait_s=float(tf_wait_s),
+                          detections_wait_s=float(detections_wait_s))
         self._qos_mode = qos
         self._node_name = node_name
         self._discovery_timeout_s = float(discovery_timeout_s)
@@ -686,13 +766,20 @@ class Ros2Source:
                 self._fe, self._stats, tm, self._graph.msgtypes(), pair_tolerance_s=self._opts["pair_tolerance_s"],
                 tf_extrapolation_s=self._opts["tf_extrapolation_s"], tf_wait_s=self._opts["tf_wait_s"], world_frame=self._opts["world_frame"],
                 camera_frame=self._opts["camera_frame"], assume_aligned=self._opts["assume_aligned"],
-                require_tracking_cfg=bool(self._ctx.require_tracking_normal), session_id=self._session_id)
+                require_tracking_cfg=bool(self._ctx.require_tracking_normal), session_id=self._session_id,
+                detections_wait_s=self._opts["detections_wait_s"])
             ingress = self._ingress
             for role in _LIVE_ROLES:
                 topic = getattr(tm, role)
                 if not topic:
                     continue
-                msg_cls = get_message(self._graph.msgtypes()[role])
+                try:
+                    msg_cls = get_message(self._graph.msgtypes()[role])
+                except Exception as e:  # noqa: BLE001 -- vision_msgs may be absent from the environment: the stream still runs without the role
+                    if role == "detections":
+                        logger.warning("[ros2] detections topic %s skipped: %s (install vision_msgs to use it)", topic, e)
+                        continue
+                    raise
                 choice = self._graph.qos[role]
                 cb = (lambda r: (lambda m: ingress.on_message(r, m, time.time_ns())))(role)
                 self._subs.append(self._node.create_subscription(msg_cls, topic, cb, _qos_profile(choice)))

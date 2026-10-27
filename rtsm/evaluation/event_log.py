@@ -133,6 +133,7 @@ Line kinds (schema_version 4: 2 = P1 task 0 2026-09-09, 3 = the P2 ledgers 2026-
             `mask` block may carry `rle` ({"size": [h, w], "counts": str}, the
             COCO compressed form pycocotools writes; rtsm/utils/rle.py encodes
             and decodes it) when diagnostics.save_masks is on; absent otherwise.
+            Schema 5 (2026-10-26, B5): the det kind above.
   mem       LEDGER (schema 3, 2026-10-26, B2): one per change the working
             memory makes to an object ON ITS OWN, so a reader can tell why an
             id is gone or moved. action expire (a proto past its TTL is
@@ -152,6 +153,22 @@ Line kinds (schema_version 4: 2 = P1 task 0 2026-09-09, 3 = the P2 ledgers 2026-
             is the last frame processed before it applied). A reset / session
             freeze writes no mem lines (the session ledger has them). Written
             by the pipeline from the memory's event sink.
+  det       LEDGER (schema 5, 2026-10-26, B5): one per PROCESSED frame and
+            source, every raw detection BEFORE the mask filter, the
+            selection and association. source "backend": the segmentation
+            backend's own output for the frame (name = the backend; idx = the
+            mask / box index the obs line's cand_idx and the frame line's
+            dropped rows use, so backend rows = obs rows + dropped rows; label
+            and score as the backend reports them; bbox_rgb from its boxes, or
+            the mask's tight box scaled to RGB; confirmation under dual).
+            source "topic": the recording's or the live stream's own
+            detections topic as paired to this frame (name = the topic;
+            msgtype, dt_ms = |message stamp - frame stamp|, the adapter's
+            drops; id and n_hypotheses per row; score None when the detector
+            reports none), whatever backend ran, so a model's detections and a
+            customer's sit side by side on the same frame. Under the external
+            backend the two lines agree on boxes: the backend line is what
+            entered the filter.
 
 A/A comparator contract: compare the receiver and dequeue streams PER (KIND,
 SOURCE) as ordered sequences of (frame_seq, t_sensor_ns, decision/outcome,
@@ -222,13 +239,16 @@ DQ_REASON_POSE_CONVERSION = "pose_conversion_failed"
 
 # ---- Ledgers (P2). Additive kinds with their own schema number in the meta
 # line's `ledgers` block (frozen at G2-C). Stage A = pose; obs / view follow.
-LEDGER_SCHEMA = 4
+LEDGER_SCHEMA = 5
 LEDGER_FORMATS = ("jsonl", "parquet")
 KIND_POSE = "pose"
 KIND_OBS = "obs"
 KIND_VIEW = "view"
 KIND_MEM = "mem"
-LEDGER_KINDS = (KIND_POSE, KIND_OBS, KIND_VIEW, KIND_MEM)
+KIND_DET = "det"
+LEDGER_KINDS = (KIND_POSE, KIND_OBS, KIND_VIEW, KIND_MEM, KIND_DET)
+DET_BACKEND = "backend"
+DET_TOPIC = "topic"
 MEM_EXPIRE = "expire"
 MEM_EVICT = "evict"
 MEM_CORRECT = "correct"
@@ -401,6 +421,26 @@ class MemoryEvent:
     age_s: Optional[float] = None             # seconds since the object was last seen, on the ingest clock
     lifetime_s: Optional[float] = None        # seconds since the object was created, on the ingest clock
     kind: str = "mem"
+
+
+@dataclass
+class DetectionsEvent:
+    """One line per processed frame and source (ledger schema 5): every raw detection before the mask filter, the selection
+    and association. ``source`` backend = the segmentation backend's output (idx = the index every other ledger line uses);
+    topic = the recording's or the live stream's own detections topic as paired to the frame."""
+    timestamp: float                          # time.monotonic() at the write
+    frame_seq: Optional[int]
+    t_sensor_ns: Optional[int]                # join key to the frame / obs lines
+    source: str                               # backend | topic (DET_BACKEND / DET_TOPIC)
+    name: str                                 # the backend's name, or the topic
+    n: int
+    rgb_hw: Optional[List[int]]
+    detections: List[Dict[str, Any]]          # backend: {idx, label, score, bbox_rgb, confirmation?}; topic: {idx, label, score, bbox_rgb, id, n_hypotheses}
+    scoring: Optional[str] = None             # present | absent | mixed (None without detections)
+    msgtype: Optional[str] = None             # topic: the message type
+    dt_ms: Optional[float] = None             # topic: |message stamp - frame stamp|
+    n_dropped: Optional[Dict[str, int]] = None   # topic: the adapter's drops by reason
+    kind: str = "det"
 
 
 @dataclass

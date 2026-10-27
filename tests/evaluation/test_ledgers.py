@@ -897,7 +897,7 @@ class TestParquetAllKinds:
         for r in (synth_ledger.pose_rows(4, limited=[(1, 1)]) + synth_ledger.obs_rows(3, per_frame=3)
                   + synth_ledger.view_rows(3, ids_per_frame=[[], ["obj0"], ["obj0", "obj1"]])
                   + synth_ledger.frame_flow_rows([("enqueued", "processed", "keyframe"), ("dropped:throttle", "", "")])
-                  + synth_ledger.mem_rows()):
+                  + synth_ledger.mem_rows() + synth_ledger.det_rows()):
             w.write(r)
         w.close()
         written = ledger.to_parquet(w.path)
@@ -905,5 +905,6 @@ class TestParquetAllKinds:
         assert pq.read_table(written["obs"]).num_rows == 9 and pq.read_table(written["view"]).num_rows == 3
         assert pq.read_table(written["pose"]).num_rows == 4 and pq.read_table(written["receiver"]).num_rows == 2
         assert pq.read_table(written["mem"]).num_rows == 3 and pq.read_table(written["mem"]).column("action").to_pylist() == ["expire", "evict", "correct"]
+        assert pq.read_table(written["det"]).num_rows == 2 and pq.read_table(written["det"]).column("source").to_pylist() == ["backend", "topic"]
         topk = pq.read_table(written["obs"]).column("label_topk")[0].as_py()
         assert topk[0] == {"label": "mug", "score": 0.8}

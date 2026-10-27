@@ -29,7 +29,8 @@ from rtsm.core.clock import Clock, WallClock
 from rtsm.evaluation.event_log import (
     DQ_DROPPED, DQ_FRAME_REJECTED, DQ_GATE_REJECTED, DQ_PROCESSED,
     DQ_REASON_GATE_ERROR, DQ_REASON_KEYFRAME, DQ_REASON_NO_POSE, DQ_REASON_POSE_CONVERSION,
-    DequeueEvent, EventLogWriter, FrameEvent, MemoryEvent, ObservationEvent, ViewEvent, summarize_sources,
+    DET_BACKEND, DET_TOPIC, DequeueEvent, DetectionsEvent, EventLogWriter, FrameEvent, MemoryEvent, ObservationEvent, ViewEvent,
+    summarize_sources,
 )
 from rtsm.core.frustum import FRUSTUM_MODEL_V1, frustum_view
 
@@ -93,6 +94,85 @@ def detector_label_score(det_labels, det_conf, idx: int) -> Tuple[Optional[str],
     if conf is not None and math.isnan(conf):       # NaN = unscored in a mixed message
         conf = None
     return str(det_labels[idx]), conf
+
+
+def _mask_boxes(masks: Any, rgb_hw: Optional[Any]) -> List[Optional[List[int]]]:
+    """Tight boxes of [N, H, W] masks, scaled into RGB pixel space when the masks are at another resolution; None for an empty mask."""
+    m = masks.detach().cpu().numpy() if hasattr(masks, "detach") else np.asarray(masks)
+    m = m.astype(bool)
+    if m.ndim != 3:
+        return []
+    n_, h, w = m.shape
+    sy = (float(rgb_hw[0]) / h) if (rgb_hw is not None and h) else 1.0
+    sx = (float(rgb_hw[1]) / w) if (rgb_hw is not None and w) else 1.0
+    rows_any, cols_any = m.any(axis=2), m.any(axis=1)
+    out: List[Optional[List[int]]] = []
+    for i in range(n_):
+        ys, xs = np.flatnonzero(rows_any[i]), np.flatnonzero(cols_any[i])
+        if ys.size == 0 or xs.size == 0:
+            out.append(None)
+            continue
+        out.append([int(round(xs[0] * sx)), int(round(ys[0] * sy)), int(round((xs[-1] + 1) * sx)), int(round((ys[-1] + 1) * sy))])
+    return out
+
+
+def backend_detections(seg: Any, rgb_hw: Optional[Any]) -> List[Dict[str, Any]]:
+    """The segmentation backend's raw output as det rows (ledger schema 5): idx = the mask / box index every other ledger line
+    uses, label and score as the backend reports them (None when it has none), bbox_rgb from the backend's boxes, else (or for a
+    degenerate box) the mask's tight box scaled to RGB, and the dual backend's confirmation per mask."""
+    if seg is None:
+        return []
+    labels, confs = detector_lists(seg)
+    boxes, masks = getattr(seg, "boxes", None), getattr(seg, "masks", None)
+    bx = None
+    if boxes is not None and len(boxes):
+        bx = boxes.detach().cpu().numpy() if hasattr(boxes, "detach") else np.asarray(boxes)
+        bx = np.asarray(bx, dtype=float).reshape(-1, 4)
+    n = int(bx.shape[0]) if bx is not None else (int(masks.shape[0]) if (masks is not None and len(masks)) else len(labels or []))
+    mb: Optional[List[Optional[List[int]]]] = None
+    if masks is not None and len(masks) and (bx is None or bool((bx[:, 2:] <= bx[:, :2]).any())):
+        mb = _mask_boxes(masks, rgb_hw)
+    src = getattr(seg, "confirmation_source", None)
+    rows: List[Dict[str, Any]] = []
+    for i in range(n):
+        label, score = detector_label_score(labels, confs, i)
+        b: Optional[List[int]] = None
+        if bx is not None and i < bx.shape[0] and bx[i][2] > bx[i][0] and bx[i][3] > bx[i][1]:
+            b = [int(round(float(v))) for v in bx[i][:4]]
+        elif mb is not None and i < len(mb):
+            b = mb[i]
+        row: Dict[str, Any] = {"idx": i, "label": label, "score": score, "bbox_rgb": b}
+        if src is not None and i < len(src):
+            row["confirmation"] = src[i]
+        rows.append(row)
+    return rows
+
+
+def topic_detections(det: Any) -> List[Dict[str, Any]]:
+    """A Detections object (rtsm/io/detections.py) as det rows: boxes already in RGB pixels, the top label, the score (None when
+    the detector reports none or this one is unscored), the source's id and the number of hypotheses behind the label."""
+    raw = getattr(det, "boxes_xyxy", None)
+    boxes = np.asarray(raw if raw is not None else np.zeros((0, 4)), dtype=float).reshape(-1, 4)
+    scores = getattr(det, "scores", None)
+    labels = list(getattr(det, "labels", None) or [])
+    hyps = list(getattr(det, "hypotheses", None) or [])
+    ids = list(getattr(det, "ids", None) or [])
+    rows: List[Dict[str, Any]] = []
+    for i in range(int(boxes.shape[0])):
+        sc: Optional[float] = None
+        if scores is not None and i < len(scores):
+            v = float(scores[i])
+            sc = None if v != v else v
+        rows.append({"idx": i, "label": (labels[i] if i < len(labels) else None), "score": sc, "bbox_rgb": [int(round(float(v))) for v in boxes[i][:4]],
+                     "id": (ids[i] if i < len(ids) else None), "n_hypotheses": (len(hyps[i]) if i < len(hyps) else 0)})
+    return rows
+
+
+def _scoring_of(rows: List[Dict[str, Any]]) -> Optional[str]:
+    if not rows:
+        return None
+    n = sum(1 for r in rows if r.get("score") is not None)
+    return "absent" if n == 0 else "present" if n == len(rows) else "mixed"
 
 
 def _bbox_to_rgb(bbox, sx: float = 1.0, sy: float = 1.0) -> List[int]:
@@ -526,6 +606,9 @@ class Pipeline:
         t_seg_end = time.perf_counter()
         # Store for downstream priority boost and label propagation
         self._last_seg_result = seg_result
+        # Ledger kind det (schema 5): every raw detection of this frame before the filter, the backend's and the topic's
+        if self._event_log.ledgers_enabled:
+            self._write_det_lines(pkt, snap, seg_result, str(backend))
         # Detector-label monitor (2026-08-28): tally what the PROMPTED
         # detector claims to see this frame, before any association/
         # confirmation gate can hide it — served in /stats so operators
@@ -939,6 +1022,32 @@ class Pipeline:
                 ))
             except Exception:
                 logger.debug("observation ledger: line skipped", exc_info=True)
+
+    def _write_det_lines(self, pkt: Optional[FramePacket], snap: Any, seg: Any, backend: str) -> None:
+        """Ledger kind det (schema 5): the backend's raw detections for this frame and, when the packet carries the
+        recording's or the stream's own detections, those too. Never raises into the processing path."""
+        if pkt is None or not self._event_log.ledgers_enabled:
+            return
+        try:
+            rgb = getattr(snap, "rgb", None) if snap is not None else None
+            rgb_hw = [int(rgb.shape[0]), int(rgb.shape[1])] if rgb is not None else None
+            ctx: Dict[str, Any] = dict(frame_seq=(int(pkt.time.seq) if pkt.time.seq is not None else None),
+                                       t_sensor_ns=(int(pkt.time.t_sensor_ns) if pkt.time.t_sensor_ns is not None else None), rgb_hw=rgb_hw)
+            rows = backend_detections(seg, rgb_hw)
+            self._event_log.write(DetectionsEvent(timestamp=time.monotonic(), source=DET_BACKEND, name=str(backend), n=len(rows), detections=rows,
+                                                  scoring=_scoring_of(rows), **ctx))
+            det = getattr(pkt, "detections", None)
+            if det is not None:
+                trows = topic_detections(det)
+                ds = getattr(det, "t_sensor_ns", None)
+                dt = (abs(int(ds) - int(ctx["t_sensor_ns"])) / 1e6) if (ds is not None and ctx["t_sensor_ns"] is not None) else None
+                nd = getattr(det, "n_dropped", None)
+                self._event_log.write(DetectionsEvent(timestamp=time.monotonic(), source=DET_TOPIC, name=str(getattr(det, "source", "") or "topic"),
+                                                      n=len(trows), detections=trows, scoring=getattr(det, "scoring", None),
+                                                      msgtype=getattr(det, "msgtype", None), dt_ms=(round(dt, 3) if dt is not None else None),
+                                                      n_dropped=(dict(nd) if nd else None), **ctx))
+        except Exception:
+            logger.debug("detections ledger: lines skipped", exc_info=True)
 
     def _mem_event(self, rec: Dict[str, Any]) -> None:
         """Ledger kind mem: one line per change the working memory made to an object on its own (expire / evict / correct),

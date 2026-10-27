@@ -91,7 +91,7 @@ def test_obs_line_carries_the_mask_only_when_saving(tmp_path: Path, on: bool):
     pipe._write_obs_lines(_packet(), [dict(cand=cand, outcome="no_p_cam")], mask_hw=(6, 8))
     w.close()
     rows = [json.loads(l) for l in (tmp_path / "e.jsonl").read_text(encoding="utf-8").splitlines() if l.strip()]
-    assert rows[0]["ledgers"]["schema"] == LEDGER_SCHEMA == 4
+    assert rows[0]["ledgers"]["schema"] == LEDGER_SCHEMA == 5
     obs = [r for r in rows if r["kind"] == "obs"][0]
     if on:
         rle = obs["mask"]["rle"]

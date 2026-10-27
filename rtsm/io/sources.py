@@ -113,7 +113,7 @@ def ros2_source(cfg: dict, ctx: SourceContext, **options: Any):
         tf_extrapolation_s=float(r.get("tf_extrapolation_s", 0.05)), tf_wait_s=float(r.get("tf_wait_s", 0.5)),
         qos=str(r.get("qos", "auto")), node_name=str(r.get("node_name", "rtsm")),
         discovery_timeout_s=float(r.get("discovery_timeout_s", 10.0)), ready_timeout_s=float(r.get("ready_timeout_s", 10.0)),
-        session_id=r.get("session_id"),
+        session_id=r.get("session_id"), detections_wait_s=float(r.get("detections_wait_s", 0.2)),
     )
 
 

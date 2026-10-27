@@ -38,7 +38,7 @@ Every line is one JSON object with a `kind`. The first line is `kind: "meta"`:
 | `schema_version` | 3 (2 = trace only; 3 adds the ledger kinds — additive) |
 | `created_wall_utc_s`, `created_mono_s`, `pid` | when and where the file was opened |
 | `ingest_clock`, `ingest_policy` | the resolved `ingest.clock` / `ingest.policy` of the run |
-| `ledgers` | `{"enabled": false}` or `{"enabled": true, "schema": 4, "format": "jsonl"}` |
+| `ledgers` | `{"enabled": false}` or `{"enabled": true, "schema": 5, "format": "jsonl"}` |
 
 All timestamps named `timestamp` are `time.monotonic()` at the write; `*_ns` are integer nanoseconds on the sensor clock; `*_s` are float seconds; `*_frac` are fractions in [0, 1].
 
@@ -150,6 +150,21 @@ One line per change the **working memory makes to an object on its own**, so a r
 | `t_sensor_ns`, `frame_seq` | | the processed frame current at the event; a correction arrives on another thread, so this is the last frame processed before it applied |
 
 A reset or a session freeze writes no `mem` lines (the `session` kind records those). Joined to the `obs` ledger on `object_id`, an id created and never matched again now has a stated end: expired after `lifetime_s`, evicted from the index, or alive to the end of the run.
+
+## Ledger schema 5 — `det`
+
+One line per **processed frame and source**: every raw detection before the mask filter, the selection and association, so a reader has the complete set the engine started from, not only what survived.
+
+| field | type | meaning |
+|---|---|---|
+| `source` | str | `backend`: the segmentation backend's own output for the frame · `topic`: the recording's or the live stream's detections topic as paired to the frame, whatever backend ran |
+| `name` | str | the backend's name (`grounded_sam2`, `dual`, `yoloe`, `external`, …) or the topic |
+| `n`, `rgb_hw` | | the count and the image the boxes refer to |
+| `detections[]` | list | per detection: `idx` (backend: the mask / box index the `obs` line's `cand_idx` and the `frame` line's `dropped` rows use, so backend rows = `obs` rows + `dropped` rows), `label`, `score` (`null` when the detector reports none), `bbox_rgb` (the backend's box, else the mask's tight box scaled to RGB), and `confirmation` under `dual`; topic rows add `id` and `n_hypotheses` |
+| `scoring` | str? | `present` · `absent` · `mixed` |
+| `msgtype`, `dt_ms`, `n_dropped` | | topic lines: the message type, \|message stamp − frame stamp\|, the adapter's drops by reason |
+
+Under the `external` backend the two lines agree on boxes; the backend line is what entered the filter. A model's detections and a customer's therefore sit side by side on the same frame whenever the recording carries a detections topic.
 
 ## Parquet
 
