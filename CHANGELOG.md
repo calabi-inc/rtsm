@@ -4,6 +4,9 @@ All notable changes to `rtsm`. The format follows [Keep a Changelog](https://kee
 
 ## [Unreleased]
 
+### Changed
+- Documentation site: the diagrams drawn with box-drawing characters were set in a fallback font (the self-hosted Geist Mono carried the latin subset only), so their columns did not line up; arrows and box-drawing glyphs now come from Geist and Geist Mono themselves (`docs/assets/fonts/*-symbols.woff`, loaded only by pages that use them).
+
 ## [0.3.1] - 2026-10-26
 
 The ledgers release. Everything a perception team needs to tell *why* an id is missing, moved or gone is now written by the engine itself, additively: every candidate the mask filter or the top-K cut dropped is located on the frame line with its box, the observation box is given in RGB pixel space and can carry the mask as COCO RLE, the memory records its own expiries, index evictions and pose-correction moves, and every raw detection of the backend and of a recording's own detections topic sits on the frame before anything filtered it. `rtsm eval` gains a timing run (`--speed`, the deployed ingest policy, the compute it ran on in `resolved.json`, arrival stamps on every receiver line) and the bag source paces on an absolute schedule and says whether the pace held. The live `ros2` source takes a `vision_msgs` detections topic. Ledger schema 1 → 5 and trace `schema_version` 3 → 4 over the release, every step additive (new kinds and fields, nothing renamed or removed); the memory's behaviour is unchanged on every check (the TUM fr1 fingerprint held through the five changes). No `metrics_schema` change. The `io.websocket.*` aliases still ship (removal stays at 0.4.0).
