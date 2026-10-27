@@ -12,6 +12,8 @@
 ## Install RTSM
 
 !!! note "What's new"
+    0.3.1 (October 2026): the ledgers release: located drops on the frame line, the observation box in RGB space with optional COCO RLE masks (`rtsm eval --save-masks`), the memory's own events (expire / evict / correct), every raw detection per frame (`det`), a timing run for `rtsm eval` (`--speed`, the deployed ingest policy, the compute in `resolved.json`, arrival stamps), and a `detections` role on the live `ros2` source. Ledger schema 1 → 5, all additive; the memory's behaviour is unchanged.
+
     0.3.0 (October 2026): sessions (a SLAM boundary freezes the live session, with a dashboard picker and `GET /sessions`), the `ros2` live source with an optional publisher, `rtsm eval --save-crops`, run provenance down to the weight files' hashes, and validated weight files with `segmentation.weights_policy`. The full list, with the behaviour changes a 0.2.x user should read first, is in the [changelog](https://github.com/calabi-inc/rtsm/blob/main/CHANGELOG.md); `rtsm version` prints what you have.
 
 ### Option A: pip install (recommended)
