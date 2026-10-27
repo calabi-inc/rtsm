@@ -38,6 +38,7 @@ One topic per role. Roles are found by the bag reader's rules or set under `io.r
 | `confidence` | image topic named `confidence` | a uint8 map (0 / 1 / 2) at the RGB size | no |
 | `tracking` | `std_msgs/String` named `tracking_state` | the tracking filter is on only when present | no |
 | `seq` | `std_msgs/UInt32` named `frame_seq` | the source frame id; arrival index otherwise | no |
+| `detections` | `vision_msgs/Detection2DArray` (preferred) or `Detection3DArray` | a topic of that type, or `io.ros2.topics.detections` | no; with it your detector's output is paired to each frame (nearest stamp within `pair_tolerance_s`, waiting `detections_wait_s` for a message that follows the image), recorded on the `det` ledger, and run as the memory's input under `segmentation.backend: external` |
 
 Relative topic names and frame ids with a leading slash are normalised.
 

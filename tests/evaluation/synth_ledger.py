@@ -178,6 +178,15 @@ def mem_rows(n: int = 3, *, t0_ns: int = 1_000_000_000) -> List[dict]:
     return rows[:n]
 
 
+def det_rows(*, t0_ns: int = 1_000_000_000) -> List[dict]:
+    """Schema-5 detections lines shaped like the pipeline's writer: the backend's and a topic's for one frame."""
+    base = {"kind": "det", "timestamp": 101.0, "frame_seq": 1, "t_sensor_ns": t0_ns, "rgb_hw": [12, 16], "scoring": "present", "msgtype": None, "dt_ms": None, "n_dropped": None}
+    return [{**base, "source": "backend", "name": "grounded_sam2", "n": 2,
+             "detections": [{"idx": 0, "label": "mug", "score": 0.8, "bbox_rgb": [1, 1, 5, 5], "confirmation": None}, {"idx": 1, "label": "box", "score": 0.4, "bbox_rgb": [6, 2, 12, 8], "confirmation": None}]},
+            {**base, "source": "topic", "name": "/detections", "n": 1, "msgtype": "vision_msgs/msg/Detection2DArray", "dt_ms": 3.0, "n_dropped": {"degenerate": 1},
+             "detections": [{"idx": 0, "label": "mug", "score": 0.9, "bbox_rgb": [1, 1, 5, 5], "id": None, "n_hypotheses": 1}]}]
+
+
 def obs_line(ts_ns: int, oid: Optional[str], outcome: str, p_world: Optional[Sequence[float]], *, cam: Sequence[float] = (0.0, 0.0, 0.0),
              label: Optional[str] = "mug", frame_seq: Optional[int] = None, cand_idx: int = 0, n_nearby: int = 0, n_gate_survivors: int = 0,
              max_cos: Optional[float] = None, cos_sim: Optional[float] = None, dist_m: Optional[float] = None,

@@ -175,6 +175,7 @@ io:
     world_frame: null              # default: the TF root that reaches the camera (map | world | odom preferred)
     camera_frame: null             # default: the RGB CameraInfo frame_id
     assume_aligned: false          # accept depth whose K differs from the RGB K (only if it IS registered to the RGB)
+    detections_wait_s: 0.2         # a paired frame waits this long (wall) for a message on the detections topic before it goes out without one
     session_id: null               # default: ros2-<start time>
     topics:                        # role -> topic overrides; null = discovered by the bag reader's rules
       rgb: null
