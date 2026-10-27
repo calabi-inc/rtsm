@@ -16,6 +16,7 @@ All notable changes to `rtsm`. The format follows [Keep a Changelog](https://kee
 
 ### Changed
 - `dual` backend: a FastSAM-only mask reports no detection confidence (`label_confidence` entry `null`) instead of `0.0`. The observation ledger already recorded `detector_score: null` for them (no label, so nothing was merged); the `scores` tensor is unchanged.
+- Documentation site: the fonts (Geist, Geist Mono, Manrope) are served from the site itself under `docs/assets/fonts/` (SIL Open Font License) instead of from Google Fonts, so a visit to the docs sends no request to a third-party font service.
 
 ### Fixed
 - `rtsm demo`: the completion summary counted the working memory after the exit freeze had moved it into the session record, so it always read 0; it now counts the frozen session.
