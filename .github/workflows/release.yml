@@ -82,12 +82,32 @@ jobs:
     environment: pypi
     permissions:
       id-token: write
+    env:
+      # Optional. A fine-grained token with contents: write on calabi-inc/website lets the site rebuild as soon as
+      # the release is on PyPI (the site also checks PyPI once a day). Without the secret the last step is skipped.
+      WEBSITE_DISPATCH_TOKEN: ${{ secrets.WEBSITE_DISPATCH_TOKEN }}
     steps:
       - uses: actions/download-artifact@v4
         with:
           name: dist
           path: dist/
       - uses: pypa/gh-action-pypi-publish@release/v1
+      - name: Tell the website to rebuild once PyPI lists this version
+        if: env.WEBSITE_DISPATCH_TOKEN != ''
+        run: |
+          want="${GITHUB_REF_NAME#v}"
+          have=""
+          for i in $(seq 1 12); do
+            have=$(curl -sf --max-time 20 https://pypi.org/pypi/rtsm/json | jq -r '.releases | keys[]' | grep -Fx "$want" || true)
+            [ -n "$have" ] && break
+            sleep 30
+          done
+          [ -n "$have" ] || echo "PyPI does not list $want yet; the site's daily check will pick it up"
+          curl -sf -X POST \
+            -H "Authorization: Bearer $WEBSITE_DISPATCH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/calabi-inc/website/dispatches \
+            -d "{\"event_type\":\"rtsm-release\",\"client_payload\":{\"tag\":\"$GITHUB_REF_NAME\"}}"
 
   docker:
     # The CUDA-ready image from the tagged source: ghcr.io/calabi-inc/rtsm:<version> and :latest.
