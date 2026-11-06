@@ -23,11 +23,11 @@ import math
 from collections import Counter, defaultdict
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Set
 
 import numpy as np
 
-from rtsm.evaluation.event_log import KIND_OBS, OBS_CREATED, OBS_MATCHED
+from rtsm.evaluation.event_log import KIND_OBS, OBS_MATCHED
 from rtsm.evaluation.ledger import _stamp, by_kind
 
 GT_SCORER_SCHEMA = 1
@@ -297,7 +297,6 @@ def score_run(rows: Sequence[dict], summary: Optional[dict], sc: Sidecar, prm: O
     n_conf = sum(1 for m in matches if m.confirmed)
     n_matched = sum(1 for m in matches if m.gt_id is not None)
     n_matched_conf = sum(1 for m in matches if m.gt_id is not None and m.confirmed)
-    phantoms = [m for m in matches if m.gt_id is None]
 
     # ── truth: observable, recalled, duplicated ──────────────────────
     visible_frames: Dict[int, List[int]] = defaultdict(list)       # gt id -> processed stamps where it is big enough

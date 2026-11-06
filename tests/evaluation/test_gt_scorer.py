@@ -2,7 +2,6 @@
 import json
 import math
 
-import numpy as np
 import pytest
 
 from rtsm.evaluation import gt_scorer as G
