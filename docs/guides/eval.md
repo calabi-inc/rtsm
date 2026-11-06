@@ -74,6 +74,26 @@ Every number is computed per run from the ledgers alone (`rtsm/evaluation/metric
 
 Parameters live under `eval.metrics` in the configuration: `cluster_radius_m` (null = `assoc.gate_dist_base_m`), `cluster_radii_m` (the sensitivity radii), `revisit_gap_s`, `range_bin_m`, `min_obs_scatter`, `worst_n`, `moments_cap`. Override them like any other key (`--set eval.metrics.cluster_radius_m=0.3`), for `rtsm eval` and `rtsm report` alike.
 
+## Scoring against simulator ground truth
+
+A run on a bag recorded in a simulator can be scored against the simulator's own truth. The Isaac Sim bridge (`rtsm-isaacsim`) writes, beside its bag, a sidecar with the scene's labelled props (stable id, prim path, class, oriented 3-D box in world metres) and, per frame, which props are in the image and how large (`objects.json`, `gt.jsonl`, `meta.json`, schema 1). Pass it with `--gt`:
+
+```bash
+rtsm eval recording_bag/ --repeats 3 --gt recording_gt/
+rtsm report eval_output/<dir>/              # rescoring later needs no flag: the path is in resolved.json
+```
+
+The report gains a "Ground truth" section and `metrics.json` the `gt.*` scalars, each with a floor across repeats like every other number:
+
+- **objects**: how many RTSM objects lie on a labelled prop (precision, also for engine-confirmed objects), and how many confirmed objects lie on no labelled prop;
+- **truth**: how many observable true objects got an RTSM object (recall), and how many got more than one (duplicates);
+- **position**: the distance from the RTSM position to the true box (0 inside), median and p90;
+- **labels**: agreement between RTSM's label and the true class, exact or through a synonym map, and the disagreements;
+- **revisits**: when a recalled true object comes back into view after the revisit gap, whether RTSM re-identified it, duplicated it or missed it; this is the number the report's re-identification lower bound stands in for when there is no truth;
+- **detection**: per processed frame, the detector's 2-D boxes against the true objects' boxes at IoU 0.3.
+
+The match rule is geometry only: an RTSM object is assigned to the smallest true box within 0.15 m of its position, preferring props that were in view in a frame where the object was observed; labels never take part, so the label numbers are not circular. A true object is *observable* when it covers at least 1000 pixels in at least two processed frames. Three caveats: the true class names come from the scene's prop names through the bridge's label table, not from a human annotation; the scene labels props but not walls, floors or ceilings, so an object on no labelled prop may still sit on real geometry and the precision numbers are lower bounds; and an RTSM position that lies within the margin of a small prop sitting on a large one is assigned to the small prop. `rtsm report --gt-margin M --gt-min-pixels PX` rescores with other thresholds.
+
 ## Your own detector
 
 If the bag already carries a detector's output as a `vision_msgs/msg/Detection2DArray` (or `Detection3DArray`) topic, RTSM can run on *those* detections instead of its own: the memory, the ledgers and the report are then about your detector.

@@ -53,11 +53,20 @@ def run_dirs(out_dir: Path) -> List[Path]:
     return [d for _, d in sorted(dirs)]
 
 
-def run_metrics(run_dir: Path, params: MetricParams) -> dict:
+def run_metrics(run_dir: Path, params: MetricParams, sidecar: Any = None, gt_params: Any = None) -> dict:
+    """One run's metrics; with a loaded ground-truth ``sidecar`` the ``gt`` block
+    is added and its summary flattened into the scalars, so the floors across
+    repeats come from ``aggregate`` like every other number."""
     from rtsm.evaluation.ledger import read_events
     summary = json.loads((run_dir / "summary.json").read_text(encoding="utf-8"))
     rows = read_events(run_dir / "events.jsonl")
     m = compute_metrics(rows, summary, params)
+    if sidecar is not None:
+        from rtsm.evaluation.gt_scorer import GtParams, score_run
+        from rtsm.evaluation.metrics import _flatten
+        g = score_run(rows, summary, sidecar, gt_params or GtParams(revisit_gap_s=params.revisit_gap_s))
+        m["gt"] = g
+        m["scalars"].update(_flatten({"gt": g["summary"]}))
     m["run_dir"] = run_dir.name
     m["run_index"] = summary.get("run_index")
     m["detector"] = summary.get("detector")
@@ -337,6 +346,49 @@ def render_markdown(agg: dict, ref: dict, *, resolved: Optional[dict], input_nam
     L.append(f"A visit ends when the cluster leaves the frustum for ≥ {params.revisit_gap_s:g} s of sensor time. Missed and duplicated revisits count as failures, so the bound is a lower bound (occlusion is a miss here).")
     L.append("")
 
+    g = ref.get("gt")
+    if g:
+        prm = g.get("params") or {}
+        sc = g.get("sidecar") or {}
+        L.append("## Ground truth (simulator sidecar)")
+        L.append("")
+        L.append(f"Sidecar `{sc.get('dir')}` (scene `{sc.get('scene')}`, {sc.get('frames')} frames): the labelled props of the scene with their "
+                 f"oriented 3-D boxes, and per frame which of them are in the image and how large. RTSM objects are matched to the truth by position only: "
+                 f"the smallest true box within {prm.get('match_margin_m')} m of the object's position, preferring boxes that were in view in a frame where "
+                 f"the object was observed; labels never take part in matching. A true object is *observable* when it covers >= {prm.get('min_pixels')} px "
+                 f"in >= {prm.get('min_frames')} processed frames; only processed frames count. The scene labels its props, not its walls, floors and ceilings: an "
+                 f"object on no labelled prop may sit on unlabelled geometry, so precision here is a lower bound, and so is per-frame detection precision.")
+        L.append("")
+        L += _table(agg, [("gt.objects.n", "RTSM objects (final memory)"), ("gt.objects.precision", "precision: objects that lie on a labelled prop"),
+                          ("gt.objects.precision_confirmed", "precision of engine-confirmed objects"), ("gt.objects.n_phantom_confirmed", "confirmed objects on no labelled prop"),
+                          ("gt.truth.n_observable", "observable true objects"), ("gt.truth.recall", "recall: observable true objects with an RTSM object"),
+                          ("gt.truth.recall_confirmed", "recall by confirmed objects"), ("gt.truth.n_duplicated", "true objects with > 1 RTSM object"),
+                          ("gt.truth.duplicates_extra", "extra RTSM objects on them"),
+                          ("gt.position.d_box_median_m", "position: distance to the true box, median (m; 0 = inside)"),
+                          ("gt.position.d_box_p90_m", "position: distance to the true box, p90 (m)"),
+                          ("gt.labels.agree_frac", "label agreement, exact or synonym"), ("gt.labels.exact_frac", "label agreement, exact"),
+                          ("gt.revisits.n_revisits", "revisits of recalled true objects"), ("gt.revisits.reid_frac", "re-identified on return, against truth"),
+                          ("gt.revisits.duplicated", "duplicated on return"), ("gt.revisits.missed", "missed on return"),
+                          ("gt.detection.recall", f"per-frame detection recall (IoU >= {prm.get('det_iou')})"), ("gt.detection.precision", "per-frame detection precision"),
+                          ("gt.frames.join_frac", "processed frames found in the sidecar")])
+        conf = g.get("confusion") or []
+        if conf:
+            L.append("")
+            L.append("Label disagreements (true class -> RTSM label, run 1): " + ", ".join(f"{c['true_class']} -> {c['rtsm_label']} ({c['n']})" for c in conf[:10]) + ".")
+        dbc = g.get("detection_by_class") or {}
+        if dbc:
+            L.append("")
+            L.append("| true class | in view (run 1, object-frames) | detected | recall |")
+            L.append("|---|---|---|---|")
+            for c, v in dbc.items():
+                L.append(f"| {c} | {v.get('n_truth')} | {v.get('n_hit')} | {_fmt('recall', v.get('recall'))} |")
+        L.append("")
+        L.append("Re-identification against truth: a recalled true object's visible processed frames split into visits at the revisit gap; a revisit is "
+                 "re-identified when an RTSM object from before the gap is matched on it again, duplicated when a new RTSM object is created on it although "
+                 "one already existed, missed otherwise. The class names of the truth are the scene's prop names mapped by the bridge's label table, "
+                 "not a human annotation; the synonym map lives in `rtsm/evaluation/gt_scorer.py`.")
+        L.append("")
+
     L.append("## Worst moments (run 1)")
     L.append("")
     L.append("| t (s) | frame | kind | score | detail |")
@@ -362,7 +414,7 @@ def render_markdown(agg: dict, ref: dict, *, resolved: Optional[dict], input_nam
 
     L.append("## Method notes")
     L.append("")
-    L.append("- Everything above is computed from the run's ledgers (`events.jsonl`: pose / obs / view lines, the frame-flow trace) and the final memory in `summary.json`. No ground truth, no labels required; label numbers use each observation's top-1 scored label (the detector's label first; under `segmentation.labels.prompt_free_primary: classifier` a prompt-free model's name stays out and the CLIP vocabulary classifier's label leads).")
+    L.append("- Everything above is computed from the run's ledgers (`events.jsonl`: pose / obs / view lines, the frame-flow trace) and the final memory in `summary.json`. No ground truth, no labels required (the ground-truth section, when present, is the one exception: `--gt` with a simulator sidecar); label numbers use each observation's top-1 scored label (the detector's label first; under `segmentation.labels.prompt_free_primary: classifier` a prompt-free model's name stays out and the CLIP vocabulary classifier's label leads).")
     L.append("- Objects = every id the associator matched or created; a **transient** object was created and is not in the final memory (a proto that expired, or one the memory evicted).")
     L.append("- **Engine-confirmed** (\"confirmed\" above) means the memory promoted the object under its own rules (hits, stability, view bins); it is not ground-truth confirmation. **Re-identified** means the associator matched an existing object (a reassociation), not a verified identity.")
     L.append("- The fingerprint is the sha256 of the sorted multiset of (label_primary, xyz rounded to 3 decimals, hits, confirmed), 16 hex characters: identical fingerprints mean the same final memory at that resolution, not bit-identical runs.")
@@ -375,8 +427,11 @@ def render_markdown(agg: dict, ref: dict, *, resolved: Optional[dict], input_nam
 
 # ───────────────────────────── writing ─────────────────────────────
 
-def write_report(out_dir: Any, cfg: Optional[dict] = None, *, params: Optional[MetricParams] = None) -> Tuple[Path, Path]:
-    """``metrics.json`` + ``report.md`` under ``out_dir`` from its ``run_*`` directories."""
+def write_report(out_dir: Any, cfg: Optional[dict] = None, *, params: Optional[MetricParams] = None,
+                 gt_dir: Optional[str] = None, gt_margin_m: Optional[float] = None, gt_min_pixels: Optional[int] = None) -> Tuple[Path, Path]:
+    """``metrics.json`` + ``report.md`` under ``out_dir`` from its ``run_*`` directories.
+    ``gt_dir`` (else ``resolved.json``'s ``gt_dir``) scores every run against a
+    simulator ground-truth sidecar as well."""
     out = Path(out_dir)
     dirs = run_dirs(out)
     if not dirs:
@@ -398,12 +453,21 @@ def write_report(out_dir: Any, cfg: Optional[dict] = None, *, params: Optional[M
             repeats = json.loads((out / "repeats.json").read_text(encoding="utf-8"))
         except Exception:  # noqa: BLE001
             repeats = None
-    per_run = [run_metrics(d, params) for d in dirs]
+    gt = gt_dir or (resolved or {}).get("gt_dir")
+    sidecar = gt_params = None
+    if gt:
+        from rtsm.evaluation.gt_scorer import GtParams, load_sidecar
+        sidecar = load_sidecar(gt)
+        gt_params = GtParams(revisit_gap_s=params.revisit_gap_s,
+                             **({"match_margin_m": float(gt_margin_m)} if gt_margin_m is not None else {}),
+                             **({"min_pixels": int(gt_min_pixels)} if gt_min_pixels is not None else {}))
+    per_run = [run_metrics(d, params, sidecar, gt_params) for d in dirs]
     agg = aggregate(per_run, params.cluster_radius_m)
     input_name = (resolved or {}).get("input") or (per_run[0].get("run_dir") if per_run else out.name)
     input_name = Path(str(input_name)).name
     doc = {"schema": REPORT_SCHEMA, "metrics_schema": METRICS_SCHEMA, "input": (resolved or {}).get("input"), "resolved": resolved,
-           "params": per_run[0]["params"], "n_runs": len(per_run), "aggregate": agg, "runs": per_run}
+           "params": per_run[0]["params"], "n_runs": len(per_run), "aggregate": agg, "runs": per_run,
+           "gt_dir": (str(gt) if gt else None)}
     metrics_path = out / "metrics.json"
     report_path = out / "report.md"
     metrics_path.write_text(json.dumps(doc, indent=1, default=_json_default), encoding="utf-8", newline="\n")
@@ -431,6 +495,10 @@ def build_parser():
     from rtsm.cfg.cli import add_config_arguments
     ap = argparse.ArgumentParser(prog="rtsm report", description="Write metrics.json + report.md from the run directories of an `rtsm eval` output (no models, no GPU).")
     ap.add_argument("out_dir", help="an `rtsm eval` output directory (holds run_1/, run_2/, …)")
+    ap.add_argument("--gt", type=str, default=None, metavar="DIR",
+                    help="score the runs against a simulator ground-truth sidecar (default: the one the eval was run with, from resolved.json)")
+    ap.add_argument("--gt-margin", type=float, default=None, metavar="M", help="point-to-box distance that still counts as on the object (default 0.15)")
+    ap.add_argument("--gt-min-pixels", type=int, default=None, metavar="PX", help="a true object counts as visible in a frame above this many pixels (default 1000)")
     add_config_arguments(ap)
     return ap
 
@@ -448,8 +516,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     if not Path(args.out_dir).is_dir():
         ap.error(f"not a directory: {args.out_dir}")
     try:
-        metrics_path, report_path = write_report(args.out_dir, cfg)
-    except ValueError as exc:
+        metrics_path, report_path = write_report(args.out_dir, cfg, gt_dir=args.gt, gt_margin_m=args.gt_margin, gt_min_pixels=args.gt_min_pixels)
+    except (ValueError, OSError) as exc:
         ap.error(str(exc))
     print(f"metrics: {metrics_path}\nreport:  {report_path}")
     return 0
