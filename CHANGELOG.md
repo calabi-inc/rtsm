@@ -4,6 +4,9 @@ All notable changes to `rtsm`. The format follows [Keep a Changelog](https://kee
 
 ## [Unreleased]
 
+### Added
+- `rtsm eval --gt DIR` and `rtsm report --gt DIR`: score every repeat against a simulator ground-truth sidecar (the `objects.json` + `gt.jsonl` + `meta.json` that `rtsm-isaacsim` writes beside a recording). RTSM objects are matched to the scene's labelled props by position only (the smallest oriented 3-D box within 0.15 m of the object, preferring props in view when the object was observed), so the report gains precision (objects on a labelled prop; walls and floors are unlabelled, so a lower bound), recall, duplicates, phantom confirmations, position error, re-identification on return against the truth, per-frame detection recall by 2-D overlap, and label agreement through a synonym map, all as `gt.*` scalars with a floor across repeats (`rtsm/evaluation/gt_scorer.py`). The sidecar path is kept in `resolved.json`, so `rtsm report <dir>` rescores without the flag.
+
 ### Changed
 - Documentation site: the diagrams drawn with box-drawing characters were set in a fallback font (the self-hosted Geist Mono carried the latin subset only), so their columns did not line up; arrows and box-drawing glyphs now come from Geist and Geist Mono themselves (`docs/assets/fonts/*-symbols.woff`, loaded only by pages that use them).
 

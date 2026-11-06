@@ -37,10 +37,10 @@ rtsm report eval_output/fr3                             # regenerate metrics.jso
 
 ```
 eval_output/<input>-<mode>-<stamp>/
-  resolved.json      the resolved settings, cadence, config fingerprint, commit (+ dirty flag and diff digest), versions, the model files the config names (size, sha256, or exists: false), the hub model ids, the compute (gpu, cuda, device_model, power_mode), the pacing (speed) and the ingest policy as configured and as resolved
+  resolved.json      the resolved settings, cadence, config fingerprint, commit (+ dirty flag and diff digest), versions, the model files the config names (size, sha256, or exists: false), the hub model ids, the compute (gpu, cuda, device_model, power_mode), the pacing (speed), the ingest policy as configured and as resolved, and gt_dir (the ground-truth sidecar the run was scored against, or null)
   bag_probe.json     (bags) topics, pose source, registration
   repeats.json       fingerprints / counts / wall time per run, identical_fingerprints
-  metrics.json       every metric per run + the aggregate with floors; per-object / per-cluster / per-frame records
+  metrics.json       every metric per run + the aggregate with floors; per-object / per-cluster / per-frame records; with --gt, a gt block per run (the match of every RTSM object, the observable true objects, the label confusion) and gt.* scalars in the aggregate
   report.md          the number sheet
   run_1/
     events.jsonl     the frame-flow trace + the pose / obs / view / mem / det ledgers (schema 4, ledgers schema 5)
@@ -74,6 +74,26 @@ Every number is computed per run from the ledgers alone (`rtsm/evaluation/metric
 
 Parameters live under `eval.metrics` in the configuration: `cluster_radius_m` (null = `assoc.gate_dist_base_m`), `cluster_radii_m` (the sensitivity radii), `revisit_gap_s`, `range_bin_m`, `min_obs_scatter`, `worst_n`, `moments_cap`. Override them like any other key (`--set eval.metrics.cluster_radius_m=0.3`), for `rtsm eval` and `rtsm report` alike.
 
+## Scoring against simulator ground truth
+
+A run on a bag recorded in a simulator can be scored against the simulator's own truth. The Isaac Sim bridge (`rtsm-isaacsim`) writes, beside its bag, a sidecar with the scene's labelled props (stable id, prim path, class, oriented 3-D box in world metres) and, per frame, which props are in the image and how large (`objects.json`, `gt.jsonl`, `meta.json`, schema 1). Pass it with `--gt`:
+
+```bash
+rtsm eval recording_bag/ --repeats 3 --gt recording_gt/
+rtsm report eval_output/<dir>/              # rescoring later needs no flag: the path is in resolved.json
+```
+
+The report gains a "Ground truth" section and `metrics.json` the `gt.*` scalars, each with a floor across repeats like every other number:
+
+- **objects**: how many RTSM objects lie on a labelled prop (precision, also for engine-confirmed objects), and how many confirmed objects lie on no labelled prop;
+- **truth**: how many observable true objects got an RTSM object (recall), and how many got more than one (duplicates);
+- **position**: the distance from the RTSM position to the true box (0 inside), median and p90;
+- **labels**: agreement between RTSM's label and the true class, exact or through a synonym map, and the disagreements;
+- **revisits**: when a recalled true object comes back into view after the revisit gap, whether RTSM re-identified it, duplicated it or missed it; this is the number the report's re-identification lower bound stands in for when there is no truth;
+- **detection**: per processed frame, the detector's 2-D boxes against the true objects' boxes at IoU 0.3.
+
+The match rule is geometry only: an RTSM object is assigned to the smallest true box within 0.15 m of its position, preferring props that were in view in a frame where the object was observed; labels never take part, so the label numbers are not circular. A true object is *observable* when it covers at least 1000 pixels in at least two processed frames. Three caveats: the true class names come from the scene's prop names through the bridge's label table, not from a human annotation; the scene labels props but not walls, floors or ceilings, so an object on no labelled prop may still sit on real geometry and the precision numbers are lower bounds; and an RTSM position that lies within the margin of a small prop sitting on a large one is assigned to the small prop. `rtsm report --gt-margin M --gt-min-pixels PX` rescores with other thresholds.
+
 ## Your own detector
 
 If the bag already carries a detector's output as a `vision_msgs/msg/Detection2DArray` (or `Detection3DArray`) topic, RTSM can run on *those* detections instead of its own: the memory, the ledgers and the report are then about your detector.
@@ -91,7 +111,7 @@ Not supported in v1: masks from the detector (boxes only; a mask-refiner slot ex
 
 ## Options
 
-`--mode`, `--repeats`, `--out`, `--label`, `--max-frames` (bag inputs), `--max-wall-s` (abort a run and record it), `--speed` (pace the input at this multiple of its recorded rate; unset = as fast as the queue accepts), `--no-report`, `--save-crops` (write each object's JPEG snapshots into `run_N/crops/`, for report renderers), `--save-masks` (each selected candidate's mask on its `obs` line as COCO compressed RLE, for label export; about 0.3–2 KB per observation), plus the usual `--config` / `--profile` / `--set` overrides. Defaults live in the `eval:` block of the configuration.
+`--mode`, `--repeats`, `--out`, `--label`, `--max-frames` (bag inputs), `--max-wall-s` (abort a run and record it), `--speed` (pace the input at this multiple of its recorded rate; unset = as fast as the queue accepts), `--no-report`, `--save-crops` (write each object's JPEG snapshots into `run_N/crops/`, for report renderers), `--save-masks` (each selected candidate's mask on its `obs` line as COCO compressed RLE, for label export; about 0.3–2 KB per observation), `--gt DIR` (score every repeat against a simulator ground-truth sidecar; see above), plus the usual `--config` / `--profile` / `--set` overrides. Defaults live in the `eval:` block of the configuration.
 
 ## Timing run
 
@@ -99,4 +119,4 @@ Not supported in v1: masks from the detector (boxes only; a mask-refiner slot ex
 
 ## For tooling built on the run directory
 
-Other tools, including Calabi's paid compare, build on three things that are versioned and changelogged: the run-directory layout above, the ledger schema (5) and the `metrics_schema` in `metrics.json`, and the modules `rtsm.evaluation.metrics` (`MetricParams`, `compute_metrics`, `object_tracks`, `leader_clusters`), `rtsm.evaluation.report` (`run_dirs`, `run_metrics`, `aggregate`, `render_markdown`, `write_report`) and `rtsm.evaluation.ledger` (`read_events`, `by_kind`). A computation a tool needs that is missing here belongs in these modules, not in the tool.
+Other tools, including Calabi's paid compare, build on three things that are versioned and changelogged: the run-directory layout above, the ledger schema (5) and the `metrics_schema` in `metrics.json`, and the modules `rtsm.evaluation.metrics` (`MetricParams`, `compute_metrics`, `object_tracks`, `leader_clusters`), `rtsm.evaluation.report` (`run_dirs`, `run_metrics`, `aggregate`, `render_markdown`, `write_report`), `rtsm.evaluation.gt_scorer` (`load_sidecar`, `GtParams`, `score_run`; the `gt` block and its `gt.*` scalars) and `rtsm.evaluation.ledger` (`read_events`, `by_kind`). A computation a tool needs that is missing here belongs in these modules, not in the tool.

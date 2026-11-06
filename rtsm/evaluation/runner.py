@@ -77,6 +77,7 @@ class EvalOptions:
     save_crops: bool = False                 # write the memory's per-object JPEG snapshots into run_N/crops/
     speed: Optional[float] = None            # pace the input at this multiple of its recorded rate (None = as fast as the queue accepts)
     save_masks: bool = False                 # each selected candidate's mask on its obs line as COCO compressed RLE (diagnostics.save_masks)
+    gt_dir: Optional[str] = None             # a simulator ground-truth sidecar (rtsm-isaacsim schema 1) to score every repeat against
 
 
 @dataclass
@@ -116,6 +117,7 @@ class ResolvedEval:
     device_model: Optional[str] = None       # /proc/device-tree/model (a Jetson's board name); None elsewhere
     power_mode: Optional[str] = None         # a Jetson's nvpmodel status line ("pmode:0000 fmode:quiet"); None elsewhere
     save_masks: bool = False                 # the obs lines carry each selected candidate's mask as COCO compressed RLE (ledger schema 4)
+    gt_dir: Optional[str] = None             # the ground-truth sidecar the report scores against (absolute path), None = no truth
 
 
 def input_kind(path: str | os.PathLike) -> str:
@@ -321,6 +323,7 @@ def resolve_eval(cfg: dict, opts: EvalOptions) -> ResolvedEval:
         model_files=_model_files(cfg), hf_models=_hf_models(cfg),
         speed=speed, policy_configured=str(lane_cfg.configured_policy), **_platform_facts(),
         save_masks=bool(opts.save_masks or diag.get("save_masks", False)),
+        gt_dir=(str(Path(opts.gt_dir).resolve()) if opts.gt_dir else None),
     )
 
 
@@ -631,6 +634,14 @@ def run_eval(cfg: dict, opts: EvalOptions, *, models: Any = None, load_models: O
     out_dir = Path(opts.out) if opts.out else Path("eval_output") / f"{stem}-{resolved.mode}-{stamp}"
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "resolved.json").write_text(json.dumps(asdict(resolved), indent=1, default=str), encoding="utf-8")
+    if resolved.gt_dir:
+        # the sidecar is read before the models load: a bad path costs seconds, not a model load
+        from rtsm.evaluation.gt_scorer import load_sidecar
+        try:
+            sc = load_sidecar(resolved.gt_dir)
+        except (OSError, ValueError, KeyError) as e:
+            raise ValueError(f"ground truth refused: {e}") from e
+        logger.info("[eval] ground truth: %s (%d labelled objects, %d with a box, %d frames)", resolved.gt_dir, sc.n_labelled, len(sc.objects), len(sc.frames))
     if resolved.input_kind == "bag":
         from rtsm.io.bag_reader import probe_bag
         bag_cfg = dict((cfg.get("io") or {}).get("bag") or {})
@@ -699,6 +710,9 @@ def build_parser():
     ap.add_argument("--save-masks", action="store_true",
                     help="write each selected candidate's mask on its obs line as COCO compressed RLE at mask resolution (diagnostics.save_masks; about 0.3-2 KB per observation)")
     ap.add_argument("--no-report", action="store_true", help="do not write metrics.json + report.md after the repeats (`rtsm report <dir>` writes them later)")
+    ap.add_argument("--gt", type=str, default=None, metavar="DIR",
+                    help="score every repeat against a simulator ground-truth sidecar (objects.json + gt.jsonl + meta.json, as rtsm-isaacsim writes it): "
+                         "precision, recall, duplicates, position error, re-identification and label agreement against the truth, in metrics.json (gt.*) and the report")
     add_config_arguments(ap)
     return ap
 
@@ -723,9 +737,12 @@ def main(argv: Optional[List[str]] = None) -> int:
         save_crops=bool(getattr(args, "save_crops", False)),
         speed=args.speed,
         save_masks=bool(getattr(args, "save_masks", False)),
+        gt_dir=args.gt,
     )
     if not Path(opts.input).exists():
         ap.error(f"input not found: {opts.input}")
+    if opts.gt_dir and not Path(opts.gt_dir).is_dir():
+        ap.error(f"--gt is not a directory: {opts.gt_dir}")
     if opts.repeats < 1:
         ap.error("--repeats must be >= 1")
     try:
