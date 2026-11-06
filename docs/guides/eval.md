@@ -37,10 +37,10 @@ rtsm report eval_output/fr3                             # regenerate metrics.jso
 
 ```
 eval_output/<input>-<mode>-<stamp>/
-  resolved.json      the resolved settings, cadence, config fingerprint, commit (+ dirty flag and diff digest), versions, the model files the config names (size, sha256, or exists: false), the hub model ids, the compute (gpu, cuda, device_model, power_mode), the pacing (speed) and the ingest policy as configured and as resolved
+  resolved.json      the resolved settings, cadence, config fingerprint, commit (+ dirty flag and diff digest), versions, the model files the config names (size, sha256, or exists: false), the hub model ids, the compute (gpu, cuda, device_model, power_mode), the pacing (speed), the ingest policy as configured and as resolved, and gt_dir (the ground-truth sidecar the run was scored against, or null)
   bag_probe.json     (bags) topics, pose source, registration
   repeats.json       fingerprints / counts / wall time per run, identical_fingerprints
-  metrics.json       every metric per run + the aggregate with floors; per-object / per-cluster / per-frame records
+  metrics.json       every metric per run + the aggregate with floors; per-object / per-cluster / per-frame records; with --gt, a gt block per run (the match of every RTSM object, the observable true objects, the label confusion) and gt.* scalars in the aggregate
   report.md          the number sheet
   run_1/
     events.jsonl     the frame-flow trace + the pose / obs / view / mem / det ledgers (schema 4, ledgers schema 5)
@@ -111,7 +111,7 @@ Not supported in v1: masks from the detector (boxes only; a mask-refiner slot ex
 
 ## Options
 
-`--mode`, `--repeats`, `--out`, `--label`, `--max-frames` (bag inputs), `--max-wall-s` (abort a run and record it), `--speed` (pace the input at this multiple of its recorded rate; unset = as fast as the queue accepts), `--no-report`, `--save-crops` (write each object's JPEG snapshots into `run_N/crops/`, for report renderers), `--save-masks` (each selected candidate's mask on its `obs` line as COCO compressed RLE, for label export; about 0.3–2 KB per observation), plus the usual `--config` / `--profile` / `--set` overrides. Defaults live in the `eval:` block of the configuration.
+`--mode`, `--repeats`, `--out`, `--label`, `--max-frames` (bag inputs), `--max-wall-s` (abort a run and record it), `--speed` (pace the input at this multiple of its recorded rate; unset = as fast as the queue accepts), `--no-report`, `--save-crops` (write each object's JPEG snapshots into `run_N/crops/`, for report renderers), `--save-masks` (each selected candidate's mask on its `obs` line as COCO compressed RLE, for label export; about 0.3–2 KB per observation), `--gt DIR` (score every repeat against a simulator ground-truth sidecar; see above), plus the usual `--config` / `--profile` / `--set` overrides. Defaults live in the `eval:` block of the configuration.
 
 ## Timing run
 
@@ -119,4 +119,4 @@ Not supported in v1: masks from the detector (boxes only; a mask-refiner slot ex
 
 ## For tooling built on the run directory
 
-Other tools, including Calabi's paid compare, build on three things that are versioned and changelogged: the run-directory layout above, the ledger schema (5) and the `metrics_schema` in `metrics.json`, and the modules `rtsm.evaluation.metrics` (`MetricParams`, `compute_metrics`, `object_tracks`, `leader_clusters`), `rtsm.evaluation.report` (`run_dirs`, `run_metrics`, `aggregate`, `render_markdown`, `write_report`) and `rtsm.evaluation.ledger` (`read_events`, `by_kind`). A computation a tool needs that is missing here belongs in these modules, not in the tool.
+Other tools, including Calabi's paid compare, build on three things that are versioned and changelogged: the run-directory layout above, the ledger schema (5) and the `metrics_schema` in `metrics.json`, and the modules `rtsm.evaluation.metrics` (`MetricParams`, `compute_metrics`, `object_tracks`, `leader_clusters`), `rtsm.evaluation.report` (`run_dirs`, `run_metrics`, `aggregate`, `render_markdown`, `write_report`), `rtsm.evaluation.gt_scorer` (`load_sidecar`, `GtParams`, `score_run`; the `gt` block and its `gt.*` scalars) and `rtsm.evaluation.ledger` (`read_events`, `by_kind`). A computation a tool needs that is missing here belongs in these modules, not in the tool.
