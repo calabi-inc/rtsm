@@ -7,7 +7,7 @@ hide:
 
 <div class="rtsm-hero" markdown>
 
-<div class="rtsm-hero__pill"><span class="dot"></span><span><strong>RTSM 0.2.0</strong> on PyPI — <em>pip install rtsm</em></span></div>
+<div class="rtsm-hero__pill"><span class="dot"></span><span><strong>RTSM {{ rtsm_version }}</strong> on PyPI — <em>pip install rtsm</em></span></div>
 
 # Real-Time Spatio-Semantic <span class="shine">Memory</span>
 
@@ -19,7 +19,7 @@ hide:
 [Evaluate a bag](guides/eval.md){ .md-button }
 [Source](https://github.com/calabi-inc/rtsm){ .md-button }
 
-<div class="rtsm-hero__meta"><span class="ok">rtsm 0.2.0</span><span>Apache-2.0</span><span>Python 3.10–3.13</span><span>5 segmentation backends + external detections</span><span>REST + MCP</span><span>ROS 1 / rosbag2 / MCAP in</span></div>
+<div class="rtsm-hero__meta"><span class="ok">rtsm {{ rtsm_version }}</span><span>Apache-2.0</span><span>Python 3.10–3.13</span><span>5 segmentation backends + external detections</span><span>REST + MCP</span><span>ROS 1 / rosbag2 / MCAP in</span></div>
 
 </div>
 

@@ -1,5 +1,9 @@
 name: Deploy Docs
 
+# Every push to main that touches the docs rebuilds the site. The release number on the home page is resolved at build
+# time by docs/hooks/version.py (the highest stable v* tag reachable from the built commit, so the checkout needs the
+# tags); release.yml deploys the docs again from the tagged source once a version is on PyPI.
+
 on:
   push:
     branches:
@@ -7,6 +11,7 @@ on:
     paths:
       - 'docs/**'
       - 'mkdocs.yml'
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -16,6 +21,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Python
         uses: actions/setup-python@v5
