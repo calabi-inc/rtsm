@@ -109,6 +109,27 @@ jobs:
             https://api.github.com/repos/calabi-inc/website/dispatches \
             -d "{\"event_type\":\"rtsm-release\",\"client_payload\":{\"tag\":\"$GITHUB_REF_NAME\"}}"
 
+  docs:
+    # The docs home page states the release that is on PyPI (docs/hooks/version.py); redeploy it from the tagged
+    # source once the publish is done, so the number changes with the tag and not with the next docs edit.
+    name: deploy the docs
+    needs: pypi
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      RTSM_DOCS_VERSION: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install mkdocs-material
+      - run: mkdocs gh-deploy --force
+
   docker:
     # The CUDA-ready image from the tagged source: ghcr.io/calabi-inc/rtsm:<version> and :latest.
     # One-time: the package is private on first push; make it public in the org's package settings.

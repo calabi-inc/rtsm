@@ -97,6 +97,12 @@ markdown_extensions:
 plugins:
   - search
 
+# The release number on the home page ({{ rtsm_version }}) comes from the tag through this hook, never from the page.
+hooks:
+  - docs/hooks/version.py
+exclude_docs: |
+  hooks/
+
 extra:
   social:
     - icon: fontawesome/brands/github
