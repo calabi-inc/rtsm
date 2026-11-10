@@ -1,6 +1,7 @@
 from __future__ import annotations
 # rtsm/models/clip/adapter.py
 from dataclasses import dataclass
+import logging
 import torch
 import numpy as np
 from .loader import load_clip
@@ -9,6 +10,9 @@ from .inference import (
     encode_images_batch as _encode_images_batch,
     tensor_preprocess_params as _tensor_preprocess_params,
 )
+
+logger = logging.getLogger(__name__)
+
 
 @dataclass
 class ClipArtifacts:
@@ -30,6 +34,12 @@ class CLIPAdapter:
             self._tensor_pre = _tensor_preprocess_params(preprocess, device)
         except Exception:  # noqa: BLE001 -- an unusual transform must not fail the load; it keeps the per-image path
             self._tensor_pre = None
+        if self._tensor_pre is not None:
+            logger.info(f"Image tower preprocessing: {self._tensor_pre[0]} px crops as one tensor on {device} "
+                        f"(bit-identical to the model's transform on the probe)")
+        else:
+            logger.info(f"Image tower preprocessing: the model's transform, image by image "
+                        f"(the tensor path does not reproduce it on {device})")
 
     def encode_image(self, image):  # image path, PIL, or np.ndarray
         return _encode_image(image, self.artifacts.model, self.artifacts.preprocess, device=self.device, keep_on_device=True)

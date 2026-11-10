@@ -107,6 +107,34 @@ def test_the_real_model_transform_passes_the_probe():
     assert torch.equal(torch.stack([pre(Image.fromarray(c)) for c in crops]), inf._tensor_batch(crops, params, "cpu"))
 
 
+def test_the_probe_covers_every_input_value():
+    """Scaling and normalising act on one byte of one channel at a time: a probe that holds all 256 values in each
+    channel decides the equality for every image, not for a sample."""
+    for size in (224, 256, 16):
+        p = inf._probe_image(size)
+        assert p.shape == (size, size, 3) and p.dtype == np.uint8
+        assert all(len(np.unique(p[..., c])) == 256 for c in range(3))
+    assert np.array_equal(inf._probe_image(224), inf._probe_image(224))
+
+
+@pytest.mark.gpu
+@pytest.mark.parametrize("make", [_clip_style, _siglip_style])
+def test_the_tensor_path_is_bit_identical_on_the_gpu(make):
+    """On CUDA a division by a Python number is a multiplication by its reciprocal, one bit off the CPU's division
+    for about half of the byte values; the tensor path divides by a tensor on the device and matches the transform."""
+    if not torch.cuda.is_available():
+        pytest.skip("needs a CUDA device")
+    pre = make()
+    params = inf.tensor_preprocess_params(pre, "cuda")
+    assert params is not None
+    crops = _crops(6, seed=9)
+    ref = torch.stack([pre(Image.fromarray(c)) for c in crops])
+    assert torch.equal(ref, inf._tensor_batch(crops, params, "cuda").cpu())
+    by_scalar = torch.from_numpy(np.stack(crops)).cuda().permute(0, 3, 1, 2).contiguous().to(torch.float32).div(255)
+    by_scalar = by_scalar.sub_(params[2]).div_(params[3]).cpu()
+    assert not torch.equal(ref, by_scalar)                # the shortcut this file exists to keep out
+
+
 # ───────────────────────── the classifier's scores in one transfer ─────────────────────────
 
 def _per_scalar_classify(clf, img_feats, params=None, return_topk=None):
