@@ -14,7 +14,7 @@ pip install "rtsm[gpu]" --extra-index-url https://download.pytorch.org/whl/cu128
 rtsm demo
 ```
 
-**246 ms/frame** · **74 objects tracked** · **Apache 2.0** · Python 3.12+ · RTX 3080–5090
+**126 ms/frame** · **65 objects confirmed** · **Apache 2.0** · Python 3.12+ · RTX 3080–5090
 
 **[Demo Video](https://youtu.be/abhXsbvOLQg)** · **[Docs](https://calabi-inc.github.io/rtsm)** · **[PyPI](https://pypi.org/project/rtsm/)**
 
@@ -105,7 +105,7 @@ No hardware needed — replay uses a bundled recording.
 │ ┌──────────────────────┐  ┌──────────────────────┐  ┌──────────────────────┐ │
 │ │ CLIP encode          │  │ Classify             │  │ `external` backend   │ │
 │ │ 224x224 crop per mask│  │ cosine vs vocabulary │  │ your detector's boxes│ │
-│ │ -> 512-D embedding   │  │ -> label + confidence│  │ stand in for Segment │ │
+│ │ -> 768-D embedding   │  │ -> label + confidence│  │ stand in for Segment │ │
 │ └──────────────────────┘  └──────────────────────┘  └──────────────────────┘ │
 │                                                                              │
 └──────────────────────────────────────────────────────────────────────────────┘
@@ -279,13 +279,13 @@ RTSM supports multiple segmentation backends via `segmentation.backend` in `conf
 
 | Backend | License | Description | Seg time* | Pipeline total* | Labels |
 |---------|---------|-------------|-----------|-----------------|--------|
-| `grounded_sam2` | Apache 2.0 | Grounding DINO detect + SAM2 segment | 217 ms | 531 ms | Open-vocab (text-prompted) |
-| `sam2` | Apache 2.0 | SAM2 auto-mask (segment everything) | ~860 ms | ~1000 ms | None (class-agnostic) |
-| `fastsam` | AGPL-3.0 | FastSAM (segment everything) | ~50 ms | ~200 ms | None (class-agnostic) |
-| `yoloe` | AGPL-3.0 | YOLOE detection + segmentation | ~60 ms | ~210 ms | Open-vocab / 4 585 built-in |
-| `dual` | AGPL-3.0 | FastSAM + YOLOE with IoU merge | 100 ms | 246 ms | Dual-confirmed labels |
+| `grounded_sam2` | Apache 2.0 | Grounding DINO detect + SAM2 segment | 236 ms | 365 ms | Open-vocab (text-prompted) |
+| `sam2` | Apache 2.0 | SAM2 auto-mask (segment everything) | 1 215 ms | 1 443 ms | None (class-agnostic) |
+| `fastsam` | AGPL-3.0 | FastSAM (segment everything) | 26 ms | 68 ms | None (class-agnostic) |
+| `yoloe` | AGPL-3.0 | YOLOE detection + segmentation | 26 ms | 72 ms | Open-vocab / 4 585 built-in |
+| `dual` | AGPL-3.0 | FastSAM + YOLOE with IoU merge | 61 ms | 126 ms | Dual-confirmed labels |
 
-*Mean on RTX 5090, 640x480 input.*
+*Mean per processed frame on an RTX 5090, the repository's 1920x1440 iPhone recording replayed at its own rate, code after 0.3.1 (release 0.3.1 itself: `grounded_sam2` 835 ms, `dual` 179 ms). On a Jetson Orin Nano Super see the [benchmark page](https://calabi-inc.github.io/rtsm/benchmarks/#edge-jetson-orin-nano-super).*
 
 **Default:** `grounded_sam2` — permissive license, open-vocabulary, no AGPL dependency.
 
@@ -300,17 +300,19 @@ segmentation:
 
 ## Performance
 
-Benchmarked on RTX 5090 (32 GB), iPhone ARKit recording (240 frames, 76s indoor scene), 640x480 RGB input.
+Benchmarked on RTX 5090 (32 GB), the repository's iPhone recording (240 frames, 76s indoor scene, 1920x1440 RGB), code after 0.3.1.
 
 | Metric | dual (FastSAM + YOLOE) | grounded_sam2 (GDINO + SAM2) |
 |--------|------------------------|------------------------------|
-| **Mean latency** | **246 ms** | **531 ms** |
-| P50 latency | 213 ms | 486 ms |
-| P95 latency | 604 ms | 942 ms |
-| Masks/frame | 25.7 | 11.3 |
-| Objects confirmed | 74 | 42 |
-| Confirmation rate | 65.4% | 59.2% |
+| **Mean latency** | **126 ms** | **365 ms** |
+| P50 latency | 130 ms | 378 ms |
+| P95 latency | 146 ms | 436 ms |
+| Masks/frame | 25.9 | 29.2 |
+| Objects confirmed | 65 | 71 |
+| Confirmation rate | 52.4% | 47.7% |
 | License | AGPL-3.0 | Apache-2.0 |
+
+**On a Jetson Orin Nano Super** (8 GB, 25 W mode, PyTorch, no TensorRT), median per processed frame over five recordings: `fastsam` 409 ms (release 0.3.1: 685 ms), `dual` 624 ms (885 ms), with the same stored memory. At the recordings' own rate the board processes 597 of the 650 frames a lossless run processes under `fastsam` (0.3.1: 375). Method and tables: [benchmark page](https://calabi-inc.github.io/rtsm/benchmarks/#edge-jetson-orin-nano-super).
 
 > Full breakdown: **[Benchmarks](https://calabi-inc.github.io/rtsm/benchmarks/)**
 

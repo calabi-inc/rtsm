@@ -58,7 +58,7 @@ RTSM processes RGB-D frames through a 10-stage pipeline that extracts, tracks, a
 │ ┌──────────────────────┐  ┌──────────────────────┐  ┌──────────────────────┐ │
 │ │ CLIP encode          │  │ Classify             │  │ `external` backend   │ │
 │ │ 224x224 crop per mask│  │ cosine vs vocabulary │  │ your detector's boxes│ │
-│ │ -> 512-D embedding   │  │ -> label + confidence│  │ stand in for Segment │ │
+│ │ -> 768-D embedding   │  │ -> label + confidence│  │ stand in for Segment │ │
 │ └──────────────────────┘  └──────────────────────┘  └──────────────────────┘ │
 │                                                                              │
 └──────────────────────────────────────────────────────────────────────────────┘
@@ -133,7 +133,7 @@ Frames wait in the **ingest lanes** (`rtsm/io/ingest_lanes.py`; `ingest.policy`)
 2. **Heuristics** — Filter masks by area, border contact, depth validity, planarity
 3. **Scoring** — Rank surviving masks by priority (coverage, depth quality, structure)
 4. **Top-K Selection** — Limit to 15 candidates per frame (bounds CLIP compute)
-5. **CLIP Encode** — 224x224 crop → ViT-B/32 → 512-dim embedding
+5. **CLIP Encode** — 224x224 crop → SigLIP ViT-B-16 → 768-dim embedding
 6. **Vocab Classify** — Cosine similarity to text embeddings → label + confidence
 
 ### Segmentation Backends
@@ -142,13 +142,13 @@ The segmentation stage is a pluggable adapter. RTSM ships with five backends:
 
 | Backend | Architecture | License | Mean seg time |
 |---------|-------------|---------|---------------|
-| `grounded_sam2` (default) | Transformer (Swin + Hiera ViT) | Apache-2.0 | 222 ms |
-| `sam2` | Transformer (Hiera ViT) | Apache-2.0 | ~860 ms |
-| `dual` | CNN (YOLOv8) | AGPL-3.0 | 116 ms |
-| `fastsam` | CNN (YOLOv8) | AGPL-3.0 | ~50 ms |
-| `yoloe` | CNN (YOLOv8) | AGPL-3.0 | ~60 ms |
+| `grounded_sam2` (default) | Transformer (Swin + Hiera ViT) | Apache-2.0 | 236 ms |
+| `sam2` | Transformer (Hiera ViT) | Apache-2.0 | 1 215 ms |
+| `dual` | CNN (YOLOv8) | AGPL-3.0 | 61 ms |
+| `fastsam` | CNN (YOLOv8) | AGPL-3.0 | 26 ms |
+| `yoloe` | CNN (YOLOv8) | AGPL-3.0 | 26 ms |
 
-The pipeline stages downstream of segmentation (heuristics, CLIP, association, memory) are identical regardless of backend. See [Benchmarks](../benchmarks.md) for measured performance.
+*RTX 5090, a 1920x1440 iPhone recording.* The pipeline stages downstream of segmentation (heuristics, CLIP, association, memory) are identical regardless of backend. See [Benchmarks](../benchmarks.md) for measured performance.
 
 ### Association
 
@@ -189,7 +189,7 @@ Each frame passes through the full pipeline:
 Frame → Gate → Segment → Filter → Score → Encode → Associate → Update → Index
 ```
 
-Measured end-to-end latency: **210 ms** (dual) / **510 ms** (grounded_sam2) on RTX 5090.
+Measured end-to-end latency: **126 ms** (dual) / **365 ms** (grounded_sam2) on RTX 5090, and 0.4 s on a Jetson Orin Nano Super with the FastSAM-only backend ([Benchmarks](../benchmarks.md)).
 
 ---
 

@@ -125,21 +125,23 @@ It is not a SLAM system and not a detector: it depends on both, and the report i
 The figures below come from the [benchmark page](benchmarks.md) and the [use-case runs](use-cases/index.md). Each use-case number is reported with its spread over three runs of the same input; a difference smaller than that spread means nothing.
 
 <div class="rtsm-stats" markdown>
-<div markdown><span class="rtsm-stats__value">210 ms</span><span class="rtsm-stats__label">mean pipeline latency per processed frame, dual backend, RTX 5090</span></div>
-<div markdown><span class="rtsm-stats__value">510 ms</span><span class="rtsm-stats__label">mean latency, grounded_sam2 (the Apache-2.0 default)</span></div>
+<div markdown><span class="rtsm-stats__value">126 ms</span><span class="rtsm-stats__label">mean pipeline latency per processed frame, dual backend, RTX 5090</span></div>
+<div markdown><span class="rtsm-stats__value">365 ms</span><span class="rtsm-stats__label">mean latency, grounded_sam2 (the Apache-2.0 default)</span></div>
+<div markdown><span class="rtsm-stats__value">409 ms</span><span class="rtsm-stats__label">median per processed frame on a Jetson Orin Nano Super: FastSAM-only backend in PyTorch, five recordings</span></div>
+<div markdown><span class="rtsm-stats__value">92 %</span><span class="rtsm-stats__label">of a lossless run's frames processed at the recordings' own rate on that board (release 0.3.1: 58 %)</span></div>
 <div markdown><span class="rtsm-stats__value">31 %</span><span class="rtsm-stats__label">re-identification of in-view objects on the TUM fr3 office loop (2012 Kinect)</span></div>
 <div markdown><span class="rtsm-stats__value">0</span><span class="rtsm-stats__label">spread on every reported scalar over three same-input runs</span></div>
 </div>
 
 | | dual (FastSAM + YOLOE) | grounded_sam2 (Grounding DINO + SAM2) |
 |---|---|---|
-| Mean latency | 210 ms | 510 ms |
-| P95 latency | 509 ms | 721 ms |
-| Masks per frame | 28.8 | 13.4 |
-| Objects confirmed | 60 | 35 |
+| Mean latency | 126 ms | 365 ms |
+| P95 latency | 146 ms | 436 ms |
+| Masks per frame | 25.9 | 29.2 |
+| Objects confirmed | 65 | 71 |
 | License | AGPL-3.0 | Apache-2.0 |
 
-*RTX 5090, an iPhone ARKit recording of an indoor scene (162 frames). The two backends differ in what they detect, so the object counts are not comparable as accuracy; they describe the backends' behaviour on this recording.*
+*RTX 5090, an iPhone recording of an indoor scene (240 frames, 1920x1440), the code after release 0.3.1; that release measures 179 and 835 ms on the same recording ([Benchmarks](benchmarks.md#against-031)). The two backends differ in what they detect, so the object counts are not comparable as accuracy; they describe the backends' behaviour on this recording.*
 
 ```json
 // "Where is the red backpack?"
