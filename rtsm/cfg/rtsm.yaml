@@ -27,6 +27,10 @@ segmentation:
                                    # validated files (rtsm/models/weights.py) when a backend is created; the file ultralytics
                                    # serves under a name changes upstream (yoloe-26s-seg-pf.pt was replaced on 2026-09-17)
   retina_masks: false                  # false = 640x640 masks (fast), true = original resolution (precise but slow)
+  warmup_inference: true           # each model runs its first inference at start-up, on synthetic input (one frame
+                                   # through the segmenter, two crop batches through the image tower and the
+                                   # vocabulary classifier), so the first frame of a session does not carry the
+                                   # models' start-up; false leaves that to the first frame
 
   fastsam:
     model_path: model_store/fastsam/FastSAM-x.pt

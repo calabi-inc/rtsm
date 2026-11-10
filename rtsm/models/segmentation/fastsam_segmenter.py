@@ -89,10 +89,16 @@ class FastSAMSegmenter(SegmentationAdapter):
 
         # Extract masks directly from results (modern ultralytics, no FastSAMPrompt needed)
         masks = None
+        row_counts = None
         if hasattr(result, "masks") and result.masks is not None:
             mask_data = result.masks.data
             if isinstance(mask_data, torch.Tensor):
-                masks = mask_data.bool().cpu()
+                mask_bool = mask_data.bool()
+                if mask_bool.is_cuda and mask_bool.ndim == 3:
+                    # Mask pixels per row, counted while the stack is still on the GPU: the mask statistics
+                    # start from this count and would otherwise make it with a pass over the stack on the CPU.
+                    row_counts = mask_bool.sum(dim=2).cpu().numpy().astype(np.int64, copy=False)
+                masks = mask_bool.cpu()
             else:
                 masks = torch.from_numpy(np.asarray(mask_data)).bool()
 
@@ -123,6 +129,7 @@ class FastSAMSegmenter(SegmentationAdapter):
             scores=scores,
             labels=None,
             embeddings=None,
+            mask_row_counts=row_counts,
         )
 
     def warmup(self) -> None:

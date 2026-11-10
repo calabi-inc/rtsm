@@ -46,6 +46,53 @@ def encode_image(
     out = feats[0].detach()
     return out if keep_on_device else out.to("cpu")  # [D]
 
+def tensor_preprocess_params(preprocess, device: str = "cpu"):
+    """(size, mean, std) when ``preprocess`` is, for an image that already has the model's input size, nothing
+    but a scaling to [0, 1] and a normalisation; None otherwise.
+
+    It is decided by running it: one probe image of that size goes through ``preprocess`` and through the two
+    tensor operations on ``device``, and the two outputs must be bit-identical. A transform that resizes to
+    another size, crops differently or converts colours fails the probe and keeps the per-image path.
+    mean and std come back as float32 tensors on ``device``, shaped [1,3,1,1].
+    """
+    size = mean = std = None
+    for t in getattr(preprocess, "transforms", None) or []:
+        kind = t.__class__.__name__
+        if kind == "Normalize":
+            mean, std = t.mean, t.std
+        elif kind in ("Resize", "CenterCrop"):
+            s = getattr(t, "size", None)
+            if isinstance(s, (tuple, list)):
+                s = int(s[0]) if len(s) in (1, 2) and all(int(v) == int(s[0]) for v in s) else None
+            if s is not None:
+                size = int(s)
+    if size is None or mean is None or std is None or len(mean) != 3 or len(std) != 3:
+        return None
+    mean_t = torch.as_tensor(mean, dtype=torch.float32, device=device).view(1, 3, 1, 1)
+    std_t = torch.as_tensor(std, dtype=torch.float32, device=device).view(1, 3, 1, 1)
+    probe = np.random.default_rng(0).integers(0, 256, (size, size, 3), dtype=np.uint8)
+    ref = preprocess(Image.fromarray(probe))
+    fast = _tensor_batch([probe], (size, mean_t, std_t), device)
+    if fast is None or not isinstance(ref, torch.Tensor) or ref.dtype != torch.float32 or ref.shape != fast.shape[1:]:
+        return None
+    if not torch.equal(ref, fast[0].to("cpu")):
+        return None
+    return size, mean_t, std_t
+
+
+def _tensor_batch(chunk, tensor_pre, device: str):
+    """[B,3,S,S] float32 on ``device`` for a chunk made only of SxSx3 uint8 arrays (S = the model's input size);
+    None for anything else. The values are those of the per-image transform (tensor_preprocess_params proves it
+    for the model at hand), without a PIL image and a transform call per crop."""
+    size, mean, std = tensor_pre
+    for im in chunk:
+        if not (isinstance(im, np.ndarray) and im.dtype == np.uint8 and im.shape == (size, size, 3)):
+            return None
+    arr = np.stack(chunk)                                   # [B,S,S,3] uint8, one contiguous block
+    x = torch.from_numpy(arr).to(device).permute(0, 3, 1, 2).contiguous().to(torch.float32).div(255)
+    return x.sub_(mean).div_(std)
+
+
 @torch.no_grad()
 def encode_images_batch(
     images: List[ImageLike],
@@ -55,17 +102,24 @@ def encode_images_batch(
     normalize: bool = True,
     batch_size: int = 16,
     keep_on_device: bool = False,
+    tensor_pre=None,
 ) -> torch.Tensor:
     """
     Batched CLIP embeddings for a list of images (paths, PIL, or np.ndarray).
     Returns [N, D] on CPU.
+
+    tensor_pre: the result of tensor_preprocess_params for this model's ``preprocess``. With it, a chunk of
+    uint8 arrays that already have the model's input size is scaled and normalised as one tensor on the device
+    (the same values, see there); every other input goes through ``preprocess`` image by image, as before.
     """
     model_dtype = next(model.parameters()).dtype
     all_feats: List[torch.Tensor] = []
     for i in range(0, len(images), batch_size):
         chunk = images[i : i + batch_size]
-        pil_imgs = [_to_pil_rgb(im) for im in chunk]
-        batch = torch.stack([preprocess(im) for im in pil_imgs])  # [B,C,H,W]
+        batch = _tensor_batch(chunk, tensor_pre, device) if tensor_pre is not None else None
+        if batch is None:
+            pil_imgs = [_to_pil_rgb(im) for im in chunk]
+            batch = torch.stack([preprocess(im) for im in pil_imgs])  # [B,C,H,W]
         batch = batch.to(device=device, dtype=model_dtype)
         feats = model.encode_image(batch)
         if normalize:

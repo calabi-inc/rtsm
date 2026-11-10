@@ -86,6 +86,18 @@ def get_segmenter(cfg: Dict[str, Any]) -> SegmentationAdapter:
         )
 
 
+def segmentation_vocab(cfg: Dict[str, Any]) -> Optional[list]:
+    """The vocabulary the configured backend is called with, None for a backend that takes none.
+    One place for it: the pipeline's call per frame and the warm-up call at start-up use the same value."""
+    seg_cfg = cfg.get("segmentation", {})
+    backend = seg_cfg.get("backend", "fastsam")
+    if backend in ("dual", "yoloe"):
+        return seg_cfg.get("yoloe", {}).get("vocab", None)
+    if backend == "grounded_sam2":
+        return seg_cfg.get("grounded_sam2", {}).get("vocab", None)
+    return None
+
+
 def _create_fastsam(cfg: Dict[str, Any], seg_cfg: Dict[str, Any]) -> SegmentationAdapter:
     """Create FastSAM segmenter from config."""
     fastsam_cfg = seg_cfg.get("fastsam", {})
@@ -181,4 +193,5 @@ __all__ = [
     "SegmentationAdapter",
     "SegmentationResult",
     "get_segmenter",
+    "segmentation_vocab",
 ]
