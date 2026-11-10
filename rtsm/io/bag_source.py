@@ -30,6 +30,7 @@ from typing import Any, Dict, Optional
 from rtsm.io.bag_reader import BagRefusal, BagStats, iter_bag_frames
 from rtsm.io.contracts import SourceContext
 from rtsm.io.ingest_frontend import WEBSOCKET_POLICY, IngestFrontEnd
+from rtsm.io.pacing import sleep_until
 
 logger = logging.getLogger(__name__)
 
@@ -158,8 +159,7 @@ class BagSource:
                 if lag > PACE_LATE_TOL_S:
                     self._pace_late += 1
                     self._pace_max_lag_s = max(self._pace_max_lag_s, lag)
-                while time.monotonic() < deadline and not self._stop_event.is_set():
-                    time.sleep(min(deadline - time.monotonic(), 0.1))
+                sleep_until(deadline, self._stop_event)
             self._fe.last_rx_mono = time.monotonic()
             try:
                 pkt = self._fe.admit(raw)

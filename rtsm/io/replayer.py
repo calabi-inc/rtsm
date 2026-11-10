@@ -23,6 +23,7 @@ from typing import List, Optional
 
 from rtsm.io.ingest_queue import IngestQueue
 from rtsm.io.ingest_frontend import WEBSOCKET_POLICY, IngestFrontEnd
+from rtsm.io.pacing import sleep_until
 from rtsm.io.websocket import handle_lens_text_message, parse_lens_message
 
 logger = logging.getLogger(__name__)
@@ -200,18 +201,14 @@ class ReplayReceiver:
                 if self._stop_event.is_set():
                     break
 
-                # Sleep to match original recording rate (adjusted by replay_speed)
+                # Sleep to match original recording rate (adjusted by replay_speed),
+                # in slices so that stop() is seen within one of them. sleep_until
+                # reads the clock once per slice: with two readings the deadline can
+                # pass between them and the length handed to time.sleep is negative.
                 t_mono = entry["t_mono_s"]
                 delta = t_mono - prev_t
                 if delta > 0:
-                    adjusted_delta = delta / self._replay_speed
-                    # Use small sleep chunks so stop_event is responsive
-                    deadline = time.monotonic() + adjusted_delta
-                    while time.monotonic() < deadline:
-                        if self._stop_event.is_set():
-                            break
-                        remaining = deadline - time.monotonic()
-                        time.sleep(min(remaining, 0.1))
+                    sleep_until(time.monotonic() + delta / self._replay_speed, self._stop_event)
                 prev_t = t_mono
 
                 kind = entry["_kind"]
