@@ -532,6 +532,14 @@ def run_once(cfg: dict, models: Any, resolved: ResolvedEval, run_dir: Path, run_
         start_analytics()
     src.start()
     aborted = _drain_and_stop(rt, src, max_wall_s=resolved.max_wall_s)
+    # A source that stopped on an error delivered a part of its input. The run is recorded as aborted, so that
+    # a short run cannot be read as a whole one: it used to end like any other, with fewer frames and another
+    # fingerprint. The error itself is in the summary under source.error and, with its traceback, in the log.
+    src_error = getattr(src, "error", None)
+    if src_error is not None and aborted is None:
+        aborted = "source_error"
+        logger.error("[eval] run %d: the source stopped on an error (%s: %s); the run is incomplete and is recorded as aborted",
+                     run_index, type(src_error).__name__, src_error)
     # force-flush every object to this run's vector store (the replay runner's rule)
     flushed = 0
     try:

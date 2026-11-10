@@ -5,7 +5,7 @@ length of the slice) the deadline can pass between them; the length is then nega
 ValueError and the thread ends with the recording half replayed. The run used to finish normally all the same.
 
 These tests drive the wait and both sources with a clock that advances on every reading, so that a deadline
-falls between two consecutive readings. CPU-only.
+falls between two consecutive readings, and check that a source that does stop on an error says so. CPU-only.
 """
 from __future__ import annotations
 
@@ -171,6 +171,40 @@ def test_an_unpaced_replay_survives_a_clock_that_advances_in_ticks(tmp_path, mon
         rr = _replay(rec, 1e9, events)
         assert [(e.decision, e.frame_seq) for e in events] == [("enqueued", i) for i in range(1, 9)], advance_on
         assert getattr(rr, "error", None) is None
+
+
+def test_a_replay_that_stops_on_an_error_says_so(tmp_path, monkeypatch, caplog):
+    """wait() still returns (a hung replay is worse than a short one), but the short one is no longer taken for a
+    whole one: the error is logged, kept on the source and reported in its statistics."""
+    rec = _recording(tmp_path, 5, gap_s=0.010)
+
+    class ThirdWaitFails(SteppingTime):
+        def sleep(self, seconds: float) -> None:
+            if len(self.slept) == 2:
+                raise OSError("the wait failed")        # anything that is not caught per frame ends the thread
+            super().sleep(seconds)
+
+    clock = ThirdWaitFails(step=1e-6)
+    _use_clock(monkeypatch, clock, "rtsm.io.replayer")
+    monkeypatch.setattr(threading, "excepthook", lambda args: None)            # the pre-fix traceback stays out of the output
+    events: list = []
+    with caplog.at_level("ERROR", logger="rtsm.io.replayer"):
+        rr = _replay(rec, 1.0, events)
+    assert [(e.decision, e.frame_seq) for e in events] == [("enqueued", 1), ("enqueued", 2), ("enqueued", 3)]
+    st = rr.stats()
+    assert isinstance(rr.error, OSError) and st["error"] == "the wait failed" and st["done"] is True and st["alive"] is False
+    assert st["messages"] == 5 and st["replayed"] == 3 and st["enqueued"] == 3
+    assert any("NOT replayed whole" in r.getMessage() for r in caplog.records)
+
+    # a whole replay: no error, every message replayed
+    whole = tmp_path / "whole"
+    whole.mkdir()
+    clock = SteppingTime(step=1e-6)
+    _use_clock(monkeypatch, clock, "rtsm.io.replayer")
+    ok = _replay(_recording(whole, 4, gap_s=0.010), 1.0, [])
+    st = ok.stats()
+    assert ok.error is None and st["error"] is None and st["done"] is True
+    assert st["messages"] == 4 and st["replayed"] == 4 and st["enqueued"] == 4 and st["path"].endswith("rec")
 
 
 # ───────────────────────────── the bag source ─────────────────────────────

@@ -270,6 +270,63 @@ def test_max_wall_abort_is_recorded(cfg, bag, tmp_path):
     assert result.runs[0]["aborted"] == "max_wall_s" and result.repeats["aborted"] == ["max_wall_s"]
 
 
+def test_a_bag_reader_that_fails_midway_aborts_the_run(cfg, bag, tmp_path, monkeypatch):
+    """A source that stops on an error delivered a part of its input. The run used to end like any other, with fewer
+    frames and another fingerprint; it is recorded as aborted (source_error) with the error in the summary."""
+    import rtsm.io.bag_source as BS
+    real_iter = BS.iter_bag_frames
+
+    def fails_after_five(*a, **k):
+        for n, raw in enumerate(real_iter(*a, **k)):
+            if n == 5:
+                raise OSError("read failed")
+            yield raw
+
+    monkeypatch.setattr(BS, "iter_bag_frames", fails_after_five)
+    result = R.run_eval(cfg, R.EvalOptions(input=str(bag), out=str(tmp_path / "out"), report=False), models=object(),
+                        runtime_factory=fake_runtime_factory)
+    s = result.runs[0]
+    assert s["aborted"] == "source_error" and result.repeats["aborted"] == ["source_error"]
+    assert s["source"]["error"] == "read failed" and sum(s["frames"]["receiver"].values()) == 5      # 5 of the 12 frames arrived
+    assert json.loads((tmp_path / "out" / "run_1" / "summary.json").read_text(encoding="utf-8"))["aborted"] == "source_error"
+    # the same input without the failure is a whole run
+    monkeypatch.setattr(BS, "iter_bag_frames", real_iter)
+    whole = R.run_eval(cfg, R.EvalOptions(input=str(bag), out=str(tmp_path / "whole"), report=False), models=object(),
+                       runtime_factory=fake_runtime_factory)
+    assert whole.runs[0]["aborted"] is None and whole.runs[0]["source"]["error"] is None
+    assert sum(whole.runs[0]["frames"]["receiver"].values()) == 12
+
+
+def test_a_replay_that_stops_on_an_error_aborts_the_run(cfg, tmp_path, monkeypatch):
+    """The same for a Lens recording: the replay thread used to die with a traceback on stderr and nothing else;
+    the run's summary now carries the source's statistics with the error and how far the replay got."""
+    import rtsm.io.replayer as replayer_mod
+    from test_replay_pacing import _recording
+
+    rec = _recording(tmp_path, 5, gap_s=0.001)
+    assert R.input_kind(rec) == "replay"
+    whole = R.run_eval(cfg, R.EvalOptions(input=str(rec), out=str(tmp_path / "whole"), report=False), models=object(),
+                       runtime_factory=fake_runtime_factory)
+    st = whole.runs[0]["source"]
+    assert whole.runs[0]["aborted"] is None and st["error"] is None and (st["messages"], st["replayed"], st["done"]) == (5, 5, True)
+
+    calls = {"n": 0}
+    real_wait = replayer_mod.sleep_until
+
+    def third_wait_fails(*a, **k):
+        calls["n"] += 1
+        if calls["n"] == 3:
+            raise OSError("the wait failed")
+        return real_wait(*a, **k)
+
+    monkeypatch.setattr(replayer_mod, "sleep_until", third_wait_fails)
+    result = R.run_eval(cfg, R.EvalOptions(input=str(rec), out=str(tmp_path / "out"), report=False), models=object(),
+                        runtime_factory=fake_runtime_factory)
+    s = result.runs[0]
+    assert s["aborted"] == "source_error" and result.repeats["aborted"] == ["source_error"]
+    assert s["source"]["error"] == "the wait failed" and (s["source"]["messages"], s["source"]["replayed"]) == (5, 3)
+
+
 def test_refused_bag_stops_before_models(cfg, tmp_path):
     from test_bag_reader import simple_bag_messages, write_bag
     nod = write_bag(tmp_path / "nodepth", [m for m in simple_bag_messages(3) if "depth" not in m[0]])
@@ -289,7 +346,7 @@ def test_cli_main_and_errors(cfg, bag, tmp_path, monkeypatch, capsys):
         r = R.resolve_eval(cfg, opts)
         res = R.EvalResult(out_dir=tmp_path / "o", resolved=r)
         res.runs.append({"memory": {"fingerprint": "abc", "objects_count": 1, "confirmed_count": 0}, "frames": {"processed": 1},
-                         "wall_s": 0.1, "aborted": None, "run_dir": "x"})
+                         "wall_s": 0.1, "aborted": seen.get("aborted"), "run_dir": "x"})
         return res
 
     monkeypatch.setattr(R, "run_eval", fake_run_eval)
@@ -299,6 +356,9 @@ def test_cli_main_and_errors(cfg, bag, tmp_path, monkeypatch, capsys):
     assert "keyframes={'kind': 'interval'" in out and '"identical_fingerprints": true' in out and "(representative)" in out
     assert seen["opts"].report is True
     assert R.main([str(bag), "--no-report"]) == 0 and seen["opts"].report is False
+    seen["aborted"] = "source_error"                 # a run whose source stopped on an error: exit status 1
+    assert R.main([str(bag), "--no-report"]) == 1 and '"source_error"' in capsys.readouterr().out
+    seen["aborted"] = None
     with pytest.raises(SystemExit) as ex:
         R.main([str(tmp_path / "missing.bag")])
     assert ex.value.code == 2 and "input not found" in capsys.readouterr().err
