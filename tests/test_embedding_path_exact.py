@@ -356,6 +356,89 @@ def test_warm_embedder_runs_the_per_frame_batch_and_half_a_batch():
     assert engine.warm_embedder(Broken(), Clf(), {}) is None
 
 
+def _fake_engine(monkeypatch):
+    """load_models over stand-ins that record the order of their calls."""
+    calls = []
+
+    class Seg:
+        name = "fake"
+
+        def warmup(self):
+            calls.append("load segmenter")
+
+        def segment(self, image, vocab=None):
+            calls.append("segment")
+            return SimpleNamespace(count=1)
+
+    class Clip:
+        def __init__(self, *a, **k):
+            calls.append("load image tower")
+            self.artifacts = SimpleNamespace(model=None, tokenizer=None, preprocess=None)
+
+        def encode_images_batch(self, images, batch_size=16):
+            calls.append("encode")
+            return torch.ones(len(images), 4)
+
+    class Clf:
+        def __init__(self, *a, **k):
+            calls.append("load vocabulary")
+
+        def ensure_text_on_device(self):
+            pass
+
+        def classify_feats(self, feats, return_topk=None):
+            calls.append("classify")
+            return []
+
+    import rtsm.models.clip.adapter as adapter_mod
+    import rtsm.models.clip.vocab_classifier as clf_mod
+    monkeypatch.setattr(engine, "get_segmenter", lambda cfg: Seg())
+    monkeypatch.setattr(adapter_mod, "CLIPAdapter", Clip)
+    monkeypatch.setattr(clf_mod, "ClipVocabClassifier", Clf)
+    return calls
+
+
+def test_load_models_warms_up_after_every_load(monkeypatch):
+    """Warming the segmenter before the image tower and the vocabulary are loaded keeps more GPU memory for the
+    life of the process; the warm-ups come last, in the order a frame calls the models."""
+    calls = _fake_engine(monkeypatch)
+    models = engine.load_models({})
+    assert calls == ["load segmenter", "load image tower", "load vocabulary", "segment", "segment", "encode", "encode", "classify"]
+    assert models.segmenter is not None and models.clip is not None and models.vocab_clf is not None
+
+
+def test_load_models_without_the_warm_up(monkeypatch):
+    calls = _fake_engine(monkeypatch)
+    engine.load_models({"segmentation": {"warmup_inference": False}})
+    assert calls == ["load segmenter", "load image tower", "load vocabulary"]
+
+
+@pytest.mark.gpu
+def test_the_vocabulary_encoding_gives_its_working_memory_back(tmp_path):
+    """The classifier encodes its whole vocabulary in one batch at start-up. torch would keep that working memory
+    cached for the life of the process; the classifier releases it once the text features are on the CPU."""
+    if not torch.cuda.is_available():
+        pytest.skip("needs a CUDA device")
+
+    class TextTower(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.w = torch.nn.Parameter(torch.ones(1, device="cuda"))
+
+        def encode_text(self, toks):
+            work = torch.zeros(toks.shape[0], 64 * 2**20 // max(1, toks.shape[0]), device="cuda")   # 256 MB of working memory
+            return (work[:, :8] + toks[:, :8].float()) * self.w
+
+    vocab = tmp_path / "vocab.yaml"
+    vocab.write_text("templates: ['a {}']\nclasses:\n" + "".join(f"  - id: c{i}\n" for i in range(32)), encoding="utf-8")
+    torch.cuda.empty_cache()
+    before = torch.cuda.memory_reserved()
+    clf = ClipVocabClassifier(TextTower(), lambda prompts: torch.arange(len(prompts) * 8).view(len(prompts), 8), None, str(vocab),
+                              device="cuda", text_on_cpu=True)
+    assert clf.text_feats.shape == (32, 8)
+    assert torch.cuda.memory_reserved() - before < 64 * 2**20
+
+
 def test_segmentation_vocab_per_backend():
     seg = {"yoloe": {"vocab": ["cup"]}, "grounded_sam2": {"vocab": ["chair"]}}
     for backend, want in (("dual", ["cup"]), ("yoloe", ["cup"]), ("grounded_sam2", ["chair"]), ("fastsam", None),

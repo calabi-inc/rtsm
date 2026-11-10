@@ -144,8 +144,10 @@ def load_models(cfg: dict) -> Models:
     """Segmenter (warmed up), CLIP adapter, CLIP vocabulary classifier -- the
     GPU-heavy objects, loaded once. Each model also runs its first inference
     here, on synthetic input (warm_segmenter / warm_embedder), so that the
-    first frame of a session is not the first call of every model; the
-    segmenter goes first, while the process holds the least memory."""
+    first frame of a session is not the first call of every model. Both
+    warm-ups run after every load, in the order a frame calls the models:
+    warming the segmenter before the image tower and the vocabulary were
+    loaded kept about 0.3 GB more GPU memory for the life of the process."""
     from rtsm.models.clip.adapter import CLIPAdapter
     from rtsm.models.clip.vocab_classifier import ClipVocabClassifier
 
@@ -153,8 +155,6 @@ def load_models(cfg: dict) -> Models:
     segmenter = get_segmenter(cfg)
     logger.info(f"Segmentation backend created: {segmenter.name}")
     segmenter.warmup()
-    if warm:
-        warm_segmenter(segmenter, cfg)
     logger.info(f"Segmentation models loaded and ready: {segmenter.name}")
 
     clip_cfg = cfg.get("clip", {})
@@ -167,6 +167,7 @@ def load_models(cfg: dict) -> Models:
                                     str(cfg_path("clip/vocab.yaml")), device=cfg.get("device", "cuda"))
     logger.info(f"CLIP vocabulary classifier successfully initialized")
     if warm:
+        warm_segmenter(segmenter, cfg)
         warm_embedder(clip, vocab_clf, cfg)
     return Models(segmenter=segmenter, clip=clip, vocab_clf=vocab_clf)
 

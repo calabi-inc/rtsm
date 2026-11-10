@@ -114,6 +114,13 @@ class ClipVocabClassifier:
             v = v / v.norm().clamp_min(1e-12)
             per_class.append(v.cpu())  # keep CPU float32; move to device later
         text_feats = torch.stack(per_class, dim=0)  # [C, D]
+        # The whole vocabulary went through the text tower as one batch (about a thousand prompts with the
+        # packaged vocabulary). torch keeps that working memory cached for the life of the process, although
+        # nothing asks for blocks of that size again: about 2 GB of GPU memory, which on a Jetson is the
+        # board's RAM. Hand it back; what the models need per frame is allocated again at their first call.
+        del t, toks
+        if self.device.type == "cuda" and torch.cuda.is_available():
+            torch.cuda.empty_cache()
         return text_feats, class_ids, params_yaml
 
     @torch.no_grad()
