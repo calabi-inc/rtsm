@@ -39,18 +39,20 @@ rtsm report eval_output/fr3                             # regenerate metrics.jso
 eval_output/<input>-<mode>-<stamp>/
   resolved.json      the resolved settings, cadence, config fingerprint, commit (+ dirty flag and diff digest), versions, the model files the config names (size, sha256, or exists: false), the hub model ids, the compute (gpu, cuda, device_model, power_mode), the pacing (speed), the ingest policy as configured and as resolved, and gt_dir (the ground-truth sidecar the run was scored against, or null)
   bag_probe.json     (bags) topics, pose source, registration
-  repeats.json       fingerprints / counts / wall time per run, identical_fingerprints
+  repeats.json       fingerprints / counts / wall time per run, identical_fingerprints, aborted (per run: null, max_wall_s or source_error)
   metrics.json       every metric per run + the aggregate with floors; per-object / per-cluster / per-frame records; with --gt, a gt block per run (the match of every RTSM object, the observable true objects, the label confusion) and gt.* scalars in the aggregate
   report.md          the number sheet
   run_1/
     events.jsonl     the frame-flow trace + the pose / obs / view / mem / det ledgers (schema 4, ledgers schema 5)
-    summary.json     counts (receiver decisions, dequeue outcomes, gate shadows), the memory (every object in the /objects shape + the fingerprint), latency and segmentation aggregates, the source's statistics
+    summary.json     counts (receiver decisions, dequeue outcomes, gate shadows), the memory (every object in the /objects shape + the fingerprint), latency and segmentation aggregates, the source's statistics (its error, when it stopped on one), aborted
     faiss/           this run's vector store
     crops/           (--save-crops) the memory's per-object JPEG snapshots, <id>/<k>.jpg + index.json
   run_2/ …
 ```
 
 `summary.json.memory.fingerprint` is the sha256 of the sorted multiset of `(label_primary, xyz rounded to 3 decimals, hits, confirmed)` — the same definition the determinism gates use (the session1 anchor above).
+
+A run that did not see its whole input is recorded as aborted. `summary.json.aborted`, and the list in `repeats.json`, is `null` for a whole run, `max_wall_s` when `--max-wall-s` cut it short, and `source_error` when the bag reader or the replay of a recording stopped on an error. The error is then in `summary.json.source.error` (a replay also says how far it got: `replayed` of `messages`), its traceback is in the console, and `rtsm eval` exits with status 1. Such a run has fewer frames and another fingerprint than a whole one, so it is not a repeat of one.
 
 ## The report
 

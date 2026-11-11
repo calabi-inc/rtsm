@@ -19,10 +19,11 @@ import logging
 import os
 import threading
 import time
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from rtsm.io.ingest_queue import IngestQueue
 from rtsm.io.ingest_frontend import WEBSOCKET_POLICY, IngestFrontEnd
+from rtsm.io.pacing import sleep_until
 from rtsm.io.websocket import handle_lens_text_message, parse_lens_message
 
 logger = logging.getLogger(__name__)
@@ -114,6 +115,10 @@ class ReplayReceiver:
 
         self._replay_speed = max(0.1, replay_speed)  # <1 = slower, >1 = faster
 
+        self._error: Optional[BaseException] = None   # what ended the replay early, if anything did
+        self._messages: Optional[int] = None          # entries of the recording's timeline (binary + text), once loaded
+        self._replayed = 0                            # entries the loop got through
+        self._enqueued = 0
         self._thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
         self._done = threading.Event()
@@ -153,13 +158,32 @@ class ReplayReceiver:
         t = self._thread
         return {"alive": bool(t is not None and t.is_alive()), **self._fe.liveness()}
 
+    def stats(self) -> Dict[str, Any]:
+        """liveness() plus what the replay did, for a run's summary: whoever reads it must be able to tell a
+        whole replay from one that stopped early (``error`` set, ``replayed`` below ``messages``)."""
+        return {**self.liveness(), "path": self._recording_dir, "messages": self._messages, "replayed": self._replayed,
+                "enqueued": self._enqueued, "done": self._done.is_set(),
+                "error": (str(self._error) if self._error else None)}
+
+    @property
+    def error(self) -> Optional[BaseException]:
+        return self._error
+
     # ── Core replay loop ──
 
     def _replay_loop(self) -> None:
         # _done is set on EVERY exit (also an unexpected exception): run.py /
         # demo.py block on wait(), and a hung replay is worse than a short one.
+        # A short one must not pass for a whole one, though: what ended it is
+        # logged and kept (error / stats()), and `rtsm eval` records the run as
+        # aborted. Before, the thread died with a traceback on stderr only and
+        # the run finished normally on the frames delivered so far.
         try:
             self._replay_loop_impl()
+        except Exception as e:  # noqa: BLE001 -- surfaced through stats()/error, never silently lost
+            self._error = e
+            logger.exception("[replay] stopped by an error after %d of %s messages: the recording was NOT replayed whole (%s)",
+                             self._replayed, (self._messages if self._messages is not None else "?"), self._recording_dir)
         finally:
             self._done.set()
 
@@ -180,6 +204,7 @@ class ReplayReceiver:
 
         total_binary = len(binary_entries)
         frames_enqueued = 0
+        self._messages = len(timeline)
 
         if not timeline:
             logger.warning("[replay] Empty recording, nothing to replay")
@@ -196,22 +221,19 @@ class ReplayReceiver:
         )
 
         with open(self._bin_path, "rb") as bin_f:
-            for entry in timeline:
+            for i, entry in enumerate(timeline):
+                self._replayed = i                  # entries the loop got through before this one
                 if self._stop_event.is_set():
                     break
 
-                # Sleep to match original recording rate (adjusted by replay_speed)
+                # Sleep to match original recording rate (adjusted by replay_speed),
+                # in slices so that stop() is seen within one of them. sleep_until
+                # reads the clock once per slice: with two readings the deadline can
+                # pass between them and the length handed to time.sleep is negative.
                 t_mono = entry["t_mono_s"]
                 delta = t_mono - prev_t
                 if delta > 0:
-                    adjusted_delta = delta / self._replay_speed
-                    # Use small sleep chunks so stop_event is responsive
-                    deadline = time.monotonic() + adjusted_delta
-                    while time.monotonic() < deadline:
-                        if self._stop_event.is_set():
-                            break
-                        remaining = deadline - time.monotonic()
-                        time.sleep(min(remaining, 0.1))
+                    sleep_until(time.monotonic() + delta / self._replay_speed, self._stop_event)
                 prev_t = t_mono
 
                 kind = entry["_kind"]
@@ -233,6 +255,7 @@ class ReplayReceiver:
                         continue
                     if pkt is not None and self._fe.enqueue(pkt):
                         frames_enqueued += 1
+                        self._enqueued = frames_enqueued
 
                 elif kind == "text":
                     try:
@@ -246,6 +269,8 @@ class ReplayReceiver:
                         )
                     except Exception as e:
                         logger.error(f"[replay] text message error: {e}")
+            else:
+                self._replayed = len(timeline)      # not stopped: the whole timeline
 
         remaining_q = self._ingest_q.qsize()
         logger.info(
