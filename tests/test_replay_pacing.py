@@ -207,6 +207,40 @@ def test_a_replay_that_stops_on_an_error_says_so(tmp_path, monkeypatch, caplog):
     assert st["messages"] == 4 and st["replayed"] == 4 and st["enqueued"] == 4 and st["path"].endswith("rec")
 
 
+def test_an_unpaced_replay_does_not_wait_at_all(tmp_path, monkeypatch):
+    """``replay_speed=None``: the recording is offered as fast as the queue accepts it, with no wait between two
+    messages. A very large speed is not the same thing: every gap stays a deadline, a fraction of a nanosecond away,
+    and on a clock that stands still between ticks each such wait lasts until the next tick (15.6 ms per message on
+    Windows before Python 3.13, which is what an unpaced `rtsm eval` of a recording used to cost)."""
+    import rtsm.io.replayer as replayer_mod
+
+    rec = _recording(tmp_path, 6, gap_s=0.2)
+    waits: list = []
+    monkeypatch.setattr(replayer_mod, "sleep_until", lambda *a, **k: waits.append(a) or True)
+    for speed in (None, float("inf")):
+        events: list = []
+        rr = _replay(rec, speed, events)
+        assert [(e.decision, e.frame_seq) for e in events] == [("enqueued", i) for i in range(1, 7)]
+        st = rr.stats()
+        assert rr.error is None and st["replayed"] == 6 and st["speed"] is None
+    assert waits == []
+    # a speed, however large, is a pace: one wait per gap
+    rr = _replay(rec, 1e9, [])
+    assert len(waits) == 5 and rr.stats()["speed"] == 1e9
+
+
+def test_the_replay_source_takes_none_as_not_paced(tmp_path):
+    from rtsm.io.contracts import SourceContext
+    from rtsm.io.sources import make_source
+
+    rec = _recording(tmp_path, 2, gap_s=0.01)
+    ctx = SourceContext(ingest_queue=IngestQueue(8))
+    speed_of = lambda **options: make_source("replay", {}, ctx, recording_dir=str(rec), **options).stats()["speed"]   # noqa: E731
+    assert speed_of(replay_speed=None) is None
+    assert speed_of() == 1.0                            # the default stays the recording's own rate
+    assert speed_of(replay_speed=2.0) == 2.0 and speed_of(replay_speed=0) == 1.0 and speed_of(replay_speed=0.01) == 0.1
+
+
 # ───────────────────────────── the bag source ─────────────────────────────
 
 def test_a_paced_bag_survives_a_deadline_that_passes_between_two_clock_readings(tmp_path, monkeypatch):

@@ -119,12 +119,14 @@ def ros2_source(cfg: dict, ctx: SourceContext, **options: Any):
 
 def replay_source(cfg: dict, ctx: SourceContext, **options: Any):
     """The recording replayer (``rtsm/io/replayer.py``). Options:
-    ``recording_dir`` (required), ``replay_speed`` (default 1.0). The replayer
+    ``recording_dir`` (required), ``replay_speed`` (default 1.0, the recording's
+    own rate; ``None`` = not paced, as fast as the queue accepts). The replayer
     takes no clearance sink (the guard is a live-receiver feature)."""
     recording_dir = options.get("recording_dir")
     if not recording_dir:
         raise ValueError("replay source needs recording_dir")
     from rtsm.io.replayer import ReplayReceiver
+    speed = options.get("replay_speed", 1.0)
     return ReplayReceiver(
         recording_dir=str(recording_dir),
         ingest_queue=ctx.ingest_queue,
@@ -141,7 +143,7 @@ def replay_source(cfg: dict, ctx: SourceContext, **options: Any):
         on_frame_correction=ctx.on_frame_correction,
         on_session_change=ctx.on_session_change,
         latency_analytics=ctx.latency_analytics,
-        replay_speed=float(options.get("replay_speed", 1.0) or 1.0),
+        replay_speed=(None if speed is None else float(speed or 1.0)),
         event_sink=ctx.event_sink,
         ledger_sink=ctx.ledger_sink,
         throttle_clock=ctx.clock_mode,

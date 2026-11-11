@@ -521,7 +521,7 @@ def run_once(cfg: dict, models: Any, resolved: ResolvedEval, run_dir: Path, run_
     )
     if resolved.input_kind == "replay":
         src = source_factory("replay", cfg_k, ctx, recording_dir=resolved.input,
-                             replay_speed=(float(resolved.speed) if resolved.speed else 1e9))   # as fast as accepted unless paced
+                             replay_speed=(float(resolved.speed) if resolved.speed else None))  # not paced unless --speed: as fast as accepted
         if opts.max_frames:
             logger.warning("[eval] --max-frames applies to bag inputs only; a recording replays whole")
     else:

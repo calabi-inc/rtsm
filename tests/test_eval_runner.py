@@ -297,10 +297,9 @@ def test_a_bag_reader_that_fails_midway_aborts_the_run(cfg, bag, tmp_path, monke
     assert sum(whole.runs[0]["frames"]["receiver"].values()) == 12
 
 
-def test_a_replay_that_stops_on_an_error_aborts_the_run(cfg, tmp_path, monkeypatch):
+def test_a_replay_that_stops_on_an_error_aborts_the_run(cfg, tmp_path):
     """The same for a Lens recording: the replay thread used to die with a traceback on stderr and nothing else;
     the run's summary now carries the source's statistics with the error and how far the replay got."""
-    import rtsm.io.replayer as replayer_mod
     from test_replay_pacing import _recording
 
     rec = _recording(tmp_path, 5, gap_s=0.001)
@@ -310,21 +309,43 @@ def test_a_replay_that_stops_on_an_error_aborts_the_run(cfg, tmp_path, monkeypat
     st = whole.runs[0]["source"]
     assert whole.runs[0]["aborted"] is None and st["error"] is None and (st["messages"], st["replayed"], st["done"]) == (5, 5, True)
 
-    calls = {"n": 0}
-    real_wait = replayer_mod.sleep_until
-
-    def third_wait_fails(*a, **k):
-        calls["n"] += 1
-        if calls["n"] == 3:
-            raise OSError("the wait failed")
-        return real_wait(*a, **k)
-
-    monkeypatch.setattr(replayer_mod, "sleep_until", third_wait_fails)
+    # a damaged index: the fourth entry has lost its offset, which no per-frame handling catches
+    lines = (rec / "index.jsonl").read_text(encoding="utf-8").splitlines()
+    entry = json.loads(lines[3]); del entry["offset"]; lines[3] = json.dumps(entry)
+    with open(rec / "index.jsonl", "w", encoding="utf-8") as fh:
+        for line in lines:
+            print(line, file=fh)
     result = R.run_eval(cfg, R.EvalOptions(input=str(rec), out=str(tmp_path / "out"), report=False), models=object(),
                         runtime_factory=fake_runtime_factory)
     s = result.runs[0]
     assert s["aborted"] == "source_error" and result.repeats["aborted"] == ["source_error"]
-    assert s["source"]["error"] == "the wait failed" and (s["source"]["messages"], s["source"]["replayed"]) == (5, 3)
+    assert s["source"]["error"] == "'offset'" and (s["source"]["messages"], s["source"]["replayed"]) == (5, 3)
+
+
+def test_an_eval_without_speed_does_not_pace_the_replay_of_a_recording(cfg, tmp_path, monkeypatch):
+    """Without --speed the replay source is asked for no pacing at all. It used to get a speed of 1e9, which is still
+    one wait per message (a clock tick each on Windows before Python 3.13). With --speed it gets that speed."""
+    import rtsm.io.replayer as replayer_mod
+    from test_replay_pacing import _recording
+
+    rec = _recording(tmp_path, 5, gap_s=0.05)
+    waits: list = []
+    real_wait = replayer_mod.sleep_until
+
+    def counted_wait(*a, **k):
+        waits.append(1)
+        return real_wait(*a, **k)
+
+    monkeypatch.setattr(replayer_mod, "sleep_until", counted_wait)
+    unpaced = R.run_eval(cfg, R.EvalOptions(input=str(rec), out=str(tmp_path / "unpaced"), report=False), models=object(),
+                         runtime_factory=fake_runtime_factory)
+    src = unpaced.runs[0]["source"]
+    assert waits == [] and src["speed"] is None and (src["messages"], src["replayed"], src["error"]) == (5, 5, None)
+    paced = R.run_eval(cfg, R.EvalOptions(input=str(rec), out=str(tmp_path / "paced"), report=False, speed=4.0), models=object(),
+                       runtime_factory=fake_runtime_factory)
+    assert len(waits) == 4 and paced.runs[0]["source"]["speed"] == 4.0
+    # the pace changes when frames arrive, not which ones are admitted (the sensor clock decides that)
+    assert paced.runs[0]["frames"]["receiver"] == unpaced.runs[0]["frames"]["receiver"]
 
 
 def test_refused_bag_stops_before_models(cfg, tmp_path):
