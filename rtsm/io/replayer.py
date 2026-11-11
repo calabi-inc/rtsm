@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 import threading
 import time
@@ -50,6 +51,9 @@ class ReplayReceiver:
     start() launches a daemon thread, stop() signals it to halt.
     Frames are fed at the original recording rate (real-time) so that
     TTL caches and throttles in the pipeline behave identically.
+    ``replay_speed`` scales that rate; ``None`` replays without pacing, as
+    fast as the queue accepts (what ``rtsm eval`` does unless ``--speed`` is
+    given).
     """
 
     name = "replay"
@@ -70,7 +74,7 @@ class ReplayReceiver:
         on_pose_corrections: Optional[callable] = None,
         on_pose_corrections_batch: Optional[callable] = None,
         latency_analytics=None,
-        replay_speed: float = 1.0,
+        replay_speed: Optional[float] = 1.0,
         event_sink: Optional[callable] = None,
         throttle_clock: str = "wall",
         pose_sink: Optional[callable] = None,
@@ -113,7 +117,13 @@ class ReplayReceiver:
             on_session_change=on_session_change,
         )
 
-        self._replay_speed = max(0.1, replay_speed)  # <1 = slower, >1 = faster
+        # <1 = slower, >1 = faster. None (or a speed that is not finite) = not
+        # paced at all: no wait between two messages. A very large speed is NOT
+        # that: every gap stays a deadline, a fraction of a nanosecond away, and
+        # on a clock that advances in ticks (Windows before Python 3.13: 15.6 ms)
+        # each such wait lasts until the next tick.
+        self._replay_speed: Optional[float] = (
+            max(0.1, float(replay_speed)) if replay_speed is not None and math.isfinite(float(replay_speed)) else None)
 
         self._error: Optional[BaseException] = None   # what ended the replay early, if anything did
         self._messages: Optional[int] = None          # entries of the recording's timeline (binary + text), once loaded
@@ -162,7 +172,7 @@ class ReplayReceiver:
         """liveness() plus what the replay did, for a run's summary: whoever reads it must be able to tell a
         whole replay from one that stopped early (``error`` set, ``replayed`` below ``messages``)."""
         return {**self.liveness(), "path": self._recording_dir, "messages": self._messages, "replayed": self._replayed,
-                "enqueued": self._enqueued, "done": self._done.is_set(),
+                "enqueued": self._enqueued, "done": self._done.is_set(), "speed": self._replay_speed,   # None = not paced
                 "error": (str(self._error) if self._error else None)}
 
     @property
@@ -230,9 +240,10 @@ class ReplayReceiver:
                 # in slices so that stop() is seen within one of them. sleep_until
                 # reads the clock once per slice: with two readings the deadline can
                 # pass between them and the length handed to time.sleep is negative.
+                # Not paced (replay_speed None): no wait at all.
                 t_mono = entry["t_mono_s"]
                 delta = t_mono - prev_t
-                if delta > 0:
+                if delta > 0 and self._replay_speed is not None:
                     sleep_until(time.monotonic() + delta / self._replay_speed, self._stop_event)
                 prev_t = t_mono
 

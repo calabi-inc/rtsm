@@ -163,7 +163,7 @@ mybag = "my_package.rtsm_source:BagSource"
 
 then `io.receiver: mybag`. The factory signature is `factory(cfg, ctx, **options) -> Source`; a class with that constructor works. In-process registration (`rtsm.io.sources.register_source("mybag", BagSource)`) does the same without packaging. A plug-in name that collides with a built-in is ignored with a warning.
 
-The runner passes these options today: `recording_dir` and `replay_speed` (from `--replay` / `--replay-speed`), `pair_window_s` and `pair_window_frames` (from `ingest.*`, used by the ZeroMQ source). Read what you need, ignore the rest.
+The runner passes these options today: `recording_dir` and `replay_speed` (from `--replay` / `--replay-speed`), `pair_window_s` and `pair_window_frames` (from `ingest.*`, used by the ZeroMQ source). Read what you need, ignore the rest. `rtsm eval` passes `replay_speed=None` for a recording that is not paced (no `--speed`): the replay source then offers the recording as fast as the queue accepts it, with no wait between two messages. A number, however large, is a pace.
 
 ### Choosing a policy
 
