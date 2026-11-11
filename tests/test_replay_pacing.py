@@ -15,6 +15,7 @@ import time as real_time
 
 import pytest
 
+import rtsm.io.replayer as replayer_mod
 from rtsm.io.ingest_queue import IngestQueue
 
 
@@ -117,10 +118,9 @@ def _recording(tmp_path, n: int, gap_s: float):
     return rec
 
 
-def _replay(rec, speed: float, events: list):
-    from rtsm.io.replayer import ReplayReceiver
-    rr = ReplayReceiver(recording_dir=str(rec), ingest_queue=IngestQueue(maxsize=64), keyframe_every_n=30,
-                        nonkf_min_interval_s=0.0, replay_speed=speed, event_sink=events.append)
+def _replay(rec, speed: float | None, events: list):
+    rr = replayer_mod.ReplayReceiver(recording_dir=str(rec), ingest_queue=IngestQueue(maxsize=64), keyframe_every_n=30,
+                                     nonkf_min_interval_s=0.0, replay_speed=speed, event_sink=events.append)
     rr.start()
     assert rr.wait(20.0)
     return rr
@@ -212,8 +212,6 @@ def test_an_unpaced_replay_does_not_wait_at_all(tmp_path, monkeypatch):
     messages. A very large speed is not the same thing: every gap stays a deadline, a fraction of a nanosecond away,
     and on a clock that stands still between ticks each such wait lasts until the next tick (15.6 ms per message on
     Windows before Python 3.13, which is what an unpaced `rtsm eval` of a recording used to cost)."""
-    import rtsm.io.replayer as replayer_mod
-
     rec = _recording(tmp_path, 6, gap_s=0.2)
     waits: list = []
     monkeypatch.setattr(replayer_mod, "sleep_until", lambda *a, **k: waits.append(a) or True)
