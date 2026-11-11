@@ -1,13 +1,18 @@
 from __future__ import annotations
 # rtsm/models/clip/adapter.py
 from dataclasses import dataclass
+import logging
 import torch
 import numpy as np
 from .loader import load_clip
 from .inference import (
     encode_image as _encode_image,
     encode_images_batch as _encode_images_batch,
+    tensor_preprocess_params as _tensor_preprocess_params,
 )
+
+logger = logging.getLogger(__name__)
+
 
 @dataclass
 class ClipArtifacts:
@@ -22,12 +27,26 @@ class CLIPAdapter:
         self.device = device
         # OpenAI CLIP models benefit from "a photo of a {}" wrapping; SigLIP does not
         self._prompt_wrap = (pretrained == "openai")
+        # Crops that already have the model's input size can be scaled and normalised as one tensor on the
+        # device instead of one PIL image and one transform call each. Whether that gives this model's
+        # preprocess bit for bit is decided here by a probe; None keeps the per-image path for every input.
+        try:
+            self._tensor_pre = _tensor_preprocess_params(preprocess, device)
+        except Exception:  # noqa: BLE001 -- an unusual transform must not fail the load; it keeps the per-image path
+            self._tensor_pre = None
+        if self._tensor_pre is not None:
+            logger.info(f"Image tower preprocessing: {self._tensor_pre[0]} px crops as one tensor on {device} "
+                        f"(bit-identical to the model's transform on the probe)")
+        else:
+            logger.info(f"Image tower preprocessing: the model's transform, image by image "
+                        f"(the tensor path does not reproduce it on {device})")
 
     def encode_image(self, image):  # image path, PIL, or np.ndarray
         return _encode_image(image, self.artifacts.model, self.artifacts.preprocess, device=self.device, keep_on_device=True)
 
     def encode_images_batch(self, images, batch_size=16):  # images: paths, PIL, or np.ndarrays
-        return _encode_images_batch(images, self.artifacts.model, self.artifacts.preprocess, device=self.device, batch_size=batch_size, keep_on_device=True)
+        return _encode_images_batch(images, self.artifacts.model, self.artifacts.preprocess, device=self.device, batch_size=batch_size,
+                                    keep_on_device=True, tensor_pre=getattr(self, "_tensor_pre", None))
 
     def close(self) -> None:
         """Release the model at shutdown: drop the references so the weights can

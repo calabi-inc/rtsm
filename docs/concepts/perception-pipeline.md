@@ -22,29 +22,31 @@ The first stage produces instance masks from the RGB image. RTSM supports multip
 [Grounding DINO](https://github.com/IDEA-Research/GroundingDINO) detects objects via text prompt, then [SAM2](https://github.com/facebookresearch/sam2) generates high-quality masks from the detected bounding boxes.
 
 - **Architecture**: Transformer (Swin backbone + Hiera ViT)
-- **Input**: 640x480 RGB + text prompt (30-class indoor vocabulary)
-- **Output**: ~13 masks/frame (text-prompted detection)
-- **Seg time**: 222 ms mean
+- **Input**: the RGB frame + a text prompt (the packaged indoor vocabulary, or `segmentation.grounded_sam2.vocab`)
+- **Output**: ~29 masks/frame on the benchmark recording (text-prompted detection), at the frame's resolution
+- **Seg time**: 236 ms mean
 
 ### dual (FastSAM + YOLOE, AGPL-3.0)
 
 Two CNN models run independently, then masks are cross-validated via IoU:
 
-- **FastSAM**: Class-agnostic segmentation (~24 masks/frame)
+- **FastSAM**: Class-agnostic segmentation (~23 masks/frame)
 - **YOLOE**: Open-vocabulary detection + segmentation (~11 masks/frame, 4 585 built-in categories)
 - **Merge**: IoU > 0.40 = dual-confirmed, remainder kept as single-source
-- **Output**: ~29 masks/frame (merged)
-- **Seg time**: 116 ms mean
+- **Output**: ~26 masks/frame (merged)
+- **Seg time**: 61 ms mean
 
-Dual-confirmed masks receive a priority boost and are 1.5x more likely to be selected into top-K.
+Dual-confirmed masks receive a priority boost; on the benchmark recording they are selected into top-K slightly more often than they occur (1.1x).
 
 ### Other backends
 
 | Backend | Description | Seg time |
 |---------|-------------|----------|
-| `sam2` | SAM2 auto-mask (segment everything, no labels) | ~860 ms |
-| `fastsam` | FastSAM only (class-agnostic, fast) | ~50 ms |
-| `yoloe` | YOLOE only (open-vocab, prompt-free) | ~60 ms |
+| `sam2` | SAM2 auto-mask (segment everything, no labels) | 1 215 ms |
+| `fastsam` | FastSAM only (class-agnostic, fast) | 26 ms |
+| `yoloe` | YOLOE only (open-vocab, prompt-free) | 26 ms |
+
+*Mean on an RTX 5090, a 1920x1440 iPhone recording ([Benchmarks](../benchmarks.md)).*
 
 ### Frame-quality gate
 
@@ -71,7 +73,7 @@ Heuristic filters remove unsuitable masks using depth and geometric information:
 | Planarity | Detect and score planar surfaces | `planarity.*` |
 
 !!! note "Heuristics cost varies by backend"
-    SAM2-based masks take **4x longer** to filter than FastSAM masks (239 ms vs 60 ms), likely due to higher-fidelity mask boundaries requiring more compute in depth validation and planarity checks.
+    The statistics of a mask are computed on its bounding box, so their cost follows the pixels the masks cover. SAM2 returns masks at the frame's resolution, FastSAM and YOLOE at a 640-px side unless `retina_masks` is on: on the 1920x1440 benchmark recording the stage takes 91 ms under `grounded_sam2` and 26 ms under `dual`. Up to release 0.3.1 it passed over the whole frame for every mask (553 and 55 ms on the same recording).
 
 ---
 
@@ -98,9 +100,9 @@ Each selected mask is:
 
 1. Cropped from the RGB image (with 6px padding)
 2. Resized to 224x224
-3. Encoded via **CLIP ViT-B/32** (OpenAI)
+3. Encoded via **SigLIP ViT-B-16** (webli) by default (`clip.model`, `clip.pretrained`)
 
-**Output**: 512-dimensional L2-normalized embedding vector
+**Output**: 768-dimensional L2-normalized embedding vector (with the default model)
 
 These embeddings enable:
 
@@ -108,7 +110,7 @@ These embeddings enable:
 - Semantic search via text queries
 - Object identity tracking over time
 
-**Speed**: ~23 ms for 15 candidates (batch encode on GPU).
+**Speed**: ~24 ms for up to 15 candidates on an RTX 5090, crops and classification included (one batch on the GPU).
 
 ---
 
@@ -128,16 +130,16 @@ Labels are tracked as EWMA (exponentially weighted moving average) scores across
 
 ## Performance Summary
 
-*Measured on RTX 5090, 640x480 input. See [Benchmarks](../benchmarks.md) for full data.*
+*Mean per processed frame on an RTX 5090, a 1920x1440 iPhone recording. See [Benchmarks](../benchmarks.md) for full data, and for a Jetson Orin Nano Super.*
 
 | Stage | dual (ms) | grounded_sam2 (ms) |
 |-------|-----------|-------------------|
-| Segmentation | 116 | 222 |
-| Heuristics | 60 | 239 |
-| Scoring | 0.2 | 0.2 |
-| CLIP encode | 23 | 24 |
-| Association | 6 | 4 |
-| **Total** | **210** | **510** |
+| Segmentation | 61 | 236 |
+| Heuristics | 26 | 91 |
+| Scoring | 0.3 | 0.4 |
+| CLIP encode | 24 | 21 |
+| Association | 5 | 6 |
+| **Total** | **126** | **365** |
 
 ---
 

@@ -142,21 +142,27 @@ segmentation:
   backend: grounded_sam2    # default (Apache-2.0)
   weights_policy: warn      # warn | strict | off: FastSAM / YOLOE files checked by sha256 against the validated files
   retina_masks: false       # false = 640x640 (fast), true = original resolution
+  warmup_inference: true    # every model runs its first inference at start-up, on synthetic input
 ```
 
 | Backend | Description | License | Mean Latency |
 |---------|-------------|---------|-------------|
-| `grounded_sam2` | Grounding DINO + SAM2 (text-prompted) | Apache-2.0 | ~510 ms |
-| `sam2` | SAM2 auto-mask (class-agnostic, no labels) | Apache-2.0 | ~860 ms |
-| `dual` | FastSAM + YOLOE IoU merge (prompt-free, 4 585 built-in categories) | AGPL-3.0 | ~210 ms |
-| `fastsam` | FastSAM only (class-agnostic) | AGPL-3.0 | ~50 ms |
-| `yoloe` | YOLOE only (open-vocab, prompt-free) | AGPL-3.0 | ~60 ms |
+| `grounded_sam2` | Grounding DINO + SAM2 (text-prompted) | Apache-2.0 | 365 ms |
+| `sam2` | SAM2 auto-mask (class-agnostic, no labels) | Apache-2.0 | 1 443 ms |
+| `dual` | FastSAM + YOLOE IoU merge (prompt-free, 4 585 built-in categories) | AGPL-3.0 | 126 ms |
+| `fastsam` | FastSAM only (class-agnostic) | AGPL-3.0 | 68 ms |
+| `yoloe` | YOLOE only (open-vocab, prompt-free) | AGPL-3.0 | 72 ms |
+
+*Mean pipeline latency per processed frame on an RTX 5090, a 1920x1440 iPhone recording replayed at its own rate ([Benchmarks](../benchmarks.md)). `sam2` does not hold that recording's rate; the other four do.*
 
 !!! note "AGPL backends require `ultralytics`"
     Backends using FastSAM or YOLOE require the `ultralytics` package (AGPL-3.0). Install with: `pip install "rtsm[gpu-ultralytics]"`
 
 !!! note "Validated weight files"
     FastSAM and YOLOE weight files are checked by sha256 against `rtsm/models/weights.py` when a backend is created, because the file ultralytics serves under a given name changes upstream. `weights_policy: warn` (default) logs a warning for a missing or different file, `strict` refuses to start, `off` is silent. The eval report header and `resolved.json` record each file's status. See [Installation, Model Weights](installation.md#model-weights).
+
+!!! note "Warm-up at start-up"
+    Loading a model's weights is not its first inference. The first call also builds the library's inference backend and starts CUDA and cuDNN, which takes about a second on a workstation GPU and 15 to 35 s on a Jetson Orin Nano. With `warmup_inference: true` (default) that happens when the models are loaded: one synthetic frame goes through the segmenter twice and two batches of noise crops through the image tower and the vocabulary classifier, and nothing of it reaches the memory or a ledger. Start-up takes that much longer and the first frame of a session is an ordinary frame; a live source no longer loses the frames that arrive during it. `false` leaves the start-up on the first frame, as before. A warm-up that fails is logged and left to the first frame. See [Benchmarks, edge](../benchmarks.md#edge-jetson-orin-nano-super).
 
 !!! note "Labels under a prompt-free detector"
     The packaged YOLOE weights are prompt-free: they name objects from their own 4 585 built-in categories (a tag list that includes abstract words such as "heat" or "adaptation"), not from your vocabulary. By default the model's own class name leads an object's labels (`segmentation.labels.prompt_free_primary: detector`); with the known-good weights that reads `bottle`, `cup`, `keyboard`, `file cabinet`. Set `prompt_free_primary: classifier` to keep that name out of the scored labels and let the CLIP vocabulary classifier (`rtsm/cfg/clip/vocab.yaml`) decide: the mitigation when the weights in use label badly, as the `yoloe-26s-seg-pf.pt` that ultralytics 8.4.31 downloads from its v8.4.0 assets does (it named shelves `heat` and boxes `razor blade`). Either way the detector's own name is kept on each observation as `detector_label` in the ledger, and the report header lists each model file's sha256. Under `grounded_sam2` the grounded phrase is the primary label.

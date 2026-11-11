@@ -59,12 +59,99 @@ class Runtime:
     sessions: Any = None               # rtsm.core.sessions.SessionRegistry | None
 
 
+def _warmup_frame(width: int, height: int):
+    """A synthetic RGB frame, flat rectangles on grey: something a segmenter returns masks on."""
+    import cv2
+    import numpy as np
+    from PIL import Image
+
+    rng = np.random.default_rng(0)
+    frame = np.full((height, width, 3), 96, np.uint8)
+    for _ in range(24):
+        x0, y0 = int(rng.integers(0, max(1, width - 40))), int(rng.integers(0, max(1, height - 40)))
+        x1, y1 = x0 + int(rng.integers(30, max(31, width // 3))), y0 + int(rng.integers(30, max(31, height // 3)))
+        cv2.rectangle(frame, (x0, y0), (x1, y1), tuple(int(c) for c in rng.integers(0, 256, 3)), -1)
+    return Image.fromarray(frame)
+
+
+def warm_segmenter(segmenter: Any, cfg: dict) -> Optional[dict]:
+    """The segmenter's first inference, on a synthetic frame, before a source starts.
+
+    A backend's ``warmup()`` loads weights. Its first real call still builds the library's inference backend,
+    starts CUDA and cuDNN and, for an exported model, loads the engine: seconds to tens of seconds that
+    otherwise fall on the first frame of a session, while the source keeps delivering. Two calls here (the
+    second is the steady state) move that to start-up. Nothing of it reaches the memory or a ledger.
+    A failure is logged and left to the first frame; ``segmentation.warmup_inference: false`` skips the call.
+    Returns {"ms": .., "masks": ..}, or None when skipped or failed.
+    """
+    if getattr(segmenter, "consumes_detections", False):     # the external backend runs no model of its own
+        return None
+    import time
+    import torch
+    from rtsm.models.segmentation import segmentation_vocab
+
+    cam = cfg.get("camera", {}) or {}
+    try:
+        frame = _warmup_frame(int(cam.get("width") or 640), int(cam.get("height") or 480))
+        vocab = segmentation_vocab(cfg)
+        t0 = time.perf_counter()
+        with torch.no_grad():
+            for _ in range(2):
+                out = segmenter.segment(frame, vocab=vocab)
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+        info = {"ms": round((time.perf_counter() - t0) * 1e3), "masks": int(getattr(out, "count", 0) or 0)}
+        logger.info(f"Segmenter warmed up on a synthetic frame: {info['ms']} ms, {info['masks']} masks")
+        return info
+    except Exception:  # noqa: BLE001 -- the first frame then pays the start-up, as it did before
+        logger.exception("Segmenter warm-up inference failed; the first frame will carry the model start-up")
+        return None
+
+
+def warm_embedder(clip: Any, vocab_clf: Any, cfg: dict) -> Optional[dict]:
+    """The image tower's and the vocabulary classifier's first calls, on noise crops, before a source starts:
+    one batch of the size the pipeline embeds per frame (``staging.topk_preclip``) and one of half the batch
+    size. Same contract as warm_segmenter."""
+    import time
+    import numpy as np
+    import torch
+
+    try:
+        batch = int(cfg.get("clip", {}).get("batch_size", 16))
+        size = int(cfg.get("staging", {}).get("clip_input", 224))
+        topk = int(cfg.get("staging", {}).get("topk_preclip", 15) or 15)
+        rng = np.random.default_rng(0)
+        crops = [rng.integers(0, 256, (size, size, 3), dtype=np.uint8) for _ in range(max(1, batch))]
+        t0 = time.perf_counter()
+        embs = None
+        with torch.no_grad():
+            for n in (max(1, min(topk, batch)), max(1, batch // 2)):
+                embs = clip.encode_images_batch(crops[:n], batch_size=batch)
+            if vocab_clf is not None and embs is not None and embs.numel() > 0:
+                vocab_clf.ensure_text_on_device()
+                vocab_clf.classify_feats(embs, return_topk=int(cfg.get("clip", {}).get("vocab_topk", 5)))
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+        info = {"ms": round((time.perf_counter() - t0) * 1e3)}
+        logger.info(f"Image tower and vocabulary classifier warmed up on noise crops: {info['ms']} ms")
+        return info
+    except Exception:  # noqa: BLE001
+        logger.exception("Image tower warm-up inference failed; the first frame will carry the model start-up")
+        return None
+
+
 def load_models(cfg: dict) -> Models:
     """Segmenter (warmed up), CLIP adapter, CLIP vocabulary classifier -- the
-    GPU-heavy objects, loaded once."""
+    GPU-heavy objects, loaded once. Each model also runs its first inference
+    here, on synthetic input (warm_segmenter / warm_embedder), so that the
+    first frame of a session is not the first call of every model. Both
+    warm-ups run after every load, in the order a frame calls the models:
+    warming the segmenter before the image tower and the vocabulary were
+    loaded kept about 0.3 GB more GPU memory for the life of the process."""
     from rtsm.models.clip.adapter import CLIPAdapter
     from rtsm.models.clip.vocab_classifier import ClipVocabClassifier
 
+    warm = bool(cfg.get("segmentation", {}).get("warmup_inference", True))
     segmenter = get_segmenter(cfg)
     logger.info(f"Segmentation backend created: {segmenter.name}")
     segmenter.warmup()
@@ -79,6 +166,9 @@ def load_models(cfg: dict) -> Models:
     vocab_clf = ClipVocabClassifier(clip.artifacts.model, clip.artifacts.tokenizer, clip.artifacts.preprocess,
                                     str(cfg_path("clip/vocab.yaml")), device=cfg.get("device", "cuda"))
     logger.info(f"CLIP vocabulary classifier successfully initialized")
+    if warm:
+        warm_segmenter(segmenter, cfg)
+        warm_embedder(clip, vocab_clf, cfg)
     return Models(segmenter=segmenter, clip=clip, vocab_clf=vocab_clf)
 
 

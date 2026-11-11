@@ -56,6 +56,11 @@ class SegmentationResult:
     fastsam_raw_count: Optional[int] = None
     yoloe_raw_count: Optional[int] = None
 
+    # [N, H] int64: mask pixels per row, in the order of `masks`. An optional by-product of a backend that
+    # had the mask stack on the GPU (FastSAM): the mask statistics start from this count, and making it there
+    # saves a pass over the stack on the CPU (rtsm.utils.mask_staging.run_heuristics). None = count on the CPU.
+    mask_row_counts: Optional[np.ndarray] = None
+
     @property
     def count(self) -> int:
         """Number of detected instances."""

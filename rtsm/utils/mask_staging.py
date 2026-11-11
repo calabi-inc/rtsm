@@ -253,16 +253,68 @@ def calculate_mask_stats(mask: torch.Tensor, depth_m: Optional[np.ndarray], intr
     return area, coverage, bbox, border_fraction
 # ---------- main: per-mask heuristic stack ----------
 
+def _row_counts(a: np.ndarray) -> np.ndarray:
+    """Mask pixels per row of a [N,H,W] bool array, as [N,H] int64: one pass over the whole stack."""
+    n, h, w = a.shape
+    if n == 0 or h == 0 or w == 0:
+        return np.zeros((n, h), dtype=np.int64)
+    rows = np.ascontiguousarray(a).view(np.uint8).reshape(n * h, w)
+    return cv2.reduce(rows, 1, cv2.REDUCE_SUM, dtype=cv2.CV_32S).reshape(n, h).astype(np.int64)
+
+
+def _depth_quantiles_at(ys: np.ndarray, xs: np.ndarray, depth_m: np.ndarray, mask_shape: Tuple[int, int]):
+    """_depth_quantiles for mask pixels given as (row, column) coordinates in mask space."""
+    if ys.size == 0:
+        return 0.0, None, None
+    dy, dx = _depth_coords(ys, xs, depth_m.shape, mask_shape)
+    z = depth_m[dy, dx]
+    good = np.isfinite(z) & (z > 0.0)
+    if not good.any(): return 0.0, None, None  # valid_pct, p50, spread
+    zg = z[good]
+    p10, p50, p90 = np.percentile(zg, [10, 50, 90]).astype(np.float32)
+    valid_pct = float(good.mean())
+    return valid_pct, float(p50), float(p90 - p10)
+
+
+def _cam_samples_at(ys: np.ndarray, xs: np.ndarray, depth_m: np.ndarray, mask_shape: Tuple[int, int],
+                    fx: float, fy: float, cx: float, cy: float, stride: int):
+    """Every `stride`-th mask pixel with a valid depth, back-projected: (X, Y, z) in the camera frame, or None.
+    The arithmetic of _centroid_cam and _sample_cam_points_from_mask, on coordinates."""
+    if ys.size == 0: return None
+    ys = ys[::stride]; xs = xs[::stride]
+    if ys.size == 0: return None
+    dy, dx = _depth_coords(ys, xs, depth_m.shape, mask_shape)
+    z = depth_m[dy, dx].astype(np.float32)
+    good = np.isfinite(z) & (z > 0.0)
+    if not good.any(): return None
+    # Keep RGB-space coords for back-projection (intrinsics are RGB-space)
+    ys = ys[good].astype(np.float32)
+    xs = xs[good].astype(np.float32)
+    z  = z[good]
+    X = (xs - cx) / fx * z
+    Y = (ys - cy) / fy * z
+    return X, Y, z
+
+
 def run_heuristics(
     ann_bool: torch.Tensor,                # [N,H,W] torch.bool CPU (from prepare_ann)
     depth_m: Optional[np.ndarray],         # [H,W] float32 meters or None
     cfg,
+    row_counts: Optional[np.ndarray] = None,   # [N,H] mask pixels per row, when the segmenter already counted them
 ) -> Tuple[List[torch.Tensor], List[MaskStats], FilterDiagnostics]:
     """
     Returns:
         kept_masks: list of torch.bool views (aligned to image grid)
         stats:      list of MaskStats (same order)
         diagnostics: FilterDiagnostics with per-reason drop counts + optional per-drop detail
+
+    Every per-mask quantity is computed on the bounding box of the mask (padded by the erosion radius), which one
+    row count over the stack locates, instead of on the full frame. The pixels, their row-major order, the dtypes
+    and the arithmetic are those of the full-frame helpers above, so the statistics are the same numbers;
+    tests/test_mask_staging_bbox.py keeps the full-frame version and compares the two field by field.
+
+    row_counts: an optional by-product of a segmenter that had the stack on the GPU
+    (SegmentationResult.mask_row_counts). It is used only when its shape is (N, H); otherwise the count is made here.
     """
     import torch
 
@@ -273,10 +325,6 @@ def run_heuristics(
     N, H, W = ann_bool.shape
     total_px = float(H * W)
     area_min = int(cfg["filters"]["min_area_px"])
-
-    # Depth range gates (treat outside as invalid)
-    zmin = cfg.get("filters", {}).get("depth", {}).get("z_min_m", 0.20)   # D435i safe default
-    zmax = cfg.get("filters", {}).get("depth", {}).get("z_max_m", 5.00)   # indoors default
 
     # Camera intrinsics for centroid_cam/planarity
     fx, fy, cx, cy = cfg["camera"].get("fx"), cfg["camera"].get("fy"), cfg["camera"].get("cx"), cfg["camera"].get("cy")
@@ -299,26 +347,71 @@ def run_heuristics(
     track_drops = bool(cfg.get("diagnostics", {}).get("track_drops", False))
     drop_details: List[Dict[str, Any]] = []
 
+    a = ann_bool.numpy()                                   # [N,H,W] bool view of the stack, no copy
+    if row_counts is not None and tuple(np.shape(row_counts)) == (N, H):
+        row_counts = np.asarray(row_counts, dtype=np.int64)
+    else:
+        row_counts = _row_counts(a)
+    areas = row_counts.sum(axis=1)
+    k = erode_px
+    kernel = np.ones((2 * k + 1, 2 * k + 1), np.uint8) if k > 0 else None
+    mask_shape = (H, W)
+    debug = logger.isEnabledFor(logging.DEBUG)
+
     for i in range(N):
         m = ann_bool[i]
-        area = int(m.sum().item())
+        area = int(areas[i])
+
+        # tight bbox (x0,y0,x1,y1), x1/y1 exclusive: the rows from the row count, the columns inside those rows
+        if area > 0:
+            rr = np.flatnonzero(row_counts[i])
+            y0, y1 = int(rr[0]), int(rr[-1]) + 1
+            cc = np.flatnonzero(a[i, y0:y1].any(axis=0))
+            x0, x1 = int(cc[0]), int(cc[-1]) + 1
+        else:
+            x0 = y0 = x1 = y1 = 0
+        bbox = (x0, y0, x1, y1)
+
         if area < area_min:
             _rej_area += 1
-            logger.debug(f"  mask {i}: REJECT area={area} < {area_min}")
+            if debug:
+                logger.debug(f"  mask {i}: REJECT area={area} < {area_min}")
             if track_drops:
                 drop_details.append({
-                    "idx": i, "reason": "area", "bbox": list(_compute_mask_bbox(m)),
+                    "idx": i, "reason": "area", "bbox": list(bbox),
                     "area_px": area, "area_min": area_min,
                 })
             continue
 
-        bbox = _compute_mask_bbox(m)
         coverage = area / total_px
-        border_fraction = _border_fraction(m, area)
+        # mask pixels on the four image edges over the area (a corner pixel counts for both of its edges)
+        if area == 0:
+            border_fraction = 0.0
+        else:
+            edge = int(row_counts[i, 0]) + int(row_counts[i, H - 1])
+            if x0 == 0:
+                edge += int(np.count_nonzero(a[i, y0:y1, 0]))
+            if x1 == W:
+                edge += int(np.count_nonzero(a[i, y0:y1, W - 1]))
+            border_fraction = float(edge) / float(area)
+
+        # The bbox padded by the erosion radius: an erosion of this window equals the erosion of the frame on it
+        # (nothing of the mask lies outside the bbox, and a clipped side is an image border on both).
+        py0, py1, px0, px1 = max(0, y0 - k), min(H, y1 + k), max(0, x0 - k), min(W, x1 + k)
+        window = a[i, py0:py1, px0:px1]
+        uy, ux = np.nonzero(window)                        # row-major, like np.where on the full mask
+        uy = uy + py0; ux = ux + px0
 
         # depth features (use eroded mask to avoid edge artifacts)
+        ey = ex = None
         if depth_m is not None:
-            depth_valid, depth_p50, depth_spread = _depth_quantiles(m, depth_m, erode_px=erode_px)
+            if k > 0:
+                eroded = cv2.erode(window.astype(np.uint8), kernel, iterations=1)
+                ey, ex = np.nonzero(eroded)
+                ey = ey + py0; ex = ex + px0
+            else:
+                ey, ex = uy, ux
+            depth_valid, depth_p50, depth_spread = _depth_quantiles_at(ey, ex, depth_m, mask_shape)
         else:
             depth_valid, depth_p50, depth_spread = 0.0, None, None
 
@@ -326,10 +419,11 @@ def run_heuristics(
         if depth_m is not None:
             if depth_valid < depth_valid_min:
                 _rej_depth_valid += 1
-                logger.debug(
-                    f"  mask {i}: REJECT depth_valid={depth_valid:.3f} < {depth_valid_min} "
-                    f"(area={area}, coverage={coverage:.1%})"
-                )
+                if debug:
+                    logger.debug(
+                        f"  mask {i}: REJECT depth_valid={depth_valid:.3f} < {depth_valid_min} "
+                        f"(area={area}, coverage={coverage:.1%})"
+                    )
                 if track_drops:
                     drop_details.append({
                         "idx": i, "reason": "depth_valid", "bbox": list(bbox),
@@ -340,10 +434,11 @@ def run_heuristics(
                 continue
             if depth_spread is not None and depth_spread > depth_spread_max:
                 _rej_depth_spread += 1
-                logger.debug(
-                    f"  mask {i}: REJECT depth_spread={depth_spread:.3f}m > {depth_spread_max}m "
-                    f"(area={area}, coverage={coverage:.1%})"
-                )
+                if debug:
+                    logger.debug(
+                        f"  mask {i}: REJECT depth_spread={depth_spread:.3f}m > {depth_spread_max}m "
+                        f"(area={area}, coverage={coverage:.1%})"
+                    )
                 if track_drops:
                     drop_details.append({
                         "idx": i, "reason": "depth_spread", "bbox": list(bbox),
@@ -355,10 +450,16 @@ def run_heuristics(
                 continue
 
         # centroids (use eroded mask for 3D centroid)
-        cpx = _centroid_px(m)
+        cpx: Optional[Tuple[float, float]] = None
+        if uy.size:
+            cpx = (float(torch.from_numpy(ux).float().mean().item()),
+                   float(torch.from_numpy(uy).float().mean().item()))
         ccam: Optional[np.ndarray] = None
         if depth_m is not None and have_intr and depth_valid >= min_valid_for_centroid:
-            ccam = _centroid_cam(m, depth_m, fx, fy, cx, cy, stride=2, erode_px=erode_px)
+            s = _cam_samples_at(ey, ex, depth_m, mask_shape, fx, fy, cx, cy, 2)
+            if s is not None:
+                X, Y, Z = s
+                ccam = np.array([X.mean(), Y.mean(), Z.mean()], dtype=np.float32)
 
         # planarity (cheap; annotate only)
         planar_inlier_pct: Optional[float] = None
@@ -366,7 +467,12 @@ def run_heuristics(
         plane_normal_cam: Optional[np.ndarray] = None
         plane_offset_cam: Optional[float] = None
         if depth_m is not None and have_intr and area >= area_min:
-            pts = _sample_cam_points_from_mask(m, depth_m, fx, fy, cx, cy, stride=max(1, plan_stride))
+            pts = None
+            s = _cam_samples_at(uy, ux, depth_m, mask_shape, fx, fy, cx, cy, max(1, plan_stride))
+            if s is not None:
+                pts = np.stack(s, axis=1).astype(np.float32)
+                if pts.shape[0] < 3:
+                    pts = None
             if pts is not None and pts.shape[0] >= 16:  # need some support
                 n_cam, d_cam = _fit_plane_pca(pts)
                 inlier_pct, rms = _planarity_metrics(pts, n_cam, d_cam, plan_rms_thr)

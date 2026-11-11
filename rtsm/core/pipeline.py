@@ -14,7 +14,7 @@ from rtsm.utils.rle import mask_to_rle
 from rtsm.utils.mask_staging import run_heuristics, MaskStats, FilterDiagnostics
 from rtsm.utils.prepare_ann import prepare_ann
 from rtsm.utils.periodic_logger import PeriodicLogger
-from rtsm.models.segmentation import SegmentationAdapter, SegmentationResult
+from rtsm.models.segmentation import SegmentationAdapter, SegmentationResult, segmentation_vocab
 from rtsm.models.clip.adapter import CLIPAdapter
 from rtsm.models.clip.vocab_classifier import ClipVocabClassifier
 from rtsm.stores.working_memory import WorkingMemory
@@ -587,14 +587,7 @@ class Pipeline:
         # Get segmentation vocab from config (for open-vocab models)
         seg_cfg = self.cfg.get("segmentation", {})
         backend = seg_cfg.get("backend", "fastsam")
-        if backend == "dual":
-            vocab = seg_cfg.get("yoloe", {}).get("vocab", None)
-        elif backend == "yoloe":
-            vocab = seg_cfg.get("yoloe", {}).get("vocab", None)
-        elif backend == "grounded_sam2":
-            vocab = seg_cfg.get("grounded_sam2", {}).get("vocab", None)
-        else:
-            vocab = None
+        vocab = segmentation_vocab(self.cfg)
 
         # Run segmentation
         t_seg_start = time.perf_counter()
@@ -678,6 +671,8 @@ class Pipeline:
             ann_bool,
             snap.depth_m,
             cfg=heur_cfg,
+            # the backend's own row count of this stack, when it made one (used only if the shapes agree)
+            row_counts=getattr(seg_result, "mask_row_counts", None),
         )
         t_heur_end = time.perf_counter()
         self._last_filter_diagnostics = filter_diag
@@ -1527,7 +1522,18 @@ class Pipeline:
                     elif bg_fill == "blur":
                         blurred = cv2.GaussianBlur(crop, (31, 31), 0)
                         crop[mask_resized == 0] = blurred[mask_resized == 0]
-                    else:  # "mean" (default)
+                    elif crop.dtype == np.uint8 and crop.ndim == 3 and crop.shape[2] == 3:  # "mean" (default)
+                        # The crop's mean colour and the fill, through OpenCV. Same values as the numpy
+                        # lines below: the channel sums of a uint8 crop are exact integers in float64,
+                        # so sum / pixel count is the division numpy's mean makes; the fill writes the
+                        # same colour to the same pixels in one masked copy.
+                        sums = cv2.sumElems(crop)
+                        bg_color = (np.array(sums[:3], dtype=np.float64)
+                                    / (crop.shape[0] * crop.shape[1])).astype(np.uint8)
+                        fill = np.empty_like(crop)
+                        fill[:] = bg_color
+                        cv2.copyTo(fill, cv2.compare(mask_resized, 0, cv2.CMP_EQ), crop)
+                    else:  # "mean" on any other frame type
                         bg_color = crop.mean(axis=(0, 1)).astype(np.uint8)
                         crop[mask_resized == 0] = bg_color
 
@@ -1546,7 +1552,9 @@ class Pipeline:
             # while every embedding in the store was computed on swapped
             # channels; found 2026-08-15).
             crop = c.crop[..., ::-1]
-            imgs.append(Image.fromarray(crop))  # already 224x224 uint8
+            # the array itself (already clip_input x clip_input uint8): the image tower takes arrays of its
+            # input size as one tensor, without a PIL image and a transform call per crop
+            imgs.append(crop)
             idxs.append(i)
         if not imgs:
             return

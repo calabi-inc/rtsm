@@ -114,6 +114,13 @@ class ClipVocabClassifier:
             v = v / v.norm().clamp_min(1e-12)
             per_class.append(v.cpu())  # keep CPU float32; move to device later
         text_feats = torch.stack(per_class, dim=0)  # [C, D]
+        # The whole vocabulary went through the text tower as one batch (about a thousand prompts with the
+        # packaged vocabulary). torch keeps that working memory cached for the life of the process, although
+        # nothing asks for blocks of that size again: about 2 GB of GPU memory, which on a Jetson is the
+        # board's RAM. Hand it back; what the models need per frame is allocated again at their first call.
+        del t, toks
+        if self.device.type == "cuda" and torch.cuda.is_available():
+            torch.cuda.empty_cache()
         return text_feats, class_ids, params_yaml
 
     @torch.no_grad()
@@ -159,16 +166,22 @@ class ClipVocabClassifier:
                 topk=k,
             )
 
+        # One transfer per tensor. Reading each score and index on its own (about twenty .item() calls per
+        # crop) is a round trip to the device every time; the values are the same Python floats and ints.
+        tkv_l, tki_l = tkv.cpu().tolist(), tki.cpu().tolist()
+        topv_l, topi_l = topv.cpu().tolist(), topi.cpu().tolist()
+        margin_l = (topv - secondv).cpu().tolist()
+
         out = []
-        for i in range(logits.size(0)):
+        for i in range(len(topv_l)):
             topk_list = [
-                (self.class_ids[int(tki[i, j])], float(tkv[i, j]), int(tki[i, j]))
+                (self.class_ids[int(tki_l[i][j])], float(tkv_l[i][j]), int(tki_l[i][j]))
                 for j in range(k)
             ]
-            tv = float(topv[i].item())
-            margin = float((topv[i] - secondv[i]).item())
+            tv = float(topv_l[i])
+            margin = float(margin_l[i])
             if tv >= params.min_top and margin >= params.min_margin:
-                out.append((self.class_ids[int(topi[i].item())], tv, int(topi[i].item()), topk_list))
+                out.append((self.class_ids[int(topi_l[i])], tv, int(topi_l[i]), topk_list))
             else:
                 out.append(("unknown", tv, -1, topk_list))
         return out
