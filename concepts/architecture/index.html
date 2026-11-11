@@ -1953,7 +1953,7 @@
 <a id="__codelineno-0-49" name="__codelineno-0-49" href="#__codelineno-0-49"></a>│ ┌──────────────────────┐  ┌──────────────────────┐  ┌──────────────────────┐ │
 <a id="__codelineno-0-50" name="__codelineno-0-50" href="#__codelineno-0-50"></a>│ │ CLIP encode          │  │ Classify             │  │ `external` backend   │ │
 <a id="__codelineno-0-51" name="__codelineno-0-51" href="#__codelineno-0-51"></a>│ │ 224x224 crop per mask│  │ cosine vs vocabulary │  │ your detector's boxes│ │
-<a id="__codelineno-0-52" name="__codelineno-0-52" href="#__codelineno-0-52"></a>│ │ -&gt; 512-D embedding   │  │ -&gt; label + confidence│  │ stand in for Segment │ │
+<a id="__codelineno-0-52" name="__codelineno-0-52" href="#__codelineno-0-52"></a>│ │ -&gt; 768-D embedding   │  │ -&gt; label + confidence│  │ stand in for Segment │ │
 <a id="__codelineno-0-53" name="__codelineno-0-53" href="#__codelineno-0-53"></a>│ └──────────────────────┘  └──────────────────────┘  └──────────────────────┘ │
 <a id="__codelineno-0-54" name="__codelineno-0-54" href="#__codelineno-0-54"></a>│                                                                              │
 <a id="__codelineno-0-55" name="__codelineno-0-55" href="#__codelineno-0-55"></a>└──────────────────────────────────────────────────────────────────────────────┘
@@ -2022,7 +2022,7 @@
 <li><strong>Heuristics</strong> — Filter masks by area, border contact, depth validity, planarity</li>
 <li><strong>Scoring</strong> — Rank surviving masks by priority (coverage, depth quality, structure)</li>
 <li><strong>Top-K Selection</strong> — Limit to 15 candidates per frame (bounds CLIP compute)</li>
-<li><strong>CLIP Encode</strong> — 224x224 crop → ViT-B/32 → 512-dim embedding</li>
+<li><strong>CLIP Encode</strong> — 224x224 crop → SigLIP ViT-B-16 → 768-dim embedding</li>
 <li><strong>Vocab Classify</strong> — Cosine similarity to text embeddings → label + confidence</li>
 </ol>
 <h3 id="segmentation-backends">Segmentation Backends<a class="headerlink" href="#segmentation-backends" title="Permanent link">&para;</a></h3>
@@ -2041,35 +2041,35 @@
 <td><code>grounded_sam2</code> (default)</td>
 <td>Transformer (Swin + Hiera ViT)</td>
 <td>Apache-2.0</td>
-<td>222 ms</td>
+<td>236 ms</td>
 </tr>
 <tr>
 <td><code>sam2</code></td>
 <td>Transformer (Hiera ViT)</td>
 <td>Apache-2.0</td>
-<td>~860 ms</td>
+<td>1 215 ms</td>
 </tr>
 <tr>
 <td><code>dual</code></td>
 <td>CNN (YOLOv8)</td>
 <td>AGPL-3.0</td>
-<td>116 ms</td>
+<td>61 ms</td>
 </tr>
 <tr>
 <td><code>fastsam</code></td>
 <td>CNN (YOLOv8)</td>
 <td>AGPL-3.0</td>
-<td>~50 ms</td>
+<td>26 ms</td>
 </tr>
 <tr>
 <td><code>yoloe</code></td>
 <td>CNN (YOLOv8)</td>
 <td>AGPL-3.0</td>
-<td>~60 ms</td>
+<td>26 ms</td>
 </tr>
 </tbody>
 </table>
-<p>The pipeline stages downstream of segmentation (heuristics, CLIP, association, memory) are identical regardless of backend. See <a href="../../benchmarks/">Benchmarks</a> for measured performance.</p>
+<p><em>RTX 5090, a 1920x1440 iPhone recording.</em> The pipeline stages downstream of segmentation (heuristics, CLIP, association, memory) are identical regardless of backend. See <a href="../../benchmarks/">Benchmarks</a> for measured performance.</p>
 <h3 id="association">Association<a class="headerlink" href="#association" title="Permanent link">&para;</a></h3>
 <p>Matches new observations to existing objects in working memory:</p>
 <ol>
@@ -2096,7 +2096,7 @@
 <p>Each frame passes through the full pipeline:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>Frame → Gate → Segment → Filter → Score → Encode → Associate → Update → Index
 </code></pre></div>
-<p>Measured end-to-end latency: <strong>210 ms</strong> (dual) / <strong>510 ms</strong> (grounded_sam2) on RTX 5090.</p>
+<p>Measured end-to-end latency: <strong>126 ms</strong> (dual) / <strong>365 ms</strong> (grounded_sam2) on RTX 5090, and 0.4 s on a Jetson Orin Nano Super with the FastSAM-only backend (<a href="../../benchmarks/">Benchmarks</a>).</p>
 <hr />
 <h2 id="next-steps">Next Steps<a class="headerlink" href="#next-steps" title="Permanent link">&para;</a></h2>
 <ul>

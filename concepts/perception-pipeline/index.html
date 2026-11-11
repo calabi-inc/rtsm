@@ -1934,20 +1934,20 @@
 <p><a href="https://github.com/IDEA-Research/GroundingDINO">Grounding DINO</a> detects objects via text prompt, then <a href="https://github.com/facebookresearch/sam2">SAM2</a> generates high-quality masks from the detected bounding boxes.</p>
 <ul>
 <li><strong>Architecture</strong>: Transformer (Swin backbone + Hiera ViT)</li>
-<li><strong>Input</strong>: 640x480 RGB + text prompt (30-class indoor vocabulary)</li>
-<li><strong>Output</strong>: ~13 masks/frame (text-prompted detection)</li>
-<li><strong>Seg time</strong>: 222 ms mean</li>
+<li><strong>Input</strong>: the RGB frame + a text prompt (the packaged indoor vocabulary, or <code>segmentation.grounded_sam2.vocab</code>)</li>
+<li><strong>Output</strong>: ~29 masks/frame on the benchmark recording (text-prompted detection), at the frame's resolution</li>
+<li><strong>Seg time</strong>: 236 ms mean</li>
 </ul>
 <h3 id="dual-fastsam-yoloe-agpl-30">dual (FastSAM + YOLOE, AGPL-3.0)<a class="headerlink" href="#dual-fastsam-yoloe-agpl-30" title="Permanent link">&para;</a></h3>
 <p>Two CNN models run independently, then masks are cross-validated via IoU:</p>
 <ul>
-<li><strong>FastSAM</strong>: Class-agnostic segmentation (~24 masks/frame)</li>
+<li><strong>FastSAM</strong>: Class-agnostic segmentation (~23 masks/frame)</li>
 <li><strong>YOLOE</strong>: Open-vocabulary detection + segmentation (~11 masks/frame, 4 585 built-in categories)</li>
 <li><strong>Merge</strong>: IoU &gt; 0.40 = dual-confirmed, remainder kept as single-source</li>
-<li><strong>Output</strong>: ~29 masks/frame (merged)</li>
-<li><strong>Seg time</strong>: 116 ms mean</li>
+<li><strong>Output</strong>: ~26 masks/frame (merged)</li>
+<li><strong>Seg time</strong>: 61 ms mean</li>
 </ul>
-<p>Dual-confirmed masks receive a priority boost and are 1.5x more likely to be selected into top-K.</p>
+<p>Dual-confirmed masks receive a priority boost; on the benchmark recording they are selected into top-K slightly more often than they occur (1.1x).</p>
 <h3 id="other-backends">Other backends<a class="headerlink" href="#other-backends" title="Permanent link">&para;</a></h3>
 <table>
 <thead>
@@ -1961,20 +1961,21 @@
 <tr>
 <td><code>sam2</code></td>
 <td>SAM2 auto-mask (segment everything, no labels)</td>
-<td>~860 ms</td>
+<td>1 215 ms</td>
 </tr>
 <tr>
 <td><code>fastsam</code></td>
 <td>FastSAM only (class-agnostic, fast)</td>
-<td>~50 ms</td>
+<td>26 ms</td>
 </tr>
 <tr>
 <td><code>yoloe</code></td>
 <td>YOLOE only (open-vocab, prompt-free)</td>
-<td>~60 ms</td>
+<td>26 ms</td>
 </tr>
 </tbody>
 </table>
+<p><em>Mean on an RTX 5090, a 1920x1440 iPhone recording (<a href="../../benchmarks/">Benchmarks</a>).</em></p>
 <h3 id="frame-quality-gate">Frame-quality gate<a class="headerlink" href="#frame-quality-gate" title="Permanent link">&para;</a></h3>
 <p>Before any segmentation pass, the frame-quality gate (<code>gates.*</code>) measures grey
 level, contrast, and the valid-depth fraction on a strided subsample of the
@@ -2032,7 +2033,7 @@ frame and skips black, blank, or depth-less frames. Skips are counted as
 </table>
 <div class="admonition note">
 <p class="admonition-title">Heuristics cost varies by backend</p>
-<p>SAM2-based masks take <strong>4x longer</strong> to filter than FastSAM masks (239 ms vs 60 ms), likely due to higher-fidelity mask boundaries requiring more compute in depth validation and planarity checks.</p>
+<p>The statistics of a mask are computed on its bounding box, so their cost follows the pixels the masks cover. SAM2 returns masks at the frame's resolution, FastSAM and YOLOE at a 640-px side unless <code>retina_masks</code> is on: on the 1920x1440 benchmark recording the stage takes 91 ms under <code>grounded_sam2</code> and 26 ms under <code>dual</code>. Up to release 0.3.1 it passed over the whole frame for every mask (553 and 55 ms on the same recording).</p>
 </div>
 <hr />
 <h2 id="3-top-k-selection">3. Top-K Selection<a class="headerlink" href="#3-top-k-selection" title="Permanent link">&para;</a></h2>
@@ -2053,16 +2054,16 @@ frame and skips black, blank, or depth-less frames. Skips are counted as
 <ol>
 <li>Cropped from the RGB image (with 6px padding)</li>
 <li>Resized to 224x224</li>
-<li>Encoded via <strong>CLIP ViT-B/32</strong> (OpenAI)</li>
+<li>Encoded via <strong>SigLIP ViT-B-16</strong> (webli) by default (<code>clip.model</code>, <code>clip.pretrained</code>)</li>
 </ol>
-<p><strong>Output</strong>: 512-dimensional L2-normalized embedding vector</p>
+<p><strong>Output</strong>: 768-dimensional L2-normalized embedding vector (with the default model)</p>
 <p>These embeddings enable:</p>
 <ul>
 <li>Matching observations across frames (cosine similarity)</li>
 <li>Semantic search via text queries</li>
 <li>Object identity tracking over time</li>
 </ul>
-<p><strong>Speed</strong>: ~23 ms for 15 candidates (batch encode on GPU).</p>
+<p><strong>Speed</strong>: ~24 ms for up to 15 candidates on an RTX 5090, crops and classification included (one batch on the GPU).</p>
 <hr />
 <h2 id="5-vocabulary-classification">5. Vocabulary Classification<a class="headerlink" href="#5-vocabulary-classification" title="Permanent link">&para;</a></h2>
 <p>Object labels are assigned by comparing the CLIP embedding to pre-computed text embeddings from a configurable vocabulary (<code>config/clip/vocab.yaml</code>):</p>
@@ -2073,7 +2074,7 @@ frame and skips black, blank, or depth-less frames. Skips are counted as
 <p>Labels are tracked as EWMA (exponentially weighted moving average) scores across observations, so transient misclassifications don't persist.</p>
 <hr />
 <h2 id="performance-summary">Performance Summary<a class="headerlink" href="#performance-summary" title="Permanent link">&para;</a></h2>
-<p><em>Measured on RTX 5090, 640x480 input. See <a href="../../benchmarks/">Benchmarks</a> for full data.</em></p>
+<p><em>Mean per processed frame on an RTX 5090, a 1920x1440 iPhone recording. See <a href="../../benchmarks/">Benchmarks</a> for full data, and for a Jetson Orin Nano Super.</em></p>
 <table>
 <thead>
 <tr>
@@ -2085,33 +2086,33 @@ frame and skips black, blank, or depth-less frames. Skips are counted as
 <tbody>
 <tr>
 <td>Segmentation</td>
-<td>116</td>
-<td>222</td>
+<td>61</td>
+<td>236</td>
 </tr>
 <tr>
 <td>Heuristics</td>
-<td>60</td>
-<td>239</td>
+<td>26</td>
+<td>91</td>
 </tr>
 <tr>
 <td>Scoring</td>
-<td>0.2</td>
-<td>0.2</td>
+<td>0.3</td>
+<td>0.4</td>
 </tr>
 <tr>
 <td>CLIP encode</td>
-<td>23</td>
 <td>24</td>
+<td>21</td>
 </tr>
 <tr>
 <td>Association</td>
+<td>5</td>
 <td>6</td>
-<td>4</td>
 </tr>
 <tr>
 <td><strong>Total</strong></td>
-<td><strong>210</strong></td>
-<td><strong>510</strong></td>
+<td><strong>126</strong></td>
+<td><strong>365</strong></td>
 </tr>
 </tbody>
 </table>

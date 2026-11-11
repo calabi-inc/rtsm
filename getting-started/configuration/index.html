@@ -2490,6 +2490,7 @@ defaults. Incoming per-frame intrinsics take precedence in the pipeline:</p>
 <a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="w">  </span><span class="nt">backend</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">grounded_sam2</span><span class="w">    </span><span class="c1"># default (Apache-2.0)</span>
 <a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="w">  </span><span class="nt">weights_policy</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">warn</span><span class="w">      </span><span class="c1"># warn | strict | off: FastSAM / YOLOE files checked by sha256 against the validated files</span>
 <a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="w">  </span><span class="nt">retina_masks</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span><span class="w">       </span><span class="c1"># false = 640x640 (fast), true = original resolution</span>
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="w">  </span><span class="nt">warmup_inference</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span><span class="w">    </span><span class="c1"># every model runs its first inference at start-up, on synthetic input</span>
 </code></pre></div>
 <table>
 <thead>
@@ -2505,34 +2506,35 @@ defaults. Incoming per-frame intrinsics take precedence in the pipeline:</p>
 <td><code>grounded_sam2</code></td>
 <td>Grounding DINO + SAM2 (text-prompted)</td>
 <td>Apache-2.0</td>
-<td>~510 ms</td>
+<td>365 ms</td>
 </tr>
 <tr>
 <td><code>sam2</code></td>
 <td>SAM2 auto-mask (class-agnostic, no labels)</td>
 <td>Apache-2.0</td>
-<td>~860 ms</td>
+<td>1 443 ms</td>
 </tr>
 <tr>
 <td><code>dual</code></td>
 <td>FastSAM + YOLOE IoU merge (prompt-free, 4 585 built-in categories)</td>
 <td>AGPL-3.0</td>
-<td>~210 ms</td>
+<td>126 ms</td>
 </tr>
 <tr>
 <td><code>fastsam</code></td>
 <td>FastSAM only (class-agnostic)</td>
 <td>AGPL-3.0</td>
-<td>~50 ms</td>
+<td>68 ms</td>
 </tr>
 <tr>
 <td><code>yoloe</code></td>
 <td>YOLOE only (open-vocab, prompt-free)</td>
 <td>AGPL-3.0</td>
-<td>~60 ms</td>
+<td>72 ms</td>
 </tr>
 </tbody>
 </table>
+<p><em>Mean pipeline latency per processed frame on an RTX 5090, a 1920x1440 iPhone recording replayed at its own rate (<a href="../../benchmarks/">Benchmarks</a>). <code>sam2</code> does not hold that recording's rate; the other four do.</em></p>
 <div class="admonition note">
 <p class="admonition-title">AGPL backends require <code>ultralytics</code></p>
 <p>Backends using FastSAM or YOLOE require the <code>ultralytics</code> package (AGPL-3.0). Install with: <code>pip install "rtsm[gpu-ultralytics]"</code></p>
@@ -2540,6 +2542,10 @@ defaults. Incoming per-frame intrinsics take precedence in the pipeline:</p>
 <div class="admonition note">
 <p class="admonition-title">Validated weight files</p>
 <p>FastSAM and YOLOE weight files are checked by sha256 against <code>rtsm/models/weights.py</code> when a backend is created, because the file ultralytics serves under a given name changes upstream. <code>weights_policy: warn</code> (default) logs a warning for a missing or different file, <code>strict</code> refuses to start, <code>off</code> is silent. The eval report header and <code>resolved.json</code> record each file's status. See <a href="../installation/#model-weights">Installation, Model Weights</a>.</p>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Warm-up at start-up</p>
+<p>Loading a model's weights is not its first inference. The first call also builds the library's inference backend and starts CUDA and cuDNN, which takes about a second on a workstation GPU and 15 to 35 s on a Jetson Orin Nano. With <code>warmup_inference: true</code> (default) that happens when the models are loaded: one synthetic frame goes through the segmenter twice and two batches of noise crops through the image tower and the vocabulary classifier, and nothing of it reaches the memory or a ledger. Start-up takes that much longer and the first frame of a session is an ordinary frame; a live source no longer loses the frames that arrive during it. <code>false</code> leaves the start-up on the first frame, as before. A warm-up that fails is logged and left to the first frame. See <a href="../../benchmarks/#edge-jetson-orin-nano-super">Benchmarks, edge</a>.</p>
 </div>
 <div class="admonition note">
 <p class="admonition-title">Labels under a prompt-free detector</p>

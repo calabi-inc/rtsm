@@ -1826,10 +1826,16 @@
 <p>The figures below come from the <a href="benchmarks/">benchmark page</a> and the <a href="use-cases/">use-case runs</a>. Each use-case number is reported with its spread over three runs of the same input; a difference smaller than that spread means nothing.</p>
 <div class="rtsm-stats">
 <div>
-<p><span class="rtsm-stats__value">210 ms</span><span class="rtsm-stats__label">mean pipeline latency per processed frame, dual backend, RTX 5090</span></p>
+<p><span class="rtsm-stats__value">126 ms</span><span class="rtsm-stats__label">mean pipeline latency per processed frame, dual backend, RTX 5090</span></p>
 </div>
 <div>
-<p><span class="rtsm-stats__value">510 ms</span><span class="rtsm-stats__label">mean latency, grounded_sam2 (the Apache-2.0 default)</span></p>
+<p><span class="rtsm-stats__value">365 ms</span><span class="rtsm-stats__label">mean latency, grounded_sam2 (the Apache-2.0 default)</span></p>
+</div>
+<div>
+<p><span class="rtsm-stats__value">409 ms</span><span class="rtsm-stats__label">median per processed frame on a Jetson Orin Nano Super: FastSAM-only backend in PyTorch, five recordings</span></p>
+</div>
+<div>
+<p><span class="rtsm-stats__value">92 %</span><span class="rtsm-stats__label">of a lossless run's frames processed at the recordings' own rate on that board (release 0.3.1: 58 %)</span></p>
 </div>
 <div>
 <p><span class="rtsm-stats__value">31 %</span><span class="rtsm-stats__label">re-identification of in-view objects on the TUM fr3 office loop (2012 Kinect)</span></p>
@@ -1849,23 +1855,23 @@
 <tbody>
 <tr>
 <td>Mean latency</td>
-<td>210 ms</td>
-<td>510 ms</td>
+<td>126 ms</td>
+<td>365 ms</td>
 </tr>
 <tr>
 <td>P95 latency</td>
-<td>509 ms</td>
-<td>721 ms</td>
+<td>146 ms</td>
+<td>436 ms</td>
 </tr>
 <tr>
 <td>Masks per frame</td>
-<td>28.8</td>
-<td>13.4</td>
+<td>25.9</td>
+<td>29.2</td>
 </tr>
 <tr>
 <td>Objects confirmed</td>
-<td>60</td>
-<td>35</td>
+<td>65</td>
+<td>71</td>
 </tr>
 <tr>
 <td>License</td>
@@ -1874,7 +1880,7 @@
 </tr>
 </tbody>
 </table>
-<p><em>RTX 5090, an iPhone ARKit recording of an indoor scene (162 frames). The two backends differ in what they detect, so the object counts are not comparable as accuracy; they describe the backends' behaviour on this recording.</em></p>
+<p><em>RTX 5090, an iPhone recording of an indoor scene (240 frames, 1920x1440), the code after release 0.3.1; that release measures 179 and 835 ms on the same recording (<a href="benchmarks/#against-031">Benchmarks</a>). The two backends differ in what they detect, so the object counts are not comparable as accuracy; they describe the backends' behaviour on this recording.</em></p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1">// "Where is the red backpack?"</span>
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="p">{</span><span class="w"> </span><span class="nt">"id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"a3f2c1"</span><span class="p">,</span><span class="w"> </span><span class="nt">"xyz"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="mf">1.2</span><span class="p">,</span><span class="w"> </span><span class="mf">0.4</span><span class="p">,</span><span class="w"> </span><span class="mf">2.1</span><span class="p">],</span><span class="w"> </span><span class="nt">"confidence"</span><span class="p">:</span><span class="w"> </span><span class="mf">0.87</span><span class="w"> </span><span class="p">}</span>
 </code></pre></div>
